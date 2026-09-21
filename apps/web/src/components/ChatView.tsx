@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { parseConversation, type MessageRecord } from "@meshnet/meshcore";
 import { messagesIn, titleOf } from "../lib/conversations.js";
+import { nameOfHash, relaysOf } from "../lib/echoes.js";
 import { dayLabel, timeOfDay, utf8Length } from "../lib/format.js";
 import { openContact } from "../lib/nav.js";
 import { session, useSession } from "../lib/session.js";
 import { IconButton } from "../ui/Button.js";
-import { AlertIcon, BackIcon, CheckIcon, ClockIcon, DoubleCheckIcon, InfoIcon, SendIcon } from "./Icons.js";
+import { AlertIcon, BackIcon, CheckIcon, ClockIcon, DoubleCheckIcon, InfoIcon, RepeaterIcon, SendIcon } from "./Icons.js";
 
 export function ChatView({ conversation, onBack }: { conversation: string; onBack?: () => void }) {
   const state = useSession();
@@ -156,10 +157,25 @@ function Message({ message, showSender }: { message: MessageRecord; showSender: 
           {message.snr !== null ? <span title="Signal to noise">{message.snr.toFixed(1)} dB</span> : null}
           {message.hops !== null ? <span title="Hops">{message.hops === 0 ? "direct" : `${message.hops} hop${message.hops === 1 ? "" : "s"}`}</span> : null}
           {message.flood ? <span title="No route: flooded">flood</span> : null}
+          {out && message.echoes.length > 0 ? <Relays message={message} /> : null}
           {out ? <Status message={message} onRetry={retry} busy={busy} /> : null}
         </div>
       </div>
     </div>
+  );
+}
+
+/** How many nodes relayed a message of ours, from the copies the radio overheard. */
+function Relays({ message }: { message: MessageRecord }) {
+  const { contacts } = useSession();
+  const relays = relaysOf(message.echoes, contacts);
+  const label = (hash: string) => nameOfHash(hash, contacts) ?? hash;
+  const paths = message.echoes.map((e) => e.path.map(label).join(" › ")).join("\n");
+  const title = `Relayed by ${relays.length}: ${relays.map((r) => label(r.hash)).join(", ")}\n${paths}`;
+  return (
+    <span className="msg-relays" title={title}>
+      <RepeaterIcon size={13} /> {relays.length}
+    </span>
   );
 }
 

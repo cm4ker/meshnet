@@ -22,6 +22,7 @@ function message(conversation: string, text: string, receivedAt: number, directi
     flood: null,
     attempt: 0,
     error: null,
+    echoes: [],
   };
 }
 

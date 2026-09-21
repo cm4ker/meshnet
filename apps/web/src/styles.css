@@ -810,6 +810,11 @@ textarea.input {
   font-size: var(--text-xs);
   color: var(--text-faint);
 }
+.msg-relays {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
 .msg-retry {
   display: inline-flex;
   align-items: center;

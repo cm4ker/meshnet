@@ -11,6 +11,8 @@
 
 import { MeshCoreClient, MeshCoreError, type TextSendResult } from "./client.js";
 import { bytesEqual, fromHex, toHex, unixNow } from "./protocol/bytes.js";
+import { groupTextPayload } from "./protocol/group.js";
+import { PayloadType, parseRawPacket } from "./protocol/packet.js";
 import { AdvType, ContactFlag, MAX_TEXT_LEN, PUB_KEY_PREFIX_SIZE, TxtType } from "./protocol/codes.js";
 import type { OtherParams, RadioParams } from "./protocol/commands.js";
 import type { Contact, DeviceInfo, PushFrame, RepeaterStats, SelfInfo } from "./protocol/frames.js";
@@ -44,6 +46,13 @@ export interface ChannelRecord {
 
 export type MessageStatus = "sending" | "sent" | "delivered" | "unconfirmed" | "failed";
 
+/** A copy of one of our channel messages the radio overheard on its way through the mesh. */
+export interface MessageEcho {
+  /** The relays it had passed, first relay first, each as the hex hash it signs the path with. */
+  path: string[];
+  snr: number;
+}
+
 export interface MessageRecord {
   id: string;
   /** `c:<key>` for a contact, `ch:<index>` for a channel, `p:<prefix>` for a sender the radio did not name. */
@@ -66,6 +75,8 @@ export interface MessageRecord {
   flood: boolean | null;
   attempt: number;
   error: string | null;
+  /** Copies heard back from repeaters, one per distinct path. Empty for incoming messages. */
+  echoes: MessageEcho[];
 }
 
 export interface LogEntry {
@@ -211,6 +222,9 @@ const EMPTY: SessionState = {
   syncing: false,
 };
 
+/** How long after sending a channel message its echoes are still looked for. */
+const ECHO_WINDOW_MS = 15 * 60 * 1000;
+
 export class MeshSession {
   private state: SessionState = EMPTY;
   private listeners = new Set<() => void>();
@@ -224,6 +238,8 @@ export class MeshSession {
   private contactsRefreshQueued = false;
   private focused: string | null = null;
   private ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** What our recent channel messages look like on the air (payload hex), to know their echoes by. */
+  private echoWatch = new Map<string, { id: string; at: number }>();
 
   constructor(options: SessionOptions = {}) {
     this.appName = options.appName ?? "Meshnet";
@@ -328,8 +344,9 @@ export class MeshSession {
         contactsCursor: persisted?.contactsCursor ?? 0,
         channels: persisted?.channels ?? [],
         // History saved before the hop count was masked holds the raw path_len
-        // byte; the low six bits are the hops either way.
-        messages: (persisted?.messages ?? []).map((m) => (m.hops === null ? m : { ...m, hops: m.hops & 63 })),
+        // byte (the low six bits are the hops either way), and history saved
+        // before echoes were kept has none.
+        messages: (persisted?.messages ?? []).map((m) => ({ ...m, hops: m.hops === null ? null : m.hops & 63, echoes: m.echoes ?? [] })),
         unread: persisted?.unread ?? {},
       });
       this.log("link", `connected to ${self.name} (${device.firmwareVersion})`);
@@ -610,6 +627,7 @@ export class MeshSession {
         flood: null,
         attempt: 0,
         error: null,
+        echoes: [],
       };
     } else if (frame.kind === "channelMessage") {
       const { sender, text } = splitChannelText(frame.text);
@@ -631,6 +649,7 @@ export class MeshSession {
         flood: null,
         attempt: 0,
         error: null,
+        echoes: [],
       };
     } else {
       this.log("channelData", `channel ${frame.channelIndex} type ${frame.dataType}: ${toHex(frame.data)}`);
@@ -672,6 +691,7 @@ export class MeshSession {
       flood: null,
       attempt: 0,
       error: null,
+      echoes: [],
     };
     this.set({ messages: [...this.state.messages, message] });
     await this.transmit(client, message, target);
@@ -695,6 +715,7 @@ export class MeshSession {
   ): Promise<void> {
     try {
       if (target.kind === "channel") {
+        await this.watchEchoes(message, target.index);
         await client.sendChannelTextMessage(target.index, message.text, {
           timestamp: message.timestamp,
           ...(this.state.self ? { senderName: this.state.self.name } : {}),
@@ -714,6 +735,38 @@ export class MeshSession {
       this.patchMessage(message.id, { status: "failed", error: (error as Error).message });
       throw error;
     }
+  }
+
+  /**
+   * Works out what the radio will put on the air for this message, so that
+   * the copies repeaters send back can be told from everyone else's packets.
+   * Done before the send: the first echo can be back within a second.
+   */
+  private async watchEchoes(message: MessageRecord, channelIndex: number): Promise<void> {
+    const channel = this.state.channels.find((c) => c.index === channelIndex);
+    if (!channel || !this.state.self) return;
+    try {
+      const payload = await groupTextPayload(fromHex(channel.secret), message.timestamp, this.state.self.name, message.text);
+      const now = this.now();
+      for (const [key, watch] of this.echoWatch) if (now - watch.at > ECHO_WINDOW_MS) this.echoWatch.delete(key);
+      this.echoWatch.set(toHex(payload), { id: message.id, at: now });
+    } catch (error) {
+      this.log("echo", `cannot work out the payload: ${(error as Error).message}`);
+    }
+  }
+
+  /** A packet the radio heard that is one of our channel messages coming back: its path says who relayed it. */
+  private noteEcho(snr: number, raw: Uint8Array): void {
+    if (this.echoWatch.size === 0) return;
+    const packet = parseRawPacket(raw);
+    if (!packet || !packet.flood || packet.payloadType !== PayloadType.GroupText || packet.path.length === 0) return;
+    const watch = this.echoWatch.get(toHex(packet.payload));
+    if (!watch) return;
+    const message = this.state.messages.find((m) => m.id === watch.id);
+    if (!message) return;
+    const key = packet.path.join(",");
+    if (message.echoes.some((e) => e.path.join(",") === key)) return;
+    this.patchMessage(message.id, { echoes: [...message.echoes, { path: packet.path, snr }] });
   }
 
   private armAck(id: string, result: TextSendResult): void {
@@ -954,6 +1007,7 @@ export class MeshSession {
         return;
       case "logRxData":
         this.log("rx", `snr ${frame.snr} rssi ${frame.rssi}: ${toHex(frame.raw)}`);
+        this.noteEcho(frame.snr, frame.raw);
         return;
       case "controlData":
         this.log("control", `snr ${frame.snr} rssi ${frame.rssi}: ${toHex(frame.payload)}`);

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ByteWriter, fromHex } from "./protocol/bytes.js";
 import { Cmd, Push, Resp, TxtType } from "./protocol/codes.js";
+import { groupTextPayload } from "./protocol/group.js";
 import { channelConversation, contactConversation, MeshSession, splitChannelText, type PersistedState } from "./session.js";
 import { BaseTransport } from "./transport.js";
 
@@ -259,6 +260,28 @@ test("history saved with the raw path_len byte is read back as a hop count", asy
   const second = new MeshSession({ storage, now: () => 1_700_000_000_000 });
   await second.connect(new ScriptedRadio());
   assert.equal(second.getState().messages[0]?.hops, 1);
+});
+
+test("a channel message heard back from repeaters is an echo, one per distinct path", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  const state = session.getState();
+  const sent = await session.sendText("ch:0", "anyone out there?");
+  const payload = await groupTextPayload(fromHex(state.channels[0]!.secret), sent.timestamp, state.self!.name, "anyone out there?");
+  // A flood GRP_TXT packet as a repeater sends it on: header 0x15, two-byte hashes in the path.
+  const heard = (hashes: string[], body: Uint8Array = payload) =>
+    new ByteWriter().u8(Push.LogRxData).i8(8).i8(-90).u8(0x15).u8(0x40 | hashes.length).bytes(fromHex(hashes.join(""))).bytes(body).toBytes();
+  radio.push(heard(["7932"]));
+  radio.push(heard(["7932"])); // the same relay again
+  radio.push(heard(["7932", "ce5b"]));
+  radio.push(heard(["dc0a"], payload.map((b, i) => (i === 5 ? b ^ 1 : b)))); // someone else's message
+  await tick();
+  const message = session.getState().messages.find((m) => m.id === sent.id)!;
+  assert.deepEqual(message.echoes, [
+    { path: ["7932"], snr: 2 },
+    { path: ["7932", "ce5b"], snr: 2 },
+  ]);
 });
 
 test("a message from a sender not yet in the contacts is filed under its prefix, then moved", async () => {
