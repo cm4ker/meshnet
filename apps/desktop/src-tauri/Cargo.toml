@@ -30,6 +30,11 @@ serde = { version = "1", features = ["derive"] }
 # Node passwords the client is asked to remember go to the system's
 # credential store, not to a file of the webview's.
 keyring = { version = "3", features = ["windows-native", "apple-native"] }
+# A message or a new node, announced by the system while the window is
+# elsewhere: WebView2 has no notification of its own. The plugin draws it on
+# macOS and Linux; Windows is drawn directly, see `announce.rs`.
+tauri-plugin-notification = "2"
+serde_json = "1"
 
 # On Windows the BLE link is the platform's own GATT API, not btleplug: the
 # firmware's UART characteristics demand an encrypted link, and btleplug's
@@ -52,6 +57,11 @@ windows = { version = "0.61", features = [
 ] }
 # `IAsyncOperation` and `AsyncStatus` live here since windows 0.60.
 windows-future = "0.2"
+# The toast backend the notification plugin reaches through `notify-rust`,
+# called directly so the toast can name the application, and the registry
+# key that says what that name is. See `announce.rs`.
+tauri-winrt-notification = "0.7"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Registry"] }
 
 # A shipped binary is built once and run for months, so the slow settings are
 # the right ones here.

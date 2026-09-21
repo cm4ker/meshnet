@@ -540,6 +540,7 @@ function replyWaitMs(estimateMs: number, extraMs: number): number {
 export class MeshSession {
   private state: SessionState = EMPTY;
   private listeners = new Set<() => void>();
+  private discoveredListeners = new Set<(contact: ContactRecord) => void>();
   private client: MeshCoreClient | null = null;
   private readonly appName: string;
   private readonly storage: SessionStorage | null;
@@ -588,6 +589,17 @@ export class MeshSession {
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /**
+   * A node the radio has just heard advertise for the first time: its
+   * `NEW_ADVERT` push, which the firmware sends for a key it did not know,
+   * whether or not it added the contact. The contacts read at connect are
+   * not new and say nothing.
+   */
+  onDiscovered(listener: (contact: ContactRecord) => void): () => void {
+    this.discoveredListeners.add(listener);
+    return () => this.discoveredListeners.delete(listener);
   }
 
   private set(patch: Partial<SessionState>): void {
@@ -1881,6 +1893,13 @@ export class MeshSession {
       case "newAdvert": {
         const record = this.upsertContact(frame.contact, true);
         this.log("advert", `new: ${record.name || record.prefix} (${contactTypeName(record.type)})`);
+        for (const listener of this.discoveredListeners) {
+          try {
+            listener(record);
+          } catch (error) {
+            console.error("discovered listener threw", error);
+          }
+        }
         return;
       }
       case "pathUpdated": {

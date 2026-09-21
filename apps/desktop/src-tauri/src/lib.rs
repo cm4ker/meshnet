@@ -3,6 +3,7 @@
 //! passwords it keeps. Everything else — the protocol, the state, the
 //! screens — is the client's, and the same on every platform.
 
+mod announce;
 mod secrets;
 #[cfg(windows)]
 mod winble;
@@ -14,7 +15,8 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_blec::init())
         .plugin(tauri_plugin_serialplugin::init())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init());
 
     #[cfg(windows)]
     let builder = builder.manage(winble::WinBle::default()).invoke_handler(tauri::generate_handler![
@@ -24,12 +26,14 @@ pub fn run() {
         winble::winble_connect,
         winble::winble_send,
         winble::winble_disconnect,
+        announce::announce,
         secrets::secret_get,
         secrets::secret_set,
         secrets::secret_delete,
     ]);
     #[cfg(not(windows))]
     let builder = builder.invoke_handler(tauri::generate_handler![
+        announce::announce,
         secrets::secret_get,
         secrets::secret_set,
         secrets::secret_delete,

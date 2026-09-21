@@ -1,6 +1,6 @@
 import { useState, useSyncExternalStore } from "react";
 import { setLookalikePrefs, useLookalikePrefs } from "../lib/lookalikes.js";
-import { askPermission, notificationsWanted, setNotificationsWanted } from "../lib/notify.js";
+import { askPermission, nodeNotificationsWanted, notificationsWanted, setNodeNotificationsWanted, setNotificationsWanted } from "../lib/notify.js";
 import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
 import { session, useSession } from "../lib/session.js";
 import { shell } from "../lib/platform.js";
@@ -11,6 +11,7 @@ import { getPreference, listThemes, setPreference, subscribeTheme } from "../the
 export function SettingsView() {
   const preference = useSyncExternalStore(subscribeTheme, getPreference);
   const [notifyOn, setNotifyOn] = useState(notificationsWanted);
+  const [nodesOn, setNodesOn] = useState(nodeNotificationsWanted);
   const [auto, setAuto] = useState(autoConnectWanted);
   const lookalikes = useLookalikePrefs();
   const state = useSession();
@@ -68,6 +69,16 @@ export function SettingsView() {
             if (v && !(await askPermission())) return;
             setNotifyOn(v);
             setNotificationsWanted(v);
+          }}
+        />
+        <Toggle
+          label="Announce new nodes"
+          hint="A system notification when the radio hears a node for the first time."
+          checked={nodesOn}
+          onChange={async (v) => {
+            if (v && !(await askPermission())) return;
+            setNodesOn(v);
+            setNodeNotificationsWanted(v);
           }}
         />
         <Toggle

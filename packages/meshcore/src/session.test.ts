@@ -406,6 +406,19 @@ test("a message from a sender not yet in the contacts is filed under its prefix,
   assert.equal(session.getState().messages[0]?.sender, "Bob");
 });
 
+test("a node heard for the first time is announced once; the contacts read at connect are not", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  const found: string[] = [];
+  session.onDiscovered((c) => found.push(c.name));
+  await session.connect(radio);
+  assert.deepEqual(found, []);
+  radio.push(new ByteWriter().u8(Push.NewAdvert).bytes(contactFrame(BOB, "Bob", 11).subarray(1)).toBytes());
+  await tick();
+  assert.deepEqual(found, ["Bob"]);
+  assert.equal(session.getState().contacts[bobKey()]?.name, "Bob");
+});
+
 test("the sender of a channel message is the name before the colon", () => {
   assert.deepEqual(splitChannelText("Alice: hi: there"), { sender: "Alice", text: "hi: there" });
   assert.deepEqual(splitChannelText("no sender"), { sender: null, text: "no sender" });
