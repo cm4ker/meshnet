@@ -2,7 +2,7 @@ import { Fragment, useState, type ReactNode } from "react";
 import type { ContactRecord, MessageEcho, MessageRecord } from "@meshnet/meshcore";
 import { candidatesOfHash, nameOfHash, relaysOf } from "../lib/echoes.js";
 import { ago, utf8Length } from "../lib/format.js";
-import { openContact } from "../lib/nav.js";
+import { openProfile } from "../lib/nav.js";
 import { useSession } from "../lib/session.js";
 
 /**
@@ -87,7 +87,7 @@ export function MessageDetails({ message, peer }: { message: MessageRecord; peer
             <b>{pick}</b> could be {candidates.length} contacts:
           </span>
           {candidates.map((c) => (
-            <button key={c.key} type="button" className="link" onClick={() => openContact(c.key)}>
+            <button key={c.key} type="button" className="link" onClick={() => openProfile(c.key)}>
               {c.name || c.prefix} · heard {ago(Math.max(c.lastHeardAt ?? 0, c.lastAdvert * 1000) || null)}
             </button>
           ))}
@@ -166,7 +166,7 @@ function HopChain({
           <Fragment key={i}>
             <span className="sep">›</span>
             {matches.length === 1 ? (
-              <button type="button" className="hop" title="Open the contact" onClick={() => openContact(matches[0]!.key)}>
+              <button type="button" className="hop" title="Open the contact" onClick={() => openProfile(matches[0]!.key)}>
                 {matches[0]!.name} <span className="hop-hash">{hash}</span>
               </button>
             ) : matches.length > 1 ? (

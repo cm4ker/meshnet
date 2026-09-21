@@ -72,3 +72,18 @@ export const ChevronDownIcon = icon('<path d="M7 10l5 5 5-5"/>');
 export const WavesIcon = icon(
   '<path d="M3 8.5c1.5-1.4 3-1.4 4.5 0s3 1.4 4.5 0 3-1.4 4.5 0 3 1.4 4.5 0"/><path d="M3 13c1.5-1.4 3-1.4 4.5 0s3 1.4 4.5 0 3-1.4 4.5 0 3 1.4 4.5 0"/><path d="M3 17.5c1.5-1.4 3-1.4 4.5 0s3 1.4 4.5 0 3-1.4 4.5 0 3 1.4 4.5 0"/>',
 );
+/** Marks an action that transmits: it costs airtime, and happens only when asked. */
+export const AirIcon = icon('<path d="M12 21v-8.5"/><circle cx="12" cy="10.5" r="1.6"/><path d="M8.3 7a5.2 5.2 0 0 0 0 7M15.7 7a5.2 5.2 0 0 1 0 7"/><path d="M5.6 4.4a9 9 0 0 0 0 12.2M18.4 4.4a9 9 0 0 1 0 12.2"/>');
+export const SearchIcon = icon('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>');
+export const ChevronRightIcon = icon('<path d="M9 5l7 7-7 7"/>');
+export const EditIcon = icon('<path d="M4 20h4L19 9l-4-4L4 16z"/>');
+export const HashIcon = icon('<path d="M9 4L7 20M17 4l-2 16M4.5 9h15M3.5 15h15"/>');
+export const KeyIcon = icon('<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/>');
+export const BellIcon = icon('<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>');
+export const PaletteIcon = icon('<path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.7-.8 1.4-1.8-.4-1.2.4-2.2 1.6-2.2H18a3 3 0 0 0 3-3A9 9 0 0 0 12 3z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16" cy="11" r="1"/>');
+export const ShieldIcon = icon('<path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/>');
+export const SlidersIcon = icon('<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>');
+export const TextIcon = icon('<path d="M5 6h14M12 6v13M8 19h8"/>');
+export const TerminalIcon = icon('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10l3 2-3 2M12 15h5"/>');
+export const ChartIcon = icon('<path d="M4 19h16"/><path d="M6 15l4-5 3 3 5-7"/>');
+export const UsersIcon = icon('<circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.5 2.7-6 6-6s6 2.5 6 6"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M17.5 14.5c2 .8 3.5 2.8 3.5 5.5"/>');

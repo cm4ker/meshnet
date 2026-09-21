@@ -1,6 +1,6 @@
 /** How the views talk about a contact's route and its time limit. */
 
-import type { ContactRecord } from "@meshnet/meshcore";
+import { contactHops, isConversationType, type ContactRecord } from "@meshnet/meshcore";
 import { useEffect, useState } from "react";
 import { session } from "./session.js";
 
@@ -51,4 +51,13 @@ export function useNow(ms = 15_000): number {
     return () => clearInterval(timer);
   }, [ms]);
   return now;
+}
+
+/** A contact's route in a few words, for under a name: how the next message goes. */
+export function routeWords(contact: ContactRecord): { text: string; tone: "" | "pinned" | "none" } {
+  if (isConversationType(contact.type) && session.routePolicy(contact.key).flood) return { text: "always flood", tone: "pinned" };
+  const hops = contactHops(contact);
+  if (hops === null) return { text: "no route · floods", tone: "none" };
+  if (hops === 0) return { text: "direct", tone: "" };
+  return { text: `via ${hops} relay${hops === 1 ? "" : "s"}`, tone: "" };
 }

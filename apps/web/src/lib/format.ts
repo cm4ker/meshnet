@@ -73,3 +73,9 @@ export function plural(n: number, one: string, many = `${one}s`): string {
 export function utf8Length(text: string): number {
   return new TextEncoder().encode(text).length;
 }
+
+/** "just now", "12 min ago", "3 h ago": `ago` as it reads after a verb. */
+export function agoPhrase(ms: number | null, now = Date.now()): string {
+  const text = ago(ms, now);
+  return text === "just now" || text === "never" || now - (ms ?? 0) >= 7 * 86_400_000 ? text : `${text} ago`;
+}

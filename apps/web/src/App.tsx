@@ -7,7 +7,8 @@ import { useLink } from "./lib/link.js";
 import { askPermissionOnce, conversationIsVisible, nodeNotificationsWanted, notificationsWanted, notify, onNotificationClick, tellWatch } from "./lib/notify.js";
 import { session, useSession } from "./lib/session.js";
 import { titleOf } from "./lib/conversations.js";
-import { getNav, openContact, openConversation } from "./lib/nav.js";
+import { isWide } from "./lib/layout.js";
+import { getNav, openConversation, openProfile, shownConversation } from "./lib/nav.js";
 
 const KIND: Record<number, string> = {
   [AdvType.Chat]: "contact",
@@ -39,9 +40,10 @@ export function App() {
       const current = session.getState();
       if (current.status !== "ready") return;
       const nav = getNav();
+      const shown = { section: nav.section, conversation: shownConversation(nav, isWide()) };
       for (const m of current.messages) {
         if (known.has(m.id) || m.direction !== "in") continue;
-        const focused = conversationIsVisible(m.conversation, nav);
+        const focused = conversationIsVisible(m.conversation, shown);
         if (!focused && notificationsWanted()) {
           const title = titleOf(current, m.conversation);
           void notify(m.sender && m.conversation.startsWith("ch:") ? `${m.sender} in ${title}` : title, m.text, `c:${m.conversation}`);
@@ -66,7 +68,7 @@ export function App() {
   useEffect(() => {
     onNotificationClick((tag) => {
       if (tag.startsWith("c:")) openConversation(tag.slice(2));
-      else if (tag.startsWith("n:")) openContact(tag.slice(2));
+      else if (tag.startsWith("n:")) openProfile(tag.slice(2), true);
     });
   }, []);
 

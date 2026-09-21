@@ -18,7 +18,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { nativePlatform, shell } from "./platform.js";
 import { readSetting, writeSetting } from "./storage.js";
-import type { Nav } from "./nav.js";
+import type { Section } from "./nav.js";
 
 const MESSAGES_KEY = "meshnet.notify";
 const NODES_KEY = "meshnet.notify.nodes";
@@ -120,7 +120,8 @@ export async function askPermissionOnce(): Promise<void> {
 
 let nextId = Math.floor(Date.now() / 1000) % 1_000_000_000;
 
-export function conversationIsVisible(conversation: string, nav: Pick<Nav, "section" | "conversation">): boolean {
+/** `nav.conversation` is the one on screen, as `shownConversation` in nav.ts finds it. */
+export function conversationIsVisible(conversation: string, nav: { section: Section; conversation: string | null }): boolean {
   return document.visibilityState === "visible" && document.hasFocus() && nav.section === "chats" && nav.conversation === conversation;
 }
 

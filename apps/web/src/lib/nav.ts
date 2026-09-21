@@ -1,53 +1,123 @@
 /**
- * Where the client is: which section, and which conversation or contact is
- * open in it. One small store, so the phone's tab bar and the desktop's rail
- * read the same thing.
+ * Where the client is: which of the three sections, and the screens stacked
+ * in each over its root (the chat list, the map, the radio). The phone shows
+ * the top of the current stack; the desktop lays the same stack out side by
+ * side, the conversation in the middle and whatever was opened from it in
+ * the panel on the right. One small store, so the tab bar, the rail,
+ * notifications and the back gesture all read the same thing.
+ *
+ * While a stack is deeper than its root, one history entry stands guard
+ * above the page: the browser's back button, Android's, and a mouse's back
+ * key take it, and the store pops a screen instead of the page leaving.
  */
 
 import { useSyncExternalStore } from "react";
 import { readSetting, writeSetting } from "./storage.js";
 
-export type Section = "chats" | "contacts" | "map" | "nodes" | "radio" | "log" | "settings";
+export type Section = "chats" | "mesh" | "radio";
+
+/** A repeater's, room's or sensor's own screens, past its profile. */
+export type NodePage = "neighbours" | "history" | "settings" | "access" | "console";
+
+/** The radio section's pages. */
+export type RadioPage = "name" | "frequency" | "privacy" | "advanced" | "notifications" | "messages" | "appearance" | "connection" | "log" | "power" | "about";
+
+export type Screen =
+  | { kind: "chat"; conversation: string }
+  /** How one message travelled: a sheet over its chat on the phone, the panel on the desktop. */
+  | { kind: "message"; conversation: string; id: string }
+  | { kind: "channel"; index: number }
+  | { kind: "profile"; key: string }
+  | { kind: "route"; key: string }
+  | { kind: "node"; key: string; page: NodePage }
+  | { kind: "radio"; page: RadioPage };
 
 export interface Nav {
   section: Section;
-  /** The conversation open in Chats, if any. */
-  conversation: string | null;
-  /** The contact open in Contacts, if any. */
-  contact: string | null;
-  /** The repeater, room or sensor open in Nodes, if any. */
-  node: string | null;
+  stacks: Record<Section, Screen[]>;
+  /** The node picked on the map, whose card the map shows. */
+  meshFocus: string | null;
 }
 
 const KEY = "meshnet.nav";
-// Partial: a nav saved before Nodes existed has no `node`.
-let nav: Nav = { section: "chats", conversation: null, contact: null, node: null, ...readSetting<Partial<Nav>>(KEY, {}) };
+const SECTIONS: Section[] = ["chats", "mesh", "radio"];
+const EMPTY: Nav = { section: "chats", stacks: { chats: [], mesh: [], radio: [] }, meshFocus: null };
+
+/** What an earlier version saved: one section of seven and one open item in three of them. */
+interface OldNav {
+  section?: string;
+  conversation?: string | null;
+  contact?: string | null;
+  node?: string | null;
+}
+
+function restore(saved: unknown): Nav {
+  if (!saved || typeof saved !== "object") return EMPTY;
+  const value = saved as Partial<Nav>;
+  if (value.stacks && SECTIONS.includes(value.section as Section)) {
+    const stacks = { ...EMPTY.stacks };
+    for (const s of SECTIONS) if (Array.isArray(value.stacks[s])) stacks[s] = value.stacks[s].filter((x) => x && typeof x === "object" && "kind" in x);
+    return { section: value.section as Section, stacks, meshFocus: typeof value.meshFocus === "string" ? value.meshFocus : null };
+  }
+  // Seven sections became three: Contacts, Map and Nodes are Mesh; Settings and Log are Radio.
+  const old = saved as OldNav;
+  const chats: Screen[] = old.conversation ? [{ kind: "chat", conversation: old.conversation }] : [];
+  const mesh: Screen[] = old.section === "nodes" && old.node ? [{ kind: "profile", key: old.node }] : old.section === "contacts" && old.contact ? [{ kind: "profile", key: old.contact }] : [];
+  const radio: Screen[] = old.section === "log" ? [{ kind: "radio", page: "log" }] : [];
+  const section: Section = old.section === "chats" || old.section === undefined ? "chats" : old.section === "radio" || old.section === "settings" || old.section === "log" ? "radio" : "mesh";
+  return { section, stacks: { chats, mesh, radio }, meshFocus: null };
+}
+
+let nav: Nav = restore(readSetting<unknown>(KEY, null));
 const listeners = new Set<() => void>();
 
-function set(patch: Partial<Nav>): void {
-  nav = { ...nav, ...patch };
+function set(next: Nav): void {
+  nav = next;
   writeSetting(KEY, nav);
+  guard();
   for (const listener of listeners) listener();
 }
 
+function same(a: Screen | undefined, b: Screen): boolean {
+  return !!a && JSON.stringify(a) === JSON.stringify(b);
+}
+
+// ---- the history guard ----
+
+let guarded = false;
+let swallowPop = false;
+
+function guard(): void {
+  if (typeof window === "undefined" || !window.history) return;
+  const deep = nav.stacks[nav.section].length > 0;
+  if (deep && !guarded) {
+    window.history.pushState({ meshnet: "back" }, "");
+    guarded = true;
+  } else if (!deep && guarded) {
+    guarded = false;
+    swallowPop = true;
+    window.history.back();
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("popstate", () => {
+    if (swallowPop) {
+      swallowPop = false;
+      return;
+    }
+    if (!guarded) return;
+    guarded = false;
+    back();
+  });
+  // A reload lands on a deep stack with no guard in the history yet.
+  queueMicrotask(guard);
+}
+
+// ---- reading ----
+
 export function getNav(): Nav {
   return nav;
-}
-
-export function goSection(section: Section): void {
-  set({ section });
-}
-
-export function openConversation(conversation: string | null): void {
-  set({ section: "chats", conversation });
-}
-
-export function openContact(contact: string | null): void {
-  set({ section: "contacts", contact });
-}
-
-export function openNode(node: string | null): void {
-  set({ section: "nodes", node });
 }
 
 export function useNav(): Nav {
@@ -58,4 +128,93 @@ export function useNav(): Nav {
     },
     () => nav,
   );
+}
+
+export function topOf(state: Nav, section: Section = state.section): Screen | null {
+  return state.stacks[section].at(-1) ?? null;
+}
+
+/**
+ * The conversation whose messages are on screen: on the phone the chat on
+ * top, or under the sheet of one of its messages; on the desktop the chat in
+ * the middle, whatever the panel shows.
+ */
+export function shownConversation(state: Nav, wide: boolean): string | null {
+  if (state.section !== "chats") return null;
+  const stack = state.stacks.chats;
+  if (wide) return stack.find((s): s is Extract<Screen, { kind: "chat" }> => s.kind === "chat")?.conversation ?? null;
+  const top = stack.at(-1);
+  if (top?.kind === "chat" || top?.kind === "message") return top.conversation;
+  return null;
+}
+
+// ---- moving ----
+
+/** To a section as it was left; `reset` goes back to its root, as a second tap on its tab does. */
+export function goSection(section: Section, reset = false): void {
+  set({ ...nav, section, stacks: reset ? { ...nav.stacks, [section]: [] } : nav.stacks, meshFocus: reset && section === "mesh" ? null : nav.meshFocus });
+}
+
+/** A screen over the current one, in the current section. */
+export function push(screen: Screen): void {
+  const stack = nav.stacks[nav.section];
+  if (same(stack.at(-1), screen)) return;
+  // One message's sheet at a time.
+  const base = screen.kind === "message" && stack.at(-1)?.kind === "message" ? stack.slice(0, -1) : stack;
+  set({ ...nav, stacks: { ...nav.stacks, [nav.section]: [...base, screen] } });
+}
+
+/** Back one screen, if there is one to leave. */
+export function back(): void {
+  const stack = nav.stacks[nav.section];
+  if (stack.length === 0) return;
+  set({ ...nav, stacks: { ...nav.stacks, [nav.section]: stack.slice(0, -1) } });
+}
+
+/** Everything over the root of a section, replaced. */
+export function setStack(section: Section, stack: Screen[], extra: Partial<Nav> = {}): void {
+  set({ ...nav, ...extra, section, stacks: { ...nav.stacks, [section]: stack } });
+}
+
+export function openConversation(conversation: string | null): void {
+  setStack("chats", conversation ? [{ kind: "chat", conversation }] : []);
+}
+
+/** A node's profile over wherever this is; a notification or the palette opens it in Mesh. */
+export function openProfile(key: string, inMesh = false): void {
+  if (inMesh || nav.section === "radio") setStack("mesh", [{ kind: "profile", key }], { meshFocus: key });
+  else push({ kind: "profile", key });
+}
+
+export function openRoute(key: string): void {
+  push({ kind: "route", key });
+}
+
+export function openChannel(index: number): void {
+  push({ kind: "channel", index });
+}
+
+export function openMessage(conversation: string, id: string): void {
+  push({ kind: "message", conversation, id });
+}
+
+export function openNodePage(key: string, page: NodePage): void {
+  const stack = nav.stacks[nav.section];
+  const top = stack.at(-1);
+  // A second page replaces the first, so the desktop's tabs do not stack up.
+  if (top?.kind === "node" && top.key === key) setStack(nav.section, [...stack.slice(0, -1), { kind: "node", key, page }]);
+  else push({ kind: "node", key, page });
+}
+
+export function openRadioPage(page: RadioPage): void {
+  setStack("radio", [{ kind: "radio", page }]);
+}
+
+/** The map, with this node picked on it. */
+export function showOnMap(key: string): void {
+  setStack("mesh", [], { meshFocus: key });
+}
+
+export function focusOnMap(key: string | null): void {
+  set({ ...nav, meshFocus: key, stacks: key === null ? { ...nav.stacks, mesh: [] } : nav.stacks });
 }

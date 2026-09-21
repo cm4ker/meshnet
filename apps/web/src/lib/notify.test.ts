@@ -66,7 +66,7 @@ test("an iOS notice the page shows withdraws the native watch's stand-in for it,
 test("only a visible, focused chat suppresses its incoming messages", () => {
   const nav = { section: "chats", conversation: "ch:0" } as const;
   assert.equal(conversationIsVisible("ch:0", nav), true);
-  assert.equal(conversationIsVisible("ch:0", { ...nav, section: "settings" }), false);
+  assert.equal(conversationIsVisible("ch:0", { ...nav, section: "radio" }), false);
   page.visibilityState = "hidden";
   // WKWebView may still report focus after the phone locks.
   assert.equal(conversationIsVisible("ch:0", nav), false);

@@ -225,3 +225,8 @@ export function validateRadio(radio: RadioValue): string | null {
   if (!Number.isFinite(freq) || freq < 150 || freq > 2500) return "Frequency between 150 and 2500 MHz.";
   return null;
 }
+
+/** What a node is, as a person reads it: a chat node is a person. */
+export function kindLabel(type: number): string {
+  return type === AdvType.Chat ? "Person" : nodeKindName(type);
+}
