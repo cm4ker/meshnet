@@ -223,12 +223,43 @@ export const AutoAdd = {
   Sensor: 0x10,
 } as const;
 
-/** What a repeater or room answers a `CMD_SEND_BINARY_REQ` with in its first byte. */
+/**
+ * The first byte of a request to a repeater, room or sensor
+ * (`CMD_SEND_BINARY_REQ`). Which of them a node answers depends on what it
+ * is: `examples/simple_repeater`, `simple_room_server` and `simple_sensor`.
+ */
 export const ReqType = {
   GetStatus: 0x01,
   KeepAlive: 0x02,
   GetTelemetryData: 0x03,
+  /** Sensors only. */
+  GetAvgMinMax: 0x04,
+  /** Admins only. */
+  GetAccessList: 0x05,
+  /** Repeaters only. */
+  GetNeighbours: 0x06,
+  /** Repeaters only, firmware level 2 and up. */
+  GetOwnerInfo: 0x07,
 } as const;
+
+/** The low two bits of a client's permissions on a repeater, room or sensor (`ClientACL.h`). */
+export const AclRole = {
+  Guest: 0,
+  ReadOnly: 1,
+  ReadWrite: 2,
+  Admin: 3,
+} as const;
+
+/** How a repeater sorts its neighbour list before it pages it out. */
+export const NeighbourOrder = {
+  Newest: 0,
+  Oldest: 1,
+  Strongest: 2,
+  Weakest: 3,
+} as const;
+
+/** The firmware copies at most this many bytes of a login password, and drops the rest without a word. */
+export const MAX_PASSWORD_LEN = 15;
 
 /** The Nordic UART service the firmware exposes over BLE. */
 export const BLE = {

@@ -8,6 +8,7 @@ import {
   channelConversation,
   contactConversation,
   parseConversation,
+  TxtType,
   type ChannelRecord,
   type ContactRecord,
   type MessageRecord,
@@ -29,7 +30,8 @@ export interface ConversationSummary {
 
 function preview(message: MessageRecord, kind: ConversationSummary["kind"]): string {
   if (message.direction === "out") return `You: ${message.text}`;
-  if (kind === "channel" && message.sender) return `${message.sender}: ${message.text}`;
+  // A room's posts carry their author the way a channel's messages do.
+  if ((kind === "channel" || message.txtType === TxtType.SignedPlain) && message.sender) return `${message.sender}: ${message.text}`;
   return message.text;
 }
 

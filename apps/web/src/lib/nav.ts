@@ -7,7 +7,7 @@
 import { useSyncExternalStore } from "react";
 import { readSetting, writeSetting } from "./storage.js";
 
-export type Section = "chats" | "contacts" | "radio" | "log" | "settings";
+export type Section = "chats" | "contacts" | "nodes" | "radio" | "log" | "settings";
 
 export interface Nav {
   section: Section;
@@ -15,10 +15,13 @@ export interface Nav {
   conversation: string | null;
   /** The contact open in Contacts, if any. */
   contact: string | null;
+  /** The repeater, room or sensor open in Nodes, if any. */
+  node: string | null;
 }
 
 const KEY = "meshnet.nav";
-let nav: Nav = { ...readSetting<Nav>(KEY, { section: "chats", conversation: null, contact: null }) };
+// Partial: a nav saved before Nodes existed has no `node`.
+let nav: Nav = { section: "chats", conversation: null, contact: null, node: null, ...readSetting<Partial<Nav>>(KEY, {}) };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<Nav>): void {
@@ -41,6 +44,10 @@ export function openConversation(conversation: string | null): void {
 
 export function openContact(contact: string | null): void {
   set({ section: "contacts", contact });
+}
+
+export function openNode(node: string | null): void {
+  set({ section: "nodes", node });
 }
 
 export function useNav(): Nav {

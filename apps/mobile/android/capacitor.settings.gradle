@@ -4,3 +4,6 @@ project(':capacitor-android').projectDir = new File('../../../node_modules/.pnpm
 
 include ':capacitor-community-bluetooth-le'
 project(':capacitor-community-bluetooth-le').projectDir = new File('../../../node_modules/.pnpm/@capacitor-community+blueto_9568fb5a41727394f7d6c4f01c445bdf/node_modules/@capacitor-community/bluetooth-le/android')
+
+include ':capacitor-secure-storage-plugin'
+project(':capacitor-secure-storage-plugin').projectDir = new File('../../../node_modules/.pnpm/capacitor-secure-storage-plugin@0.13.0_@capacitor+core@8.5.2/node_modules/capacitor-secure-storage-plugin/android')

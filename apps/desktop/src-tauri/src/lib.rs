@@ -1,7 +1,9 @@
 //! The desktop shell: a window around the client, with the two links a
-//! browser cannot offer. Everything else — the protocol, the state, the
+//! browser cannot offer and the system's credential store for the node
+//! passwords it keeps. Everything else — the protocol, the state, the
 //! screens — is the client's, and the same on every platform.
 
+mod secrets;
 #[cfg(windows)]
 mod winble;
 
@@ -22,6 +24,15 @@ pub fn run() {
         winble::winble_connect,
         winble::winble_send,
         winble::winble_disconnect,
+        secrets::secret_get,
+        secrets::secret_set,
+        secrets::secret_delete,
+    ]);
+    #[cfg(not(windows))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        secrets::secret_get,
+        secrets::secret_set,
+        secrets::secret_delete,
     ]);
 
     builder

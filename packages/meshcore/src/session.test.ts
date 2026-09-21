@@ -18,6 +18,7 @@ class ScriptedRadio extends BaseTransport {
   contacts: Uint8Array[] = [contactFrame(BOB, "Bob", 10)];
   time = 1_700_000_000;
   nextAck = 0x11223344;
+  binaryTag = 0x55667788;
 
   async send(frame: Uint8Array): Promise<void> {
     this.sent.push(frame);
@@ -90,6 +91,15 @@ class ScriptedRadio extends BaseTransport {
         return [new ByteWriter().u8(Resp.Sent).u8(0).u32(this.nextAck).u32(2000).toBytes()];
       case Cmd.SendChannelTxtMsg:
         return [new Uint8Array([Resp.Ok])];
+      case Cmd.SendLogin:
+        // The radio names a login by the first four bytes of the node's key.
+        return [new ByteWriter().u8(Resp.Sent).u8(0).bytes(frame.subarray(1, 5)).u32(2000).toBytes()];
+      case Cmd.SendStatusReq:
+        return [new ByteWriter().u8(Resp.Sent).u8(0).u32(0x0a0b0c0d).u32(2000).toBytes()];
+      case Cmd.SendBinaryReq:
+        return [new ByteWriter().u8(Resp.Sent).u8(1).u32(this.binaryTag).u32(2000).toBytes()];
+      case Cmd.Logout:
+        return [new Uint8Array([Resp.Ok])];
       default:
         return [new Uint8Array([Resp.Err, 1])];
     }
@@ -102,11 +112,11 @@ class ScriptedRadio extends BaseTransport {
   protected async shutdown(): Promise<void> {}
 }
 
-function contactFrame(key: Uint8Array, name: string, lastMod: number): Uint8Array {
+function contactFrame(key: Uint8Array, name: string, lastMod: number, type = 1): Uint8Array {
   return new ByteWriter()
     .u8(Resp.Contact)
     .bytes(key)
-    .u8(1)
+    .u8(type)
     .u8(0)
     .u8(0xff)
     .zeros(64)
@@ -305,3 +315,243 @@ test("the sender of a channel message is the name before the colon", () => {
 function bobKey(): string {
   return "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
 }
+
+// ---- repeaters, rooms and sensors ----
+
+const HILL = fromHex("c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0");
+const HILL_KEY = "c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0";
+const ROOM = fromHex("e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff00");
+const ROOM_KEY = "e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff00";
+
+function statusBody(tail: Uint8Array): Uint8Array {
+  return new ByteWriter()
+    .u16(4100)
+    .u16(1)
+    .u16(0xff92) // noise floor -110
+    .u16(0xff9e) // last RSSI -98
+    .u32(100)
+    .u32(50)
+    .u32(60)
+    .u32(3600)
+    .u32(1)
+    .u32(2)
+    .u32(3)
+    .u32(4)
+    .u16(0)
+    .u16(0xfff8) // last SNR -2 dB, in quarters
+    .u16(5)
+    .u16(6)
+    .bytes(tail)
+    .toBytes();
+}
+
+function cliFrame(from: Uint8Array, text: string): Uint8Array {
+  return new ByteWriter()
+    .u8(Resp.ContactMsgRecvV3)
+    .i8(20)
+    .u16(0)
+    .bytes(from.subarray(0, 6))
+    .u8(0)
+    .u8(TxtType.CliData)
+    .u32(1_700_000_070)
+    .string(text)
+    .toBytes();
+}
+
+async function nodeSession(options: { replyWaitMs?: (estimate: number, extra: number) => number } = {}) {
+  const radio = new ScriptedRadio();
+  radio.contacts = [contactFrame(HILL, "Hill", 10, 2), contactFrame(ROOM, "Lounge", 11, 3), contactFrame(BOB, "Bob", 12)];
+  const session = new MeshSession({ now: () => 1_700_000_000_000, ...options });
+  await session.connect(radio);
+  return { radio, session };
+}
+
+function sentText(frame: Uint8Array): string {
+  return new TextDecoder().decode(frame.subarray(13));
+}
+
+test("remote requests wait their turn: the second goes out only after the first is answered", async () => {
+  const { radio, session } = await nodeSession();
+  const login = session.login(HILL_KEY, "secret");
+  const status = session.requestStatus(HILL_KEY);
+  await tick();
+  assert.equal(radio.sent.filter((f) => f[0] === Cmd.SendLogin).length, 1);
+  assert.equal(radio.sent.filter((f) => f[0] === Cmd.SendStatusReq).length, 0);
+  assert.equal(session.getState().remote.active?.label, "sign in");
+  assert.deepEqual(
+    session.getState().remote.queued.map((j) => j.label),
+    ["status"],
+  );
+
+  // Admin: flag 1, the node's clock, permissions 3, firmware level 2.
+  radio.push(new ByteWriter().u8(Push.LoginSuccess).u8(1).bytes(HILL.subarray(0, 6)).u32(1_699_999_950).u8(3).u8(2).toBytes());
+  const result = await login;
+  assert.equal(result.ok, true);
+  assert.equal(result.role, 3);
+  assert.equal(result.serverTime, 1_699_999_950);
+  await tick();
+  assert.equal(radio.sent.filter((f) => f[0] === Cmd.SendStatusReq).length, 1);
+
+  const tail = new ByteWriter().u32(90).u32(7).toBytes();
+  radio.push(new ByteWriter().u8(Push.StatusResponse).u8(0).bytes(HILL.subarray(0, 6)).bytes(statusBody(tail)).toBytes());
+  const answered = await status;
+  assert.equal(answered.stats?.noiseFloor, -110);
+  assert.equal(answered.stats?.lastSnr, -2);
+  assert.equal(answered.stats?.rxAirTimeSecs, 90);
+  assert.equal(answered.stats?.posted, null);
+  assert.deepEqual(session.getState().statusHistory[HILL_KEY], [{ at: 1_700_000_000_000, batteryMv: 4100, noiseFloor: -110 }]);
+  assert.equal(session.getState().remote.active, null);
+});
+
+test("a room's status tail is its post counts, not receive air time", async () => {
+  const { radio, session } = await nodeSession();
+  const status = session.requestStatus(ROOM_KEY);
+  await tick();
+  const tail = new ByteWriter().u16(184).u16(1203).toBytes();
+  radio.push(new ByteWriter().u8(Push.StatusResponse).u8(0).bytes(ROOM.subarray(0, 6)).bytes(statusBody(tail)).toBytes());
+  const answered = await status;
+  assert.equal(answered.stats?.posted, 184);
+  assert.equal(answered.stats?.postPushes, 1203);
+  assert.equal(answered.stats?.rxAirTimeSecs, null);
+});
+
+test("a refused password resolves as not signed in, and frees the queue", async () => {
+  const { radio, session } = await nodeSession();
+  const login = session.login(HILL_KEY, "wrong");
+  await tick();
+  radio.push(new ByteWriter().u8(Push.LoginFail).u8(0).bytes(HILL.subarray(0, 6)).toBytes());
+  const result = await login;
+  assert.equal(result.ok, false);
+  assert.equal(result.role, null);
+  assert.equal(session.getState().remote.active, null);
+});
+
+test("a node that never answers times the request out and lets the next one go", async () => {
+  const { radio, session } = await nodeSession({ replyWaitMs: () => 20 });
+  const first = session.requestStatus(HILL_KEY);
+  const second = session.requestStatus(HILL_KEY);
+  await assert.rejects(first, /no reply/);
+  await tick();
+  assert.equal(radio.sent.filter((f) => f[0] === Cmd.SendStatusReq).length, 2);
+  await assert.rejects(second, /no reply/);
+});
+
+test("neighbours come back under the radio's tag, with prefixes, age and SNR", async () => {
+  const { radio, session } = await nodeSession();
+  const request = session.requestNeighbours(HILL_KEY, { order: 2 });
+  await tick();
+  const sent = radio.sent.find((f) => f[0] === Cmd.SendBinaryReq)!;
+  // After the key: type 6, version 0, count 10, offset 0 (two bytes), order 2, six-byte prefixes.
+  assert.deepEqual([...sent.subarray(33, 40)], [6, 0, 10, 0, 0, 2, 6]);
+  // A reply under another tag is not this one.
+  radio.push(new ByteWriter().u8(Push.BinaryResponse).u8(0).u32(0x99).u16(0).u16(0).toBytes());
+  radio.push(
+    new ByteWriter()
+      .u8(Push.BinaryResponse)
+      .u8(0)
+      .u32(radio.binaryTag)
+      .u16(14)
+      .u16(2)
+      .bytes(fromHex("aabbccddeeff"))
+      .u32(120)
+      .i8(29)
+      .bytes(fromHex("010203040506"))
+      .u32(3600)
+      .i8(-34)
+      .toBytes(),
+  );
+  const list = await request;
+  assert.equal(list.total, 14);
+  assert.deepEqual(list.neighbours, [
+    { prefix: "aabbccddeeff", heardSecsAgo: 120, snr: 7.25 },
+    { prefix: "010203040506", heardSecsAgo: 3600, snr: -8.5 },
+  ]);
+});
+
+test("a console command carries a tag, and its reply goes to the console, not the chat", async () => {
+  const { radio, session } = await nodeSession();
+  const reply = session.readNodeSetting(HILL_KEY, "tx");
+  await tick();
+  const sent = radio.sent.find((f) => f[0] === Cmd.SendTxtMsg)!;
+  assert.equal(sent[1], TxtType.CliData);
+  const text = sentText(sent);
+  assert.match(text, /^[0-9a-f]{2}\|get tx$/);
+  radio.queue.push(cliFrame(HILL, `${text.slice(0, 2)}|> 22`));
+  radio.push(new Uint8Array([Push.MsgWaiting]));
+  assert.equal(await reply, "22");
+  const state = session.getState();
+  assert.equal(state.messages.length, 0);
+  assert.equal(state.nodeSettings[HILL_KEY]?.["tx"]?.value, "22");
+  assert.deepEqual(
+    state.consoles[HILL_KEY]?.map((e) => [e.command, e.status, e.reply]),
+    [["get tx", "done", "> 22"]],
+  );
+});
+
+test("a console reply that comes after the wait ran out still lands on its command", async () => {
+  const { radio, session } = await nodeSession({ replyWaitMs: () => 20 });
+  await assert.rejects(session.runCli(HILL_KEY, "ver"), /no reply/);
+  const tag = sentText(radio.sent.find((f) => f[0] === Cmd.SendTxtMsg)!).slice(0, 2);
+  assert.equal(session.getState().consoles[HILL_KEY]?.[0]?.status, "timeout");
+  radio.queue.push(cliFrame(HILL, `${tag}|v1.17.1 (Build: 12-Sep-2026)`));
+  radio.push(new Uint8Array([Push.MsgWaiting]));
+  await tick(5);
+  const entry = session.getState().consoles[HILL_KEY]?.[0];
+  assert.equal(entry?.status, "done");
+  assert.equal(entry?.reply, "v1.17.1 (Build: 12-Sep-2026)");
+});
+
+test("a password change shows in the console without the password", async () => {
+  const { radio, session } = await nodeSession();
+  const change = session.writeNodeSetting(HILL_KEY, "password", "hunter22", "password hunter22", { mask: "password ••••••" });
+  await tick();
+  const tag = sentText(radio.sent.find((f) => f[0] === Cmd.SendTxtMsg)!).slice(0, 2);
+  radio.queue.push(cliFrame(HILL, `${tag}|password now: hunter22`));
+  radio.push(new Uint8Array([Push.MsgWaiting]));
+  await change;
+  const entry = session.getState().consoles[HILL_KEY]![0]!;
+  assert.equal(entry.command, "password ••••••");
+  assert.equal(entry.reply, "password now: ••••••");
+});
+
+test("a room post is filed under the room and named after its author", async () => {
+  const { radio, session } = await nodeSession();
+  radio.queue.push(
+    new ByteWriter()
+      .u8(Resp.ContactMsgRecvV3)
+      .i8(8)
+      .u16(0)
+      .bytes(ROOM.subarray(0, 6))
+      .u8(1)
+      .u8(TxtType.SignedPlain)
+      .u32(1_700_000_010)
+      .bytes(BOB.subarray(0, 4))
+      .string("posted in the room")
+      .toBytes(),
+  );
+  radio.push(new Uint8Array([Push.MsgWaiting]));
+  await tick(5);
+  const message = session.getState().messages[0]!;
+  assert.equal(message.conversation, contactConversation(ROOM_KEY));
+  assert.equal(message.sender, "Bob");
+  assert.equal(message.text, "posted in the room");
+});
+
+test("the role from a sign-in survives a reconnect", async () => {
+  const storage = new MemoryStorage();
+  const radio = new ScriptedRadio();
+  radio.contacts = [contactFrame(HILL, "Hill", 10, 2)];
+  const session = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  const login = session.login(HILL_KEY, "secret");
+  await tick();
+  radio.push(new ByteWriter().u8(Push.LoginSuccess).u8(1).bytes(HILL.subarray(0, 6)).u32(1).u8(3).u8(2).toBytes());
+  await login;
+  await session.disconnect();
+
+  const again = new ScriptedRadio();
+  again.contacts = [contactFrame(HILL, "Hill", 10, 2)];
+  const second = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  await second.connect(again);
+  assert.equal(second.getState().logins[HILL_KEY]?.role, 3);
+});

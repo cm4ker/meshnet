@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { parseConversation, type MessageRecord } from "@meshnet/meshcore";
+import { AdvType, parseConversation, type MessageRecord } from "@meshnet/meshcore";
 import { messagesIn, titleOf } from "../lib/conversations.js";
 import { nameOfHash, relaysOf } from "../lib/echoes.js";
 import { dayLabel, timeOfDay, utf8Length } from "../lib/format.js";
@@ -13,6 +13,8 @@ export function ChatView({ conversation, onBack }: { conversation: string; onBac
   const messages = useMemo(() => messagesIn(state, conversation), [state, conversation]);
   const title = titleOf(state, conversation);
   const target = parseConversation(conversation);
+  // A room relays many voices, so its messages are named like a channel's.
+  const many = target.kind === "channel" || (target.kind === "contact" && state.contacts[target.key]?.type === AdvType.Room);
   const online = state.status === "ready";
   const scroller = useRef<HTMLDivElement>(null);
   const [text, setText] = useState("");
@@ -97,7 +99,7 @@ export function ChatView({ conversation, onBack }: { conversation: string; onBac
           return (
             <div key={m.id}>
               {newDay ? <div className="day">{dayLabel(m.timestamp)}</div> : null}
-              <Message message={m} showSender={target.kind === "channel" && m.direction === "in" && !sameSender} />
+              <Message message={m} showSender={many && m.direction === "in" && !sameSender} />
             </div>
           );
         })}

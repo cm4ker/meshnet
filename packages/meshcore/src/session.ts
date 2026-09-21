@@ -13,9 +13,28 @@ import { MeshCoreClient, MeshCoreError, type TextSendResult } from "./client.js"
 import { bytesEqual, fromHex, toHex, unixNow } from "./protocol/bytes.js";
 import { groupTextPayload } from "./protocol/group.js";
 import { PayloadType, parseRawPacket } from "./protocol/packet.js";
-import { AdvType, ContactFlag, MAX_TEXT_LEN, PUB_KEY_PREFIX_SIZE, TxtType } from "./protocol/codes.js";
-import type { OtherParams, RadioParams } from "./protocol/commands.js";
-import type { Contact, DeviceInfo, PushFrame, RepeaterStats, SelfInfo } from "./protocol/frames.js";
+import { AclRole, AdvType, ContactFlag, MAX_TEXT_LEN, PUB_KEY_PREFIX_SIZE, TxtType } from "./protocol/codes.js";
+import {
+  accessListRequest,
+  avgMinMaxRequest,
+  neighboursRequest,
+  ownerInfoRequest,
+  type OtherParams,
+  type RadioParams,
+} from "./protocol/commands.js";
+import {
+  readAccessList,
+  readAvgMinMax,
+  readNeighbours,
+  readNodeStats,
+  readOwnerInfo,
+  type Contact,
+  type DeviceInfo,
+  type NodeStats,
+  type PushFrame,
+  type SelfInfo,
+  type SeriesSummary,
+} from "./protocol/frames.js";
 import type { LppReading } from "./protocol/lpp.js";
 import type { Transport } from "./transport.js";
 
@@ -85,6 +104,100 @@ export interface LogEntry {
   text: string;
 }
 
+/** What a repeater, room or sensor said the last time we signed in to it. */
+export interface NodeLogin {
+  ok: boolean;
+  /** An `AclRole`, when the node said; a legacy "OK" does not. */
+  role: number | null;
+  /** The node's clock at sign-in, unix seconds. */
+  serverTime: number | null;
+  firmwareLevel: number | null;
+  /** Local clock, ms. */
+  at: number;
+}
+
+export interface NodeStatus {
+  stats: NodeStats | null;
+  /** Hex of the body, for a shape this client does not read. */
+  raw: string;
+  at: number;
+}
+
+/** One status answer, kept for the trend lines. */
+export interface StatusSample {
+  at: number;
+  batteryMv: number;
+  noiseFloor: number;
+}
+
+export interface NeighbourRecord {
+  /** Hex of the six-byte key prefix. */
+  prefix: string;
+  heardSecsAgo: number;
+  snr: number;
+}
+
+export interface NeighbourList {
+  /** How many the node knows, of which `neighbours` is the part fetched so far. */
+  total: number;
+  /** A `NeighbourOrder`. */
+  order: number;
+  neighbours: NeighbourRecord[];
+  at: number;
+}
+
+export interface AccessRecord {
+  prefix: string;
+  permissions: number;
+}
+
+export interface OwnerInfo {
+  firmware: string;
+  name: string;
+  owner: string;
+  at: number;
+}
+
+export interface SeriesWindow {
+  /** How far back the window reaches, seconds. */
+  windowSecs: number;
+  /** The sensor's clock when it answered. */
+  time: number;
+  series: SeriesSummary[];
+  at: number;
+}
+
+export type ConsoleStatus = "queued" | "waiting" | "done" | "timeout" | "failed";
+
+/** A console command and what came back, or a line the node sent unasked. */
+export interface ConsoleEntry {
+  id: string;
+  /** Empty for a line nobody here asked for. */
+  command: string;
+  /** The two characters before `|` the node echoes back. */
+  tag: string;
+  at: number;
+  status: ConsoleStatus;
+  reply: string | null;
+  repliedAt: number | null;
+  error: string | null;
+}
+
+/** A value read from a node with `get`, or confirmed by a `set`. */
+export interface NodeSetting {
+  value: string;
+  at: number;
+}
+
+/** A request to a remote node, waiting its turn or on the air. */
+export interface RemoteJobInfo {
+  id: string;
+  key: string;
+  label: string;
+  /** Local ms when it went out; null while queued. */
+  startedAt: number | null;
+}
+
 export interface SessionState {
   status: "idle" | "connecting" | "ready" | "closed";
   link: { kind: Transport["kind"]; label: string } | null;
@@ -98,9 +211,20 @@ export interface SessionState {
   unread: Record<string, number>;
   battery: { mv: number; at: number } | null;
   tuning: { rxDelayBase: number; airtimeFactor: number } | null;
-  logins: Record<string, { permissions: number; ok: boolean; at: number }>;
+  /** Keyed by contact key, like everything about remote nodes below. */
+  logins: Record<string, NodeLogin>;
   telemetry: Record<string, { readings: LppReading[]; at: number }>;
-  statuses: Record<string, { stats: RepeaterStats | null; raw: string; at: number }>;
+  statuses: Record<string, NodeStatus>;
+  /** A week of status answers per node, oldest first. */
+  statusHistory: Record<string, StatusSample[]>;
+  neighbours: Record<string, NeighbourList>;
+  accessLists: Record<string, { entries: AccessRecord[]; at: number }>;
+  ownerInfo: Record<string, OwnerInfo>;
+  series: Record<string, SeriesWindow>;
+  nodeSettings: Record<string, Record<string, NodeSetting>>;
+  consoles: Record<string, ConsoleEntry[]>;
+  /** The radio carries one request to a remote node at a time; the rest wait here. */
+  remote: { active: RemoteJobInfo | null; queued: RemoteJobInfo[] };
   /** The most recent pushes and errors, newest last, for a log pane. */
   log: LogEntry[];
   error: string | null;
@@ -114,6 +238,9 @@ export interface PersistedState {
   channels: ChannelRecord[];
   messages: MessageRecord[];
   unread: Record<string, number>;
+  /** Absent in history saved before remote nodes were managed. */
+  logins?: Record<string, NodeLogin>;
+  statusHistory?: Record<string, StatusSample[]>;
 }
 
 export interface SessionStorage {
@@ -126,6 +253,8 @@ export interface SessionOptions {
   storage?: SessionStorage;
   /** Overrides the clock, for tests. Returns ms. */
   now?: () => number;
+  /** How long to wait for a remote node, from the radio's estimate; for tests. */
+  replyWaitMs?: (estimateMs: number, extraMs: number) => number;
   trace?: ConstructorParameters<typeof MeshCoreClient>[1] extends infer O ? (O extends { trace?: infer T } ? T : never) : never;
 }
 
@@ -174,6 +303,54 @@ export function contactTypeName(type: number): string {
   }
 }
 
+export function isNodeType(type: number): boolean {
+  return type === AdvType.Repeater || type === AdvType.Room || type === AdvType.Sensor;
+}
+
+export function aclRoleName(role: number): string {
+  switch (role & 3) {
+    case AclRole.Admin:
+      return "admin";
+    case AclRole.ReadWrite:
+      return "read-write";
+    case AclRole.ReadOnly:
+      return "read-only";
+    default:
+      return "guest";
+  }
+}
+
+/** Nothing came back from a remote node within the time the radio said it would take. */
+export class NoReplyError extends Error {
+  constructor(label: string, ms: number) {
+    super(`${label}: no reply in ${Math.round(ms / 1000)} s`);
+    this.name = "NoReplyError";
+  }
+}
+
+/** A node answered a console command with an error of its own. */
+export class NodeCommandError extends Error {
+  constructor(readonly reply: string) {
+    super(reply);
+    this.name = "NodeCommandError";
+  }
+}
+
+/**
+ * Replies that mean the node refused: `Err - bad params`, `Error, …`,
+ * `Unknown command`, `unknown config: key`, `??: key`, `Board not supported`.
+ */
+export function isCliError(reply: string): boolean {
+  const text = reply.trim();
+  return /^(err\b|error|unknown|\?\?)/i.test(text) || /\bnot supported$/i.test(text);
+}
+
+/** The value of a `get` reply, which the node writes as `> value`. */
+export function cliValue(reply: string): string | null {
+  const trimmed = reply.replace(/\s+$/, "");
+  return trimmed.startsWith("> ") ? trimmed.slice(2) : trimmed === ">" ? "" : null;
+}
+
 function toRecord(contact: Contact, lastHeardAt: number | null): ContactRecord {
   const key = toHex(contact.publicKey);
   return {
@@ -217,6 +394,14 @@ const EMPTY: SessionState = {
   logins: {},
   telemetry: {},
   statuses: {},
+  statusHistory: {},
+  neighbours: {},
+  accessLists: {},
+  ownerInfo: {},
+  series: {},
+  nodeSettings: {},
+  consoles: {},
+  remote: { active: null, queued: [] },
   log: [],
   error: null,
   syncing: false,
@@ -225,6 +410,43 @@ const EMPTY: SessionState = {
 /** How long after sending a channel message its echoes are still looked for. */
 const ECHO_WINDOW_MS = 15 * 60 * 1000;
 
+/** How far back status answers are kept, and at most how many a node. */
+const HISTORY_MS = 7 * 24 * 3600 * 1000;
+const HISTORY_LIMIT = 600;
+
+/** The last this many console lines a node are kept. */
+const CONSOLE_LIMIT = 200;
+
+/** What a remote node's reply is matched by. */
+type RemoteEvent =
+  | { kind: "login"; prefix: string; ok: boolean }
+  | { kind: "status"; prefix: string }
+  | { kind: "telemetry"; prefix: string; readings: LppReading[] }
+  | { kind: "binary"; tag: number; data: Uint8Array }
+  | { kind: "path"; prefix: string }
+  | { kind: "cli"; prefix: string; tag: string | null; text: string };
+
+interface RemoteJob {
+  info: RemoteJobInfo;
+  /** Sends the command; the radio answers with the tag and how long the reply may take. */
+  start: (client: MeshCoreClient) => Promise<TextSendResult>;
+  /** Whether this event is the reply, given what the radio said when it sent the request. */
+  answers: (event: RemoteEvent, sent: TextSendResult | null) => boolean;
+  /** Added to the radio's estimate: a node holds a console reply back before it sends it. */
+  extraWaitMs: number;
+  sent: TextSendResult | null;
+  /** Events that arrived before the radio had confirmed the send. */
+  early: RemoteEvent[];
+  timer: ReturnType<typeof setTimeout> | null;
+  resolve: (event: RemoteEvent) => void;
+  reject: (error: Error) => void;
+}
+
+/** How long to wait for a remote node: the radio's estimate with room to spare, but not forever. */
+function replyWaitMs(estimateMs: number, extraMs: number): number {
+  return Math.min(60_000, Math.max(6_000, estimateMs * 1.25 + 1_500 + extraMs));
+}
+
 export class MeshSession {
   private state: SessionState = EMPTY;
   private listeners = new Set<() => void>();
@@ -232,6 +454,7 @@ export class MeshSession {
   private readonly appName: string;
   private readonly storage: SessionStorage | null;
   private readonly now: () => number;
+  private readonly replyWait: (estimateMs: number, extraMs: number) => number;
   private readonly trace: SessionOptions["trace"];
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private syncQueued = false;
@@ -240,11 +463,17 @@ export class MeshSession {
   private ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** What our recent channel messages look like on the air (payload hex), to know their echoes by. */
   private echoWatch = new Map<string, { id: string; at: number }>();
+  private remoteQueue: RemoteJob[] = [];
+  private remoteActive: RemoteJob | null = null;
+  private jobCounter = 0;
+  /** The next console tag; two hex digits, so the node's `XX|` rule holds. */
+  private cliTag = Math.floor(Math.random() * 256);
 
   constructor(options: SessionOptions = {}) {
     this.appName = options.appName ?? "Meshnet";
     this.storage = options.storage ?? null;
     this.now = options.now ?? (() => Date.now());
+    this.replyWait = options.replyWaitMs ?? replyWaitMs;
     this.trace = options.trace;
   }
 
@@ -267,7 +496,9 @@ export class MeshSession {
       "contactsCursor" in patch ||
       "channels" in patch ||
       "messages" in patch ||
-      "unread" in patch
+      "unread" in patch ||
+      "logins" in patch ||
+      "statusHistory" in patch
     ) {
       this.scheduleSave();
     }
@@ -290,9 +521,9 @@ export class MeshSession {
 
   private async saveNow(): Promise<void> {
     if (!this.storage || !this.state.self) return;
-    const { contacts, contactsCursor, channels, messages, unread } = this.state;
+    const { contacts, contactsCursor, channels, messages, unread, logins, statusHistory } = this.state;
     try {
-      await this.storage.save(this.state.self.key, { contacts, contactsCursor, channels, messages, unread });
+      await this.storage.save(this.state.self.key, { contacts, contactsCursor, channels, messages, unread, logins, statusHistory });
     } catch (error) {
       this.log("error", `could not save: ${(error as Error).message}`);
     }
@@ -325,6 +556,7 @@ export class MeshSession {
       this.client = null;
       for (const timer of this.ackTimers.values()) clearTimeout(timer);
       this.ackTimers.clear();
+      this.dropRemoteJobs(reason ? `link dropped: ${reason.message}` : "disconnected");
       this.set({ status: "closed", syncing: false, error: reason ? reason.message : this.state.error });
       this.log("link", reason ? `link dropped: ${reason.message}` : "disconnected");
     });
@@ -348,6 +580,8 @@ export class MeshSession {
         // before echoes were kept has none.
         messages: (persisted?.messages ?? []).map((m) => ({ ...m, hops: m.hops === null ? null : m.hops & 63, echoes: m.echoes ?? [] })),
         unread: persisted?.unread ?? {},
+        logins: persisted?.logins ?? {},
+        statusHistory: persisted?.statusHistory ?? {},
       });
       this.log("link", `connected to ${self.name} (${device.firmwareVersion})`);
 
@@ -438,7 +672,9 @@ export class MeshSession {
       const contact = byPrefix.get(m.conversation.slice(2));
       if (!contact) return m;
       changed = true;
-      return { ...m, conversation: contactConversation(contact.key), sender: contact.name };
+      // A room post keeps its author; only a direct message is named after its sender.
+      const sender = m.txtType === TxtType.SignedPlain ? m.sender : contact.name;
+      return { ...m, conversation: contactConversation(contact.key), sender };
     });
     if (!changed) return;
     const unread: Record<string, number> = {};
@@ -460,6 +696,13 @@ export class MeshSession {
 
   contactByPrefix(prefix: string): ContactRecord | null {
     for (const c of Object.values(this.state.contacts)) if (c.prefix === prefix) return c;
+    return null;
+  }
+
+  /** A contact whose key starts with this hex, however short; ourselves included. */
+  contactByKeyStart(hex: string): ContactRecord | { name: string } | null {
+    if (this.state.self && this.state.self.key.startsWith(hex)) return { name: this.state.self.name };
+    for (const c of Object.values(this.state.contacts)) if (c.key.startsWith(hex)) return c;
     return null;
   }
 
@@ -607,15 +850,22 @@ export class MeshSession {
     let message: MessageRecord;
     if (frame.kind === "contactMessage") {
       const prefix = toHex(frame.senderPrefix);
+      if (frame.txtType === TxtType.CliData) {
+        this.receiveCli(prefix, frame.text);
+        return;
+      }
       const contact = this.contactByPrefix(prefix);
       if (!contact) this.queueContactsRefresh();
+      // A room relays its members' posts signed with the author's key prefix.
+      const signer = frame.signerPrefix ? toHex(frame.signerPrefix) : null;
+      const author = signer ? this.contactByKeyStart(signer) : null;
       message = {
         id: newId(now),
         conversation: contact ? contactConversation(contact.key) : `p:${prefix}`,
         direction: "in",
         text: frame.text,
-        sender: contact?.name ?? null,
-        senderPrefix: prefix,
+        sender: signer ? (author?.name ?? signer) : (contact?.name ?? null),
+        senderPrefix: signer ?? prefix,
         timestamp: frame.timestamp,
         receivedAt: now,
         snr: frame.snr,
@@ -875,12 +1125,35 @@ export class MeshSession {
     await this.need().factoryReset();
   }
 
-  // ---- repeaters and rooms ----
+  // ---- repeaters, rooms and sensors ----
+  //
+  // The radio keeps one request to a remote node pending at a time: each new
+  // login, status, telemetry, path or binary request makes it forget the
+  // last (`clearPendingReqs`), and a reply nobody is waiting for is dropped.
+  // So they go through one queue here, each waiting for its reply or for the
+  // time the radio estimated before the next is sent. Console commands do not
+  // take the radio's slot, but they share the air and queue here all the same.
 
-  async login(key: string, password: string): Promise<void> {
-    await this.need().sendLogin(this.contactBytes(key), password);
+  private needContact(key: string): ContactRecord {
+    const contact = this.state.contacts[key];
+    if (!contact) throw new Error("unknown contact");
+    return contact;
   }
 
+  /** Signs in. Resolves with what the node said, `ok: false` when it refused the password. */
+  async login(key: string, password: string): Promise<NodeLogin> {
+    const contact = this.needContact(key);
+    const bytes = fromHex(key);
+    await this.remoteRequest(
+      key,
+      "sign in",
+      (client) => client.sendLogin(bytes, password),
+      (event) => event.kind === "login" && event.prefix === contact.prefix,
+    );
+    return this.state.logins[key]!;
+  }
+
+  /** Ends a room's keep-alive and forgets the role; the node keeps its own record of us. */
   async logout(key: string): Promise<void> {
     await this.need().logout(this.contactBytes(key));
     const logins = { ...this.state.logins };
@@ -888,16 +1161,335 @@ export class MeshSession {
     this.set({ logins });
   }
 
-  async requestStatus(key: string): Promise<void> {
-    await this.need().sendStatusReq(this.contactBytes(key));
+  async requestStatus(key: string): Promise<NodeStatus> {
+    const contact = this.needContact(key);
+    const bytes = fromHex(key);
+    await this.remoteRequest(
+      key,
+      "status",
+      (client) => client.sendStatusReq(bytes),
+      (event) => event.kind === "status" && event.prefix === contact.prefix,
+    );
+    return this.state.statuses[key]!;
   }
 
-  async requestTelemetry(key?: string): Promise<void> {
-    await this.need().sendTelemetryReq(key ? this.contactBytes(key) : undefined);
+  /** Without a key, the radio's own sensors, answered at once and outside the queue. */
+  async requestTelemetry(key?: string): Promise<LppReading[] | null> {
+    if (!key) {
+      await this.need().sendTelemetryReq();
+      return null;
+    }
+    const contact = this.needContact(key);
+    const bytes = fromHex(key);
+    const event = await this.remoteRequest(
+      key,
+      "telemetry",
+      (client) => client.sendTelemetryReq(bytes).then((sent) => sent!),
+      (event) => event.kind === "telemetry" && event.prefix === contact.prefix,
+    );
+    return event.kind === "telemetry" ? event.readings : null;
   }
 
   async discoverPath(key: string): Promise<void> {
-    await this.need().sendPathDiscoveryReq(this.contactBytes(key));
+    const contact = this.needContact(key);
+    const bytes = fromHex(key);
+    await this.remoteRequest(
+      key,
+      "path discovery",
+      (client) => client.sendPathDiscoveryReq(bytes),
+      (event) => event.kind === "path" && event.prefix === contact.prefix,
+    );
+  }
+
+  /** A page of the repeaters a repeater hears direct. A page past the first is added to what was fetched. */
+  async requestNeighbours(key: string, options: { order?: number; offset?: number; count?: number } = {}): Promise<NeighbourList> {
+    const order = options.order ?? 0;
+    const offset = options.offset ?? 0;
+    const data = await this.binaryRequest(key, offset > 0 ? "more neighbours" : "neighbours", neighboursRequest({ order, offset, count: options.count ?? 10 }));
+    const { total, neighbours } = readNeighbours(data);
+    const page = neighbours.map((n) => ({ prefix: toHex(n.prefix), heardSecsAgo: n.heardSecsAgo, snr: n.snr }));
+    const prior = this.state.neighbours[key];
+    const list = offset > 0 && prior && prior.order === order ? [...prior.neighbours.slice(0, offset), ...page] : page;
+    const record: NeighbourList = { total, order, neighbours: list, at: this.now() };
+    this.set({ neighbours: { ...this.state.neighbours, [key]: record } });
+    return record;
+  }
+
+  async requestAccessList(key: string): Promise<AccessRecord[]> {
+    const data = await this.binaryRequest(key, "access list", accessListRequest());
+    const entries = readAccessList(data).map((e) => ({ prefix: toHex(e.prefix), permissions: e.permissions }));
+    this.set({ accessLists: { ...this.state.accessLists, [key]: { entries, at: this.now() } } });
+    return entries;
+  }
+
+  async requestOwnerInfo(key: string): Promise<OwnerInfo> {
+    const data = await this.binaryRequest(key, "owner info", ownerInfoRequest());
+    const info: OwnerInfo = { ...readOwnerInfo(data), at: this.now() };
+    this.set({ ownerInfo: { ...this.state.ownerInfo, [key]: info } });
+    return info;
+  }
+
+  /** A sensor's min, max and mean of each series over the last `windowSecs`. */
+  async requestSeries(key: string, windowSecs: number): Promise<SeriesWindow> {
+    const data = await this.binaryRequest(key, "min/max/avg", avgMinMaxRequest(windowSecs, 0));
+    const { time, series } = readAvgMinMax(data);
+    const record: SeriesWindow = { windowSecs, time, series, at: this.now() };
+    this.set({ series: { ...this.state.series, [key]: record } });
+    return record;
+  }
+
+  private async binaryRequest(key: string, label: string, body: Uint8Array): Promise<Uint8Array> {
+    this.needContact(key);
+    const bytes = fromHex(key);
+    const event = await this.remoteRequest(
+      key,
+      label,
+      (client) => client.sendBinaryReq(bytes, body),
+      (event, sent) => event.kind === "binary" && sent !== null && event.tag === sent.ackTag,
+    );
+    if (event.kind !== "binary") throw new Error("unreachable");
+    return event.data;
+  }
+
+  /**
+   * Runs a console command on a node and resolves with its reply. The node
+   * answers admins only, and says nothing to a retry of a command it has
+   * seen. `mask` is what the console shows in place of the command and its
+   * reply, for a command that carries a password.
+   */
+  async runCli(key: string, command: string, options: { mask?: string } = {}): Promise<string> {
+    const contact = this.needContact(key);
+    const tag = (this.cliTag++ & 0xff).toString(16).padStart(2, "0");
+    const prefix = fromHex(contact.prefix);
+    if (options.mask) this.maskedTags.add(`${contact.prefix}:${tag}`);
+    const entry: ConsoleEntry = {
+      id: newId(this.now()),
+      command: options.mask ?? command,
+      tag,
+      at: this.now(),
+      status: "queued",
+      reply: null,
+      repliedAt: null,
+      error: null,
+    };
+    this.appendConsole(key, entry);
+    try {
+      const event = await this.remoteRequest(
+        key,
+        options.mask ?? command,
+        (client) => client.sendCliCommand(prefix, `${tag}|${command}`),
+        (event) => event.kind === "cli" && event.prefix === contact.prefix && event.tag === tag,
+        // The node holds a console reply back for about half a second.
+        1_500,
+        () => this.patchConsole(key, entry.id, { status: "waiting", at: this.now() }),
+      );
+      const reply = event.kind === "cli" ? event.text : "";
+      this.patchConsole(key, entry.id, { status: "done", reply: options.mask ? maskReply(reply) : reply, repliedAt: this.now() });
+      return reply;
+    } catch (error) {
+      this.patchConsole(key, entry.id, {
+        status: error instanceof NoReplyError ? "timeout" : "failed",
+        error: (error as Error).message,
+      });
+      throw error;
+    }
+  }
+
+  /** `get <name>`, or another command whose reply is the value; remembered per node. */
+  async readNodeSetting(key: string, name: string, command = `get ${name}`): Promise<string> {
+    const reply = await this.runCli(key, command);
+    if (isCliError(reply)) throw new NodeCommandError(reply);
+    // `get` answers "> value"; a few commands (powersaving) answer the bare value.
+    const value = cliValue(reply) ?? reply.trim();
+    this.storeSetting(key, name, value);
+    return value;
+  }
+
+  /** `set <name> <value>`, or the command given; the value is remembered when the node says OK. */
+  async writeNodeSetting(key: string, name: string, value: string, command = `set ${name} ${value}`, options: { mask?: string } = {}): Promise<string> {
+    const reply = await this.runCli(key, command, options);
+    if (isCliError(reply)) throw new NodeCommandError(reply);
+    if (!options.mask) this.storeSetting(key, name, value);
+    return reply;
+  }
+
+  private storeSetting(key: string, name: string, value: string): void {
+    const settings = { ...this.state.nodeSettings[key], [name]: { value, at: this.now() } };
+    this.set({ nodeSettings: { ...this.state.nodeSettings, [key]: settings } });
+  }
+
+  /** Drops what this client remembers about a node: its role, its status trend, the console. */
+  forgetNode(key: string): void {
+    const without = <T,>(record: Record<string, T>): Record<string, T> => {
+      const copy = { ...record };
+      delete copy[key];
+      return copy;
+    };
+    this.set({
+      logins: without(this.state.logins),
+      statusHistory: without(this.state.statusHistory),
+      statuses: without(this.state.statuses),
+      neighbours: without(this.state.neighbours),
+      accessLists: without(this.state.accessLists),
+      ownerInfo: without(this.state.ownerInfo),
+      nodeSettings: without(this.state.nodeSettings),
+      consoles: without(this.state.consoles),
+      series: without(this.state.series),
+    });
+  }
+
+  clearConsole(key: string): void {
+    const consoles = { ...this.state.consoles };
+    delete consoles[key];
+    this.set({ consoles });
+  }
+
+  /** Takes a request out of the queue before it goes on the air. One already out cannot be called back. */
+  cancelRemote(id: string): void {
+    const index = this.remoteQueue.findIndex((j) => j.info.id === id);
+    if (index < 0) return;
+    const [job] = this.remoteQueue.splice(index, 1);
+    job!.reject(new Error("cancelled"));
+    this.publishRemote();
+  }
+
+  private maskedTags = new Set<string>();
+
+  private appendConsole(key: string, entry: ConsoleEntry): void {
+    const prior = this.state.consoles[key] ?? [];
+    const list = prior.length >= CONSOLE_LIMIT ? prior.slice(-CONSOLE_LIMIT + 1) : prior;
+    this.set({ consoles: { ...this.state.consoles, [key]: [...list, entry] } });
+  }
+
+  private patchConsole(key: string, id: string, patch: Partial<ConsoleEntry>): void {
+    const list = this.state.consoles[key];
+    if (!list) return;
+    this.set({ consoles: { ...this.state.consoles, [key]: list.map((e) => (e.id === id ? { ...e, ...patch } : e)) } });
+  }
+
+  /** A console reply: to the command waiting for it, to one that gave up on it, or a line of its own. */
+  private receiveCli(prefix: string, text: string): void {
+    const match = /^([0-9a-fA-F]{2})\|/.exec(text);
+    const tag = match ? match[1]!.toLowerCase() : null;
+    const body = match ? text.slice(3) : text;
+    if (this.remoteEvent({ kind: "cli", prefix, tag, text: body })) return;
+    const contact = this.contactByPrefix(prefix);
+    const key = contact?.key ?? prefix;
+    const masked = tag !== null && this.maskedTags.has(`${prefix}:${tag}`);
+    const reply = masked ? maskReply(body) : body;
+    const late = tag === null ? undefined : this.state.consoles[key]?.find((e) => e.tag === tag && e.status !== "done");
+    if (late) {
+      this.patchConsole(key, late.id, { status: "done", reply, repliedAt: this.now(), error: null });
+      return;
+    }
+    this.appendConsole(key, { id: newId(this.now()), command: "", tag: tag ?? "", at: this.now(), status: "done", reply, repliedAt: this.now(), error: null });
+  }
+
+  private remoteRequest(
+    key: string,
+    label: string,
+    start: RemoteJob["start"],
+    answers: (event: RemoteEvent, sent: TextSendResult | null) => boolean,
+    extraWaitMs = 0,
+    onStart?: () => void,
+  ): Promise<RemoteEvent> {
+    if (!this.client || this.client.isClosed) return Promise.reject(new Error("not connected"));
+    return new Promise((resolve, reject) => {
+      this.jobCounter += 1;
+      this.remoteQueue.push({
+        info: { id: `r${this.jobCounter}`, key, label, startedAt: null },
+        start: async (client) => {
+          onStart?.();
+          return start(client);
+        },
+        answers,
+        extraWaitMs,
+        sent: null,
+        early: [],
+        timer: null,
+        resolve,
+        reject,
+      });
+      this.publishRemote();
+      void this.pumpRemote();
+    });
+  }
+
+  private async pumpRemote(): Promise<void> {
+    if (this.remoteActive) return;
+    const job = this.remoteQueue.shift();
+    if (!job) return;
+    this.remoteActive = job;
+    job.info = { ...job.info, startedAt: this.now() };
+    this.publishRemote();
+    const client = this.client;
+    if (!client || client.isClosed) {
+      this.finishRemote(job, new Error("not connected"));
+      return;
+    }
+    try {
+      const sent = await job.start(client);
+      if (this.remoteActive !== job) return;
+      job.sent = sent;
+      const wait = this.replyWait(sent.estTimeoutMs, job.extraWaitMs);
+      job.timer = setTimeout(() => this.finishRemote(job, new NoReplyError(job.info.label, wait)), wait);
+      for (const event of job.early.splice(0)) this.remoteEvent(event);
+    } catch (error) {
+      this.finishRemote(job, error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  private finishRemote(job: RemoteJob, error: Error | null, event?: RemoteEvent): void {
+    if (this.remoteActive !== job) return;
+    this.remoteActive = null;
+    if (job.timer) clearTimeout(job.timer);
+    if (error) job.reject(error);
+    else job.resolve(event!);
+    this.publishRemote();
+    void this.pumpRemote();
+  }
+
+  /** Hands a reply from a remote node to the request waiting for it; says whether one was. */
+  private remoteEvent(event: RemoteEvent): boolean {
+    const job = this.remoteActive;
+    if (!job) return false;
+    // A binary reply is known by the tag the radio gave when it sent the
+    // request; one that overtakes that answer waits for it.
+    if (!job.sent && event.kind === "binary") {
+      job.early.push(event);
+      return true;
+    }
+    if (!job.answers(event, job.sent)) return false;
+    this.finishRemote(job, null, event);
+    return true;
+  }
+
+  private publishRemote(): void {
+    this.set({ remote: { active: this.remoteActive?.info ?? null, queued: this.remoteQueue.map((j) => j.info) } });
+  }
+
+  private dropRemoteJobs(reason: string): void {
+    const jobs = [...(this.remoteActive ? [this.remoteActive] : []), ...this.remoteQueue];
+    this.remoteActive = null;
+    this.remoteQueue = [];
+    for (const job of jobs) {
+      if (job.timer) clearTimeout(job.timer);
+      job.reject(new Error(reason));
+    }
+    this.publishRemote();
+  }
+
+  private noteStatus(key: string, contact: ContactRecord | null, raw: Uint8Array): void {
+    // The tail differs between a repeater and a room, and only the contact says which answered.
+    const stats = contact ? readNodeStats(raw, contact.type === AdvType.Room ? "room" : "repeater") : null;
+    const at = this.now();
+    const patch: Partial<SessionState> = { statuses: { ...this.state.statuses, [key]: { stats, raw: toHex(raw), at } } };
+    if (stats) {
+      const kept = (this.state.statusHistory[key] ?? []).filter((s) => at - s.at < HISTORY_MS);
+      const history = [...kept, { at, batteryMv: stats.batteryMv, noiseFloor: stats.noiseFloor }].slice(-HISTORY_LIMIT);
+      patch.statusHistory = { ...this.state.statusHistory, [key]: history };
+    }
+    this.set(patch);
   }
 
   // ---- pushes ----
@@ -965,18 +1557,26 @@ export class MeshSession {
         const contact = this.contactByPrefix(prefix);
         const key = contact?.key ?? prefix;
         const ok = frame.kind === "loginSuccess";
-        this.set({
-          logins: { ...this.state.logins, [key]: { permissions: ok ? frame.permissions : 0, ok, at: this.now() } },
-        });
-        this.log("login", `${contact?.name ?? prefix}: ${ok ? "logged in" : "login refused"}`);
+        const login: NodeLogin = ok
+          ? {
+              ok,
+              role: frame.permissions === null ? null : frame.permissions & 3,
+              serverTime: frame.serverTime,
+              firmwareLevel: frame.firmwareLevel,
+              at: this.now(),
+            }
+          : { ok, role: null, serverTime: null, firmwareLevel: null, at: this.now() };
+        this.set({ logins: { ...this.state.logins, [key]: login } });
+        this.log("login", `${contact?.name ?? prefix}: ${ok ? `signed in${login.role === null ? "" : ` as ${aclRoleName(login.role)}`}` : "password refused"}`);
+        this.remoteEvent({ kind: "login", prefix, ok });
         return;
       }
       case "statusResponse": {
         const prefix = toHex(frame.prefix);
         const contact = this.contactByPrefix(prefix);
-        const key = contact?.key ?? prefix;
-        this.set({ statuses: { ...this.state.statuses, [key]: { stats: frame.stats, raw: toHex(frame.raw), at: this.now() } } });
+        this.noteStatus(contact?.key ?? prefix, contact, frame.raw);
         this.log("status", `${contact?.name ?? prefix}: status received`);
+        this.remoteEvent({ kind: "status", prefix });
         return;
       }
       case "telemetryResponse": {
@@ -985,6 +1585,7 @@ export class MeshSession {
         const key = this.state.self?.prefix === prefix ? "self" : (contact?.key ?? prefix);
         this.set({ telemetry: { ...this.state.telemetry, [key]: { readings: frame.readings, at: this.now() } } });
         this.log("telemetry", `${key === "self" ? "this radio" : (contact?.name ?? prefix)}: ${frame.readings.length} reading(s)`);
+        if (key !== "self") this.remoteEvent({ kind: "telemetry", prefix, readings: frame.readings });
         return;
       }
       case "pathDiscoveryResponse": {
@@ -994,13 +1595,15 @@ export class MeshSession {
           "path",
           `${contact?.name ?? prefix}: out ${frame.outPathLen & 63} hop(s) ${toHex(frame.outPath)}, in ${frame.inPathLen & 63} hop(s) ${toHex(frame.inPath)}`,
         );
+        this.remoteEvent({ kind: "path", prefix });
         return;
       }
       case "traceData":
         this.log("trace", `tag ${frame.tag.toString(16)}: ${toHex(frame.hashes)} snr ${frame.snrs.map((s) => s.toFixed(1)).join("/")}`);
         return;
       case "binaryResponse":
-        this.log("binary", `tag ${frame.tag.toString(16)}: ${toHex(frame.data)}`);
+        this.log("binary", `tag ${frame.tag.toString(16)}: ${frame.data.length} byte(s)`);
+        this.remoteEvent({ kind: "binary", tag: frame.tag, data: frame.data });
         return;
       case "rawData":
         this.log("raw", `snr ${frame.snr} rssi ${frame.rssi}: ${toHex(frame.payload)}`);
@@ -1014,6 +1617,11 @@ export class MeshSession {
         return;
     }
   }
+}
+
+/** A console reply with a password in it, as the console shows it. */
+function maskReply(reply: string): string {
+  return reply.replace(/^(password now:\s*).*$/is, "$1••••••");
 }
 
 /** Whether `a` and `b` name the same radio. */

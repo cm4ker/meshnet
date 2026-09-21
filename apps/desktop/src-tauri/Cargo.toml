@@ -27,6 +27,9 @@ tauri-plugin-opener = "2"
 log = "0.4"
 env_logger = "0.11"
 serde = { version = "1", features = ["derive"] }
+# Node passwords the client is asked to remember go to the system's
+# credential store, not to a file of the webview's.
+keyring = { version = "3", features = ["windows-native", "apple-native"] }
 
 # On Windows the BLE link is the platform's own GATT API, not btleplug: the
 # firmware's UART characteristics demand an encrypted link, and btleplug's

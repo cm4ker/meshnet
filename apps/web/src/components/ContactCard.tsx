@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { AdvType, contactHops, contactTypeName, isFavourite, pathByteLength, type LppReading, type RepeaterStats } from "@meshnet/meshcore";
+import { AdvType, contactHops, contactTypeName, isFavourite, isNodeType, pathByteLength, type LppReading } from "@meshnet/meshcore";
 import { contactConversation } from "../lib/conversations.js";
-import { ago, battery } from "../lib/format.js";
-import { openConversation } from "../lib/nav.js";
+import { ago } from "../lib/format.js";
+import { openConversation, openNode } from "../lib/nav.js";
 import { session, useSession } from "../lib/session.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Confirm, Prompt } from "../ui/Dialog.js";
@@ -15,7 +15,7 @@ export function ContactCard({ contactKey, onClose }: { contactKey: string; onClo
   const contact = state.contacts[contactKey];
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [ask, setAsk] = useState<"remove" | "login" | "rename" | null>(null);
+  const [ask, setAsk] = useState<"remove" | "rename" | null>(null);
   const online = state.status === "ready";
 
   if (!contact) {
@@ -45,9 +45,7 @@ export function ContactCard({ contactKey, onClose }: { contactKey: string; onClo
   };
 
   const hops = contactHops(contact);
-  const infra = contact.type === AdvType.Repeater || contact.type === AdvType.Room;
-  const login = state.logins[contact.key];
-  const status = state.statuses[contact.key];
+  const node = isNodeType(contact.type);
   const telemetry = state.telemetry[contact.key];
 
   return (
@@ -118,25 +116,14 @@ export function ContactCard({ contactKey, onClose }: { contactKey: string; onClo
           <p className="muted small">Discovery and telemetry answer through the log and the readings below, when the radio hears back.</p>
         </Section>
 
-        {infra ? (
-          <Section title={contact.type === AdvType.Repeater ? "Repeater" : "Room"}>
-            <Row label="Login">
-              {login ? (login.ok ? `signed in${login.permissions & 1 ? " as admin" : ""} · ${ago(login.at)}` : `refused · ${ago(login.at)}`) : "not signed in"}
-            </Row>
+        {node ? (
+          <Section title={contact.type === AdvType.Repeater ? "Repeater" : contact.type === AdvType.Room ? "Room" : "Sensor"}>
             <div className="row-actions wrap">
-              <Button variant="primary" disabled={!online} onClick={() => setAsk("login")}>
-                Sign in
-              </Button>
-              {login?.ok ? (
-                <Button busy={busy === "logout"} onClick={run("logout", () => session.logout(contact.key))}>
-                  Sign out
-                </Button>
-              ) : null}
-              <Button busy={busy === "status"} disabled={!online} onClick={run("status", () => session.requestStatus(contact.key))}>
-                Request status
+              <Button variant="primary" onClick={() => openNode(contact.key)}>
+                Manage in Nodes
               </Button>
             </div>
-            {status?.stats ? <Stats stats={status.stats} at={status.at} /> : status ? <p className="muted small">Status received ({status.raw.length / 2} bytes), in a shape this client does not read.</p> : null}
+            <p className="muted small">Sign-in, status, neighbours, settings and the console are in the Nodes section.</p>
           </Section>
         ) : null}
 
@@ -168,18 +155,6 @@ export function ContactCard({ contactKey, onClose }: { contactKey: string; onClo
         }}
       />
       <Prompt
-        open={ask === "login"}
-        title={`Sign in to ${contact.name}`}
-        label="Password"
-        type="password"
-        submitLabel="Sign in"
-        onCancel={() => setAsk(null)}
-        onSubmit={async (password) => {
-          await session.login(contact.key, password);
-          setAsk(null);
-        }}
-      />
-      <Prompt
         open={ask === "rename"}
         title="Rename contact"
         label="Name"
@@ -191,35 +166,6 @@ export function ContactCard({ contactKey, onClose }: { contactKey: string; onClo
           setAsk(null);
         }}
       />
-    </div>
-  );
-}
-
-function Stats({ stats, at }: { stats: RepeaterStats; at: number }) {
-  const up = stats.upTimeSecs;
-  const uptime = up >= 86400 ? `${Math.floor(up / 86400)} d ${Math.floor((up % 86400) / 3600)} h` : `${Math.floor(up / 3600)} h ${Math.floor((up % 3600) / 60)} min`;
-  return (
-    <div className="kv-grid">
-      <Row label="Received">{ago(at)}</Row>
-      <Row label="Battery">{battery(stats.batteryMv)}</Row>
-      <Row label="Uptime">{uptime}</Row>
-      <Row label="Noise floor">{stats.noiseFloor} dBm</Row>
-      <Row label="Last RSSI / SNR">
-        {stats.lastRssi} dBm / {stats.lastSnr.toFixed(1)} dB
-      </Row>
-      <Row label="Packets">
-        {stats.packetsRecv} in · {stats.packetsSent} out · {stats.recvErrors} errors
-      </Row>
-      <Row label="Flood / direct">
-        {stats.recvFlood}/{stats.recvDirect} in · {stats.sentFlood}/{stats.sentDirect} out
-      </Row>
-      <Row label="Air time">
-        tx {Math.round(stats.airTimeSecs / 60)} min · rx {Math.round(stats.rxAirTimeSecs / 60)} min
-      </Row>
-      <Row label="Queue">{stats.txQueueLen}</Row>
-      <Row label="Duplicates">
-        {stats.floodDups} flood · {stats.directDups} direct
-      </Row>
     </div>
   );
 }

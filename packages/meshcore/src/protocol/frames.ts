@@ -8,7 +8,7 @@
  * notes kept where a field was added.
  */
 
-import { ByteReader, pathByteLength, pathHashCount } from "./bytes.js";
+import { ByteReader, fromUtf8, pathByteLength, pathHashCount } from "./bytes.js";
 import { MAX_PATH_SIZE, PUB_KEY_PREFIX_SIZE, PUB_KEY_SIZE, Push, Resp, StatsType, TxtType } from "./codes.js";
 import { decodeLpp, type LppReading } from "./lpp.js";
 
@@ -68,8 +68,12 @@ export interface DeviceInfo {
   pathHashMode: number | null;
 }
 
-/** `struct RepeaterStats`, as a repeater answers a status request. */
-export interface RepeaterStats {
+/**
+ * A status answer: `struct RepeaterStats` from a repeater, `struct
+ * ServerStats` from a room. The two share their first 48 bytes and differ in
+ * the tail, so which one arrived depends on who was asked, not on the bytes.
+ */
+export interface NodeStats {
   batteryMv: number;
   txQueueLen: number;
   noiseFloor: number;
@@ -87,8 +91,37 @@ export interface RepeaterStats {
   lastSnr: number;
   directDups: number;
   floodDups: number;
-  rxAirTimeSecs: number;
-  recvErrors: number;
+  /** Repeaters: time spent receiving. Null from a room, or from a repeater too old to send it. */
+  rxAirTimeSecs: number | null;
+  recvErrors: number | null;
+  /** Rooms: posts stored. */
+  posted: number | null;
+  /** Rooms: posts pushed out to members. */
+  postPushes: number | null;
+}
+
+/** One repeater another repeater hears direct, as `GetNeighbours` lists it. */
+export interface Neighbour {
+  prefix: Uint8Array;
+  heardSecsAgo: number;
+  /** dB. */
+  snr: number;
+}
+
+export interface AccessEntry {
+  prefix: Uint8Array;
+  /** The low two bits are an `AclRole`; the rest are node-specific (a sensor's alert levels). */
+  permissions: number;
+}
+
+/** A sensor's summary of one series over a window. */
+export interface SeriesSummary {
+  channel: number;
+  /** The Cayenne LPP type code of the series. */
+  lppType: number;
+  min: number;
+  max: number;
+  avg: number;
 }
 
 export type ResponseFrame =
@@ -174,14 +207,18 @@ export type PushFrame =
   | { kind: "rawData"; snr: number; rssi: number; payload: Uint8Array }
   | {
       kind: "loginSuccess";
-      permissions: number;
+      /** The node's "is admin" flag. Rooms also answer 2 here for a client with no permissions at all. */
+      adminFlag: number;
       prefix: Uint8Array;
+      /** The node's clock, unix seconds. Null from a legacy "OK" answer. */
       serverTime: number | null;
-      acl: number | null;
+      /** The client's permissions byte on the node; its low two bits are the `AclRole`. */
+      permissions: number | null;
       firmwareLevel: number | null;
     }
   | { kind: "loginFail"; prefix: Uint8Array }
-  | { kind: "statusResponse"; prefix: Uint8Array; stats: RepeaterStats | null; raw: Uint8Array }
+  /** Read the body with `readNodeStats`, knowing whether a repeater or a room was asked. */
+  | { kind: "statusResponse"; prefix: Uint8Array; raw: Uint8Array }
   | { kind: "logRxData"; snr: number; rssi: number; raw: Uint8Array }
   | {
       kind: "traceData";
@@ -324,12 +361,15 @@ function readDeviceInfo(r: ByteReader): DeviceInfo {
   };
 }
 
-function readRepeaterStats(bytes: Uint8Array): RepeaterStats | null {
-  // The struct grew over releases; the first 48 bytes have been there since
-  // v1.0 and are the least a repeater sends.
+/**
+ * The body of a `statusResponse`. The first 48 bytes have been there since
+ * v1.0 and are the least a node sends; a repeater then adds receive air time
+ * and receive errors, a room the counts of posts stored and pushed.
+ */
+export function readNodeStats(bytes: Uint8Array, kind: "repeater" | "room"): NodeStats | null {
   if (bytes.length < 48) return null;
   const r = new ByteReader(bytes);
-  const stats: RepeaterStats = {
+  const stats: NodeStats = {
     batteryMv: r.u16(),
     txQueueLen: r.u16(),
     noiseFloor: r.i16(),
@@ -346,12 +386,140 @@ function readRepeaterStats(bytes: Uint8Array): RepeaterStats | null {
     lastSnr: r.i16() / 4,
     directDups: r.u16(),
     floodDups: r.u16(),
-    rxAirTimeSecs: 0,
-    recvErrors: 0,
+    rxAirTimeSecs: null,
+    recvErrors: null,
+    posted: null,
+    postPushes: null,
   };
-  if (r.remaining >= 4) stats.rxAirTimeSecs = r.u32();
-  if (r.remaining >= 4) stats.recvErrors = r.u32();
+  if (kind === "room") {
+    if (r.remaining >= 4) {
+      stats.posted = r.u16();
+      stats.postPushes = r.u16();
+    }
+  } else {
+    if (r.remaining >= 4) stats.rxAirTimeSecs = r.u32();
+    if (r.remaining >= 4) stats.recvErrors = r.u32();
+  }
   return stats;
+}
+
+/** The body of a `GetNeighbours` answer: how many there are in all, then this page. */
+export function readNeighbours(bytes: Uint8Array, prefixLength = PUB_KEY_PREFIX_SIZE): { total: number; neighbours: Neighbour[] } {
+  const r = new ByteReader(bytes);
+  const total = r.u16();
+  const count = r.u16();
+  const neighbours: Neighbour[] = [];
+  for (let i = 0; i < count && r.remaining >= prefixLength + 5; i++) {
+    neighbours.push({ prefix: r.take(prefixLength), heardSecsAgo: r.u32(), snr: snr(r.i8()) });
+  }
+  return { total, neighbours };
+}
+
+/** The body of a `GetAccessList` answer: seven bytes a client. */
+export function readAccessList(bytes: Uint8Array): AccessEntry[] {
+  const r = new ByteReader(bytes);
+  const entries: AccessEntry[] = [];
+  while (r.remaining >= PUB_KEY_PREFIX_SIZE + 1) {
+    entries.push({ prefix: r.take(PUB_KEY_PREFIX_SIZE), permissions: r.u8() });
+  }
+  return entries;
+}
+
+/** The body of a `GetOwnerInfo` answer: `version\nname\nowner`, where the owner text may hold newlines of its own. */
+export function readOwnerInfo(bytes: Uint8Array): { firmware: string; name: string; owner: string } {
+  const text = fromUtf8(bytes);
+  const first = text.indexOf("\n");
+  const second = first < 0 ? -1 : text.indexOf("\n", first + 1);
+  if (first < 0) return { firmware: text, name: "", owner: "" };
+  if (second < 0) return { firmware: text.slice(0, first), name: text.slice(first + 1), owner: "" };
+  return { firmware: text.slice(0, first), name: text.slice(first + 1, second), owner: text.slice(second + 1) };
+}
+
+/**
+ * The body of a `GetAvgMinMax` answer: the sensor's clock, then for each
+ * series its channel, LPP type, and min, max and mean. The numbers use the
+ * sensor's own widths and scales (`SensorMesh.cpp`), which are not quite
+ * Cayenne's: humidity is two bytes in tenths here, one byte in halves there.
+ */
+export function readAvgMinMax(bytes: Uint8Array): { time: number; series: SeriesSummary[] } {
+  const r = new ByteReader(bytes);
+  const time = r.u32();
+  const series: SeriesSummary[] = [];
+  while (r.remaining >= 2) {
+    const channel = r.u8();
+    const lppType = r.u8();
+    const size = seriesSize(lppType);
+    if (r.remaining < size * 3) break;
+    const scale = seriesScale(lppType);
+    const signed = SIGNED_SERIES.has(lppType);
+    const value = () => seriesValue(r.take(size), scale, signed);
+    series.push({ channel, lppType, min: value(), max: value(), avg: value() });
+  }
+  return { time, series };
+}
+
+const SIGNED_SERIES = new Set([0x79, 0x67, 0x86, 0x02, 0x03, 0x88, 0x71]);
+
+function seriesSize(type: number): number {
+  switch (type) {
+    case 0x88:
+      return 9;
+    case 0x86:
+    case 0x71:
+      return 6;
+    case 0x64:
+    case 0x76:
+    case 0x82:
+    case 0x83:
+    case 0x85:
+      return 4;
+    case 0x87:
+      return 3;
+    case 0x02:
+    case 0x03:
+    case 0x65:
+    case 0x67:
+    case 0x7d:
+    case 0x73:
+    case 0x68:
+    case 0x79:
+    case 0x74:
+    case 0x75:
+    case 0x84:
+    case 0x80:
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+function seriesScale(type: number): number {
+  switch (type) {
+    case 0x75:
+    case 0x82:
+    case 0x83:
+      return 1000;
+    case 0x74:
+    case 0x02:
+    case 0x03:
+      return 100;
+    case 0x67:
+    case 0x73:
+    case 0x68:
+      return 10;
+    default:
+      return 1;
+  }
+}
+
+/** Big-endian, as the sensor writes it; wider than four bytes has no single value. */
+function seriesValue(bytes: Uint8Array, scale: number, signed: boolean): number {
+  if (bytes.length > 4) return Number.NaN;
+  let v = 0;
+  for (const b of bytes) v = v * 256 + b;
+  const top = 2 ** (bytes.length * 8 - 1);
+  if (signed && v >= top) v -= top * 2;
+  return v / scale;
 }
 
 function readContactMessage(r: ByteReader, v3: boolean): ResponseFrame {
@@ -517,12 +685,12 @@ function decodePush(code: number, r: ByteReader): PushFrame | null {
       return { kind: "rawData", snr: snrValue, rssi, payload: r.rest() };
     }
     case Push.LoginSuccess: {
-      const permissions = r.u8();
+      const adminFlag = r.u8();
       const prefix = r.take(PUB_KEY_PREFIX_SIZE);
       const serverTime = r.remaining >= 4 ? r.u32() : null;
-      const acl = r.remaining >= 1 ? r.u8() : null;
+      const permissions = r.remaining >= 1 ? r.u8() : null;
       const firmwareLevel = r.remaining >= 1 ? r.u8() : null;
-      return { kind: "loginSuccess", permissions, prefix, serverTime, acl, firmwareLevel };
+      return { kind: "loginSuccess", adminFlag, prefix, serverTime, permissions, firmwareLevel };
     }
     case Push.LoginFail:
       r.skip(1);
@@ -530,8 +698,7 @@ function decodePush(code: number, r: ByteReader): PushFrame | null {
     case Push.StatusResponse: {
       r.skip(1);
       const prefix = r.take(PUB_KEY_PREFIX_SIZE);
-      const raw = r.rest();
-      return { kind: "statusResponse", prefix, stats: readRepeaterStats(raw), raw };
+      return { kind: "statusResponse", prefix, raw: r.rest() };
     }
     case Push.LogRxData:
       return { kind: "logRxData", snr: snr(r.i8()), rssi: r.i8(), raw: r.rest() };

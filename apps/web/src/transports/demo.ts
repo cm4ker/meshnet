@@ -6,7 +6,7 @@
  * say something every so often.
  */
 
-import { BaseTransport, ByteWriter, Cmd, fromHex, Push, Resp, TxtType, type Transport } from "@meshnet/meshcore";
+import { BaseTransport, ByteWriter, Cmd, fromHex, fromUtf8, Push, ReqType, Resp, TxtType, type Transport } from "@meshnet/meshcore";
 import type { Connector } from "./types.js";
 
 const SELF = fromHex("a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf");
@@ -61,6 +61,45 @@ const LINES = [
   "Ping me when you're in range",
 ];
 
+/** What the demo's repeater, room and sensor answer `get` with, and change on `set`. */
+function nodePrefs(p: Person): Record<string, string> {
+  return {
+    name: p.name,
+    lat: String(p.lat),
+    lon: String(p.lon),
+    "owner.info": p.type === 2 ? "Hill club|ask on #test" : "",
+    radio: "869.161,62.500,7,7",
+    tx: "22",
+    repeat: p.type === 2 ? "on" : "off",
+    "flood.max": "64",
+    "advert.interval": "0",
+    "flood.advert.interval": "47",
+    txdelay: "0.5",
+    "direct.txdelay": "0.3",
+    rxdelay: "0.0",
+    af: "1.0",
+    "guest.password": "guest",
+    "allow.read.only": "off",
+    powersaving: "off",
+  };
+}
+
+/** Repeaters the demo repeater hears direct: prefix, seconds ago, SNR in dB. */
+const NEIGHBOURS: [string, number, number][] = [
+  ["0a1b2c3d4e5f", 240, 7.25],
+  ["e07b55a1c2d3", 120, 9],
+  ["40c1d8e3a902", 660, 3.5],
+  ["b2d9e4f5a6b7", 2880, 1.25],
+  ["7fa013c4d5e6", 1560, -2.75],
+  ["5e21b0112233", 3840, -8.5],
+  ["18c6aa445566", 7860, -5.5],
+  ["c07d44778899", 11220, -12.25],
+  ["62e9f0aabbcc", 12720, 0.5],
+  ["0d4c7bddeeff", 18300, -14],
+  ["9aa3e1102030", 20400, 4.75],
+  ["f1b208405060", 28800, -10.25],
+];
+
 class DemoRadio extends BaseTransport {
   readonly kind = "ble" as const;
   readonly label = "MeshCore-demo";
@@ -68,6 +107,9 @@ class DemoRadio extends BaseTransport {
   private timers: ReturnType<typeof setTimeout>[] = [];
   private chatter: ReturnType<typeof setInterval> | null = null;
   private acks = 0x1000;
+  private prefs = new Map<Person, Record<string, string>>(PEOPLE.filter((p) => p.type >= 2).map((p) => [p, nodePrefs(p)]));
+  /** Nodes that took our admin password; only they answer the console. */
+  private admins = new Set<Person>();
 
   start(): void {
     this.queue.push(this.dm(PEOPLE[0]!, "Welcome to the demo mesh 👋"), this.channel(0, "Bob (bike)", "Public channel works too"));
@@ -106,6 +148,107 @@ class DemoRadio extends BaseTransport {
       .u32(Math.floor(Date.now() / 1000))
       .string(`${sender}: ${text}`)
       .toBytes();
+  }
+
+  private person(key: Uint8Array): Person | undefined {
+    return PEOPLE.find((p) => key.every((b, i) => b === p.key[i]));
+  }
+
+  private sent(tag: number, flood = false): Uint8Array {
+    return new ByteWriter().u8(Resp.Sent).u8(flood ? 1 : 0).u32(tag).u32(2500).toBytes();
+  }
+
+  /** A console reply: queued as a CliData message and announced, after the node's pause. */
+  private cliReply(p: Person, text: string, ms = 1100 + Math.random() * 900): void {
+    this.timers.push(
+      setTimeout(() => {
+        this.queue.push(
+          new ByteWriter()
+            .u8(Resp.ContactMsgRecvV3)
+            .i8(24)
+            .u16(0)
+            .bytes(p.key.subarray(0, 6))
+            .u8(p.hops)
+            .u8(TxtType.CliData)
+            .u32(Math.floor(Date.now() / 1000))
+            .string(text)
+            .toBytes(),
+        );
+        this.emitFrame(new Uint8Array([Push.MsgWaiting]));
+      }, ms),
+    );
+  }
+
+  private runCli(p: Person, command: string): string | null {
+    const prefs = this.prefs.get(p)!;
+    const get = /^get (\S+)$/.exec(command);
+    const set = /^set (\S+) (.*)$/.exec(command);
+    const now = new Date();
+    const clock = `${now.toISOString().slice(11, 16)} - ${now.getUTCDate()}/${now.getUTCMonth() + 1}/${now.getUTCFullYear()} UTC`;
+    if (command === "ver") return "v1.17.1 (Build: 14-Aug-2026)";
+    if (command === "board") return "Demo board";
+    if (command === "clock") return clock;
+    if (command === "clock sync") return `OK - clock set: ${clock}`;
+    if (command === "advert") return "OK - Advert sent";
+    if (command === "advert.zerohop") return "OK - zerohop advert sent";
+    if (command === "clear stats") return "OK";
+    if (command === "reboot") return null;
+    if (command === "neighbors") return NEIGHBOURS.slice(0, 5).map(([prefix, secs, snr]) => `${prefix.slice(0, 8)}:${secs}:${snr * 4}`).join("\n");
+    if (command === "powersaving") return prefs["powersaving"]!;
+    if (command === "powersaving on" || command === "powersaving off") {
+      prefs["powersaving"] = command.slice(12);
+      return command.endsWith("on") ? "on - After 2 minutes" : "off";
+    }
+    if (command.startsWith("password ")) return `password now: ${command.slice(9)}`;
+    if (command.startsWith("tempradio ")) return `OK - temp params for ${command.split(",").pop()} mins`;
+    if (command.startsWith("setperm ")) return "OK";
+    if (get) return get[1]! in prefs ? `> ${prefs[get[1]!]}` : `??: ${get[1]}`;
+    if (set) {
+      if (!(set[1]! in prefs)) return `unknown config: ${set[1]}`;
+      prefs[set[1]!] = set[2]!;
+      if (set[1] === "radio") return "OK - reboot to apply";
+      if (set[1] === "repeat") return `OK - repeat is now ${set[2] === "on" ? "ON" : "OFF"}`;
+      return "OK";
+    }
+    return "Unknown command";
+  }
+
+  private binary(p: Person, tag: number, req: Uint8Array): Uint8Array | null {
+    const w = new ByteWriter().u8(Push.BinaryResponse).u8(0).u32(tag);
+    switch (req[0]) {
+      case ReqType.GetNeighbours: {
+        const count = req[2] ?? 10;
+        const offset = (req[3] ?? 0) | ((req[4] ?? 0) << 8);
+        const order = req[5] ?? 0;
+        const sorted = [...NEIGHBOURS].sort((a, b) => (order === 0 ? a[1] - b[1] : order === 1 ? b[1] - a[1] : order === 2 ? b[2] - a[2] : a[2] - b[2]));
+        const page = sorted.slice(offset, offset + Math.min(count, 11));
+        w.u16(NEIGHBOURS.length).u16(page.length);
+        for (const [prefix, secs, snr] of page) w.bytes(fromHex(prefix)).u32(secs).i8(Math.round(snr * 4));
+        return w.toBytes();
+      }
+      case ReqType.GetAccessList:
+        if (!this.admins.has(p)) return null;
+        w.bytes(SELF.subarray(0, 6)).u8(3).bytes(PEOPLE[0]!.key.subarray(0, 6)).u8(3);
+        if (p.type !== 3) w.bytes(PEOPLE[1]!.key.subarray(0, 6)).u8(2).bytes(fromHex("91c2e0a1b2c3")).u8(1);
+        return w.toBytes();
+      case ReqType.GetOwnerInfo:
+        return w.string(`v1.17.1\n${p.name}\n${this.prefs.get(p)!["owner.info"]!.replace(/\|/g, "\n")}`).toBytes();
+      case ReqType.GetAvgMinMax: {
+        const span = (req[1] ?? 0) | ((req[2] ?? 0) << 8) | ((req[3] ?? 0) << 16);
+        const wide = Math.min(1, span / (7 * 86400));
+        const be = (v: number) => new Uint8Array([(v >> 8) & 0xff, v & 0xff]);
+        const series = (type: number, scale: number, min: number, max: number, avg: number) =>
+          w.u8(1).u8(type).bytes(be(Math.round(min * scale))).bytes(be(Math.round(max * scale))).bytes(be(Math.round(avg * scale)));
+        w.u32(Math.floor(Date.now() / 1000));
+        series(0x67, 10, 13.6 - 7 * wide, 14.4 + 7 * wide, 14.0 - 1.5 * wide);
+        series(0x68, 10, 69 - 20 * wide, 72 + 22 * wide, 70.5);
+        series(0x73, 10, 1012.1 - 14 * wide, 1012.5 + 7 * wide, 1012.3 - 4 * wide);
+        series(0x74, 100, 3.97 - 0.12 * wide, 3.98 + 0.08 * wide, 3.98 - 0.02 * wide);
+        return w.toBytes();
+      }
+      default:
+        return null;
+    }
   }
 
   async send(frame: Uint8Array): Promise<void> {
@@ -180,27 +323,78 @@ class DemoRadio extends BaseTransport {
       case Cmd.GetTuningParams:
         return [new ByteWriter().u8(Resp.TuningParams).u32(0).u32(1000).toBytes()];
       case Cmd.SendTxtMsg: {
+        if (frame[1] === TxtType.CliData) {
+          const p = this.person(frame.subarray(7, 13));
+          const text = fromUtf8(frame.subarray(13));
+          const tagged = /^([0-9a-f]{2})\|(.*)$/s.exec(text);
+          // Like the firmware: the console answers admins, and a stranger hears nothing.
+          if (p && this.prefs.has(p) && this.admins.has(p)) {
+            const reply = this.runCli(p, tagged ? tagged[2]! : text);
+            if (reply !== null) this.cliReply(p, tagged ? `${tagged[1]}|${reply}` : reply);
+          }
+          return [this.sent(0)];
+        }
         const tag = this.acks++;
         this.later(900 + Math.random() * 2000, new ByteWriter().u8(Push.SendConfirmed).u32(tag).u32(1400).toBytes());
         return [new ByteWriter().u8(Resp.Sent).u8(frame[2] === 0 ? 0 : 1).u32(tag).u32(3000).toBytes()];
       }
-      case Cmd.SendLogin:
-        this.later(1200, new ByteWriter().u8(Push.LoginSuccess).u8(1).bytes(frame.subarray(1, 7)).u32(Math.floor(Date.now() / 1000)).u8(0).u8(3).toBytes());
-        return [new ByteWriter().u8(Resp.Sent).u8(0).u32(this.acks++).u32(3000).toBytes()];
-      case Cmd.SendStatusReq:
-        this.later(
-          1500,
-          new ByteWriter()
-            .u8(Push.StatusResponse)
-            .u8(0)
-            .bytes(frame.subarray(1, 7))
-            .u16(4050).u16(0).u16(0xff9c & 0xffff).u16(0xffa6 & 0xffff)
-            .u32(12345).u32(11000).u32(3600).u32(86400 * 3)
-            .u32(200).u32(300).u32(6000).u32(4000)
-            .u16(2).u16(30).u16(5).u16(40).u32(7200).u32(12)
-            .toBytes(),
-        );
-        return [new ByteWriter().u8(Resp.Sent).u8(0).u32(this.acks++).u32(3000).toBytes()];
+      case Cmd.SendLogin: {
+        const p = this.person(frame.subarray(1, 33));
+        const password = fromUtf8(frame.subarray(33));
+        if (!p || !this.prefs.has(p)) return [new Uint8Array([Resp.Err, 2])];
+        if (password === "wrong" || (p.type === 4 && password === "guest")) {
+          this.later(1400, new ByteWriter().u8(Push.LoginFail).u8(0).bytes(p.key.subarray(0, 6)).toBytes());
+        } else {
+          // "guest" signs in as a guest (a room's guests may post); anything else, blank included, as admin.
+          const guest = password === "guest";
+          if (guest) this.admins.delete(p);
+          else this.admins.add(p);
+          // The repeater's clock runs 47 s behind, for the clock card.
+          const drift = p.type === 2 ? 47 : 2;
+          this.later(
+            1400,
+            new ByteWriter()
+              .u8(Push.LoginSuccess)
+              .u8(guest ? 0 : 1)
+              .bytes(p.key.subarray(0, 6))
+              .u32(Math.floor(Date.now() / 1000) - drift)
+              .u8(guest ? (p.type === 3 ? 2 : 0) : 3)
+              .u8(p.type === 2 ? 2 : 1)
+              .toBytes(),
+          );
+        }
+        return [new ByteWriter().u8(Resp.Sent).u8(0).bytes(p.key.subarray(0, 4)).u32(2500).toBytes()];
+      }
+      case Cmd.SendStatusReq: {
+        const p = this.person(frame.subarray(1, 33));
+        const room = p?.type === 3;
+        const hours = (Date.now() / 3_600_000) % 24;
+        const mv = room ? 4200 : Math.round(4050 + 80 * Math.sin((hours / 24) * Math.PI * 2) + Math.random() * 20);
+        const w = new ByteWriter()
+          .u8(Push.StatusResponse)
+          .u8(0)
+          .bytes(frame.subarray(1, 7))
+          .u16(mv)
+          .u16(Math.random() < 0.8 ? 0 : 2)
+          .u16((-112 + Math.round(Math.random() * 4)) & 0xffff)
+          .u16(-98 & 0xffff)
+          .u32(48213)
+          .u32(21907)
+          .u32(22080)
+          .u32(86400 * 12 + 4 * 3600)
+          .u32(19204)
+          .u32(2703)
+          .u32(41880)
+          .u32(6333)
+          .u16(0)
+          .u16(25)
+          .u16(88)
+          .u16(9412);
+        if (room) w.u16(184).u16(1203);
+        else w.u32(111_600).u32(12);
+        this.later(1500, w.toBytes());
+        return [this.sent(this.acks++)];
+      }
       case Cmd.SendTelemetryReq: {
         const prefix = frame.length > 4 ? frame.subarray(4, 10) : SELF.subarray(0, 6);
         this.later(
@@ -212,7 +406,14 @@ class DemoRadio extends BaseTransport {
             .bytes(new Uint8Array([1, 0x74, 0x01, 0x8e, 1, 0x67, 0x00, 0xd2, 2, 0x68, 0x5a]))
             .toBytes(),
         );
-        return frame.length > 4 ? [new ByteWriter().u8(Resp.Sent).u8(0).u32(this.acks++).u32(3000).toBytes()] : [];
+        return frame.length > 4 ? [this.sent(this.acks++)] : [];
+      }
+      case Cmd.SendBinaryReq: {
+        const p = this.person(frame.subarray(1, 33));
+        const tag = this.acks++;
+        const reply = p ? this.binary(p, tag, frame.subarray(33)) : null;
+        if (reply) this.later(1600, reply);
+        return [this.sent(tag, p?.hops === 0xff)];
       }
       case Cmd.SendPathDiscoveryReq:
         this.later(1800, new ByteWriter().u8(Push.PathDiscoveryResponse).u8(0).bytes(frame.subarray(2, 8)).u8(2).bytes(fromHex("a1b2")).u8(2).bytes(fromHex("b2a1")).toBytes());

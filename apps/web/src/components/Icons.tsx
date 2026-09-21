@@ -52,3 +52,6 @@ export const LinkOffIcon = icon('<path d="M10 14l4-4"/><path d="M8.5 15.5l-2 2a3
 export const MoreIcon = icon('<circle cx="6" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="18" cy="12" r="1.2" fill="currentColor"/>');
 export const LocationIcon = icon('<path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><circle cx="12" cy="10" r="2"/>');
 export const PowerIcon = icon('<path d="M12 3v8"/><path d="M6.5 6.5a8 8 0 1 0 11 0"/>');
+export const NodesIcon = icon('<circle cx="12" cy="5.5" r="2.5"/><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="18.5" cy="17.5" r="2.5"/><path d="M10.8 7.7 6.8 15.3M13.2 7.7l4 7.6M8 17.5h8"/>');
+export const LockIcon = icon('<rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>');
+export const DownIcon = icon('<path d="M12 5v14M6 13l6 6 6-6"/>');

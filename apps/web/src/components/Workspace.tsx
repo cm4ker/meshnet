@@ -1,15 +1,17 @@
 import type { ReactNode } from "react";
 import { useLink } from "../lib/link.js";
 import { useWide } from "../lib/layout.js";
-import { goSection, openContact, openConversation, useNav, type Section } from "../lib/nav.js";
+import { goSection, openContact, openConversation, openNode, useNav, type Section } from "../lib/nav.js";
 import { useSession } from "../lib/session.js";
 import { totalUnread } from "../lib/conversations.js";
 import { ChatList } from "./ChatList.js";
 import { ChatView } from "./ChatView.js";
 import { ContactCard } from "./ContactCard.js";
 import { ContactsList } from "./ContactsList.js";
-import { ChatIcon, ContactsIcon, LogIcon, RadioIcon, SettingsIcon } from "./Icons.js";
+import { ChatIcon, ContactsIcon, LogIcon, NodesIcon, RadioIcon, SettingsIcon } from "./Icons.js";
 import { LogView } from "./LogView.js";
+import { NodesList } from "./NodesList.js";
+import { NodeView } from "./node/NodeView.js";
 import { RadioView } from "./RadioView.js";
 import { SettingsView } from "./SettingsView.js";
 import { StatusBar } from "./StatusBar.js";
@@ -17,6 +19,7 @@ import { StatusBar } from "./StatusBar.js";
 const SECTIONS: { id: Section; label: string; icon: ReactNode }[] = [
   { id: "chats", label: "Chats", icon: <ChatIcon size={20} /> },
   { id: "contacts", label: "Contacts", icon: <ContactsIcon size={20} /> },
+  { id: "nodes", label: "Nodes", icon: <NodesIcon size={20} /> },
   { id: "radio", label: "Radio", icon: <RadioIcon size={20} /> },
   { id: "log", label: "Log", icon: <LogIcon size={20} /> },
   { id: "settings", label: "Settings", icon: <SettingsIcon size={20} /> },
@@ -62,7 +65,7 @@ export function Workspace() {
   ) : null;
 
   if (wide) {
-    const twoPane = nav.section === "chats" || nav.section === "contacts";
+    const twoPane = nav.section === "chats" || nav.section === "contacts" || nav.section === "nodes";
     return (
       <div className="app wide">
         {tabs}
@@ -72,6 +75,8 @@ export function Workspace() {
               <StatusBar />
               {nav.section === "chats" ? (
                 <ChatList selected={nav.conversation} onOpen={openConversation} />
+              ) : nav.section === "nodes" ? (
+                <NodesList selected={nav.node} onOpen={openNode} />
               ) : (
                 <ContactsList selected={nav.contact} onOpen={openContact} />
               )}
@@ -83,6 +88,12 @@ export function Workspace() {
                   <ChatView conversation={nav.conversation} />
                 ) : (
                   <Empty>Pick a conversation.</Empty>
+                )
+              ) : nav.section === "nodes" ? (
+                nav.node ? (
+                  <NodeView key={nav.node} nodeKey={nav.node} onClose={() => openNode(null)} />
+                ) : (
+                  <Empty>Pick a node, or add one with +.</Empty>
                 )
               ) : nav.contact ? (
                 <ContactCard contactKey={nav.contact} onClose={() => openContact(null)} />
@@ -108,6 +119,8 @@ export function Workspace() {
     screen = <ChatView conversation={nav.conversation} onBack={() => openConversation(null)} />;
   } else if (nav.section === "contacts" && nav.contact) {
     screen = <ContactCard contactKey={nav.contact} onClose={() => openContact(null)} />;
+  } else if (nav.section === "nodes" && nav.node) {
+    screen = <NodeView key={nav.node} nodeKey={nav.node} onClose={() => openNode(null)} />;
   } else {
     screen = (
       <>
@@ -117,13 +130,15 @@ export function Workspace() {
           <ChatList selected={null} onOpen={openConversation} />
         ) : nav.section === "contacts" ? (
           <ContactsList selected={null} onOpen={openContact} />
+        ) : nav.section === "nodes" ? (
+          <NodesList selected={null} onOpen={openNode} />
         ) : (
           <SectionBody section={nav.section} />
         )}
       </>
     );
   }
-  const detail = (nav.section === "chats" && nav.conversation) || (nav.section === "contacts" && nav.contact);
+  const detail = (nav.section === "chats" && nav.conversation) || (nav.section === "contacts" && nav.contact) || (nav.section === "nodes" && nav.node);
   return (
     <div className={["app", "narrow", detail ? "detail" : ""].join(" ")}>
       <main className="content">{screen}</main>

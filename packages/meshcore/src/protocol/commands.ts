@@ -9,11 +9,13 @@ import { ByteWriter, unixNow, utf8 } from "./bytes.js";
 import {
   APP_PROTOCOL_VERSION,
   Cmd,
+  MAX_PASSWORD_LEN,
   MAX_PATH_SIZE,
   MAX_TEXT_LEN,
   OUT_PATH_UNKNOWN,
   PUB_KEY_PREFIX_SIZE,
   PUB_KEY_SIZE,
+  ReqType,
   TxtType,
 } from "./codes.js";
 
@@ -273,7 +275,60 @@ export function setChannel(index: number, name: string, secret: Uint8Array): Uin
 }
 
 export function sendLogin(publicKey: Uint8Array, password: string): Uint8Array {
-  return new ByteWriter().u8(Cmd.SendLogin).bytes(key(publicKey)).string(password).toBytes();
+  const bytes = utf8(password);
+  if (bytes.length > MAX_PASSWORD_LEN) {
+    throw new Error(`a password is at most ${MAX_PASSWORD_LEN} bytes; the node would only check the first ${MAX_PASSWORD_LEN}`);
+  }
+  return new ByteWriter().u8(Cmd.SendLogin).bytes(key(publicKey)).bytes(bytes).toBytes();
+}
+
+/**
+ * A console command for a repeater, room or sensor. The radio stamps it with
+ * its own clock and expects no ack; the answer comes back as a contact
+ * message of type `CliData`.
+ */
+export function sendCliCommand(recipientPrefix: Uint8Array, text: string): Uint8Array {
+  return sendTextMessage(recipientPrefix, text, { txtType: TxtType.CliData });
+}
+
+function random4(): Uint8Array {
+  const out = new Uint8Array(4);
+  globalThis.crypto.getRandomValues(out);
+  return out;
+}
+
+/**
+ * `GetNeighbours`, version 0: a page of the repeaters this one hears direct.
+ * The answer holds as many as fit in 130 bytes, so eleven with six-byte
+ * prefixes. The random tail keeps two identical requests from looking like
+ * one packet to the mesh.
+ */
+export function neighboursRequest(
+  options: { count?: number; offset?: number; order?: number; prefixLength?: number; random?: Uint8Array } = {},
+): Uint8Array {
+  return new ByteWriter()
+    .u8(ReqType.GetNeighbours)
+    .u8(0)
+    .u8(options.count ?? 10)
+    .u16(options.offset ?? 0)
+    .u8(options.order ?? 0)
+    .u8(options.prefixLength ?? PUB_KEY_PREFIX_SIZE)
+    .bytes(options.random ?? random4())
+    .toBytes();
+}
+
+/** `GetAccessList`; the two zero bytes are reserved query parameters the node insists on. */
+export function accessListRequest(): Uint8Array {
+  return new ByteWriter().u8(ReqType.GetAccessList).u8(0).u8(0).toBytes();
+}
+
+export function ownerInfoRequest(): Uint8Array {
+  return new ByteWriter().u8(ReqType.GetOwnerInfo).toBytes();
+}
+
+/** A sensor's min, max and mean for each series over one window, given as seconds ago. */
+export function avgMinMaxRequest(startSecsAgo: number, endSecsAgo = 0): Uint8Array {
+  return new ByteWriter().u8(ReqType.GetAvgMinMax).u32(startSecsAgo).u32(endSecsAgo).u8(0).u8(0).toBytes();
 }
 
 export function logout(publicKey: Uint8Array): Uint8Array {

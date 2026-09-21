@@ -16,7 +16,7 @@ apps/mobile         Capacitor 8 shell: iOS and Android; BLE through a plugin
 - Direct messages with delivery: sent, acknowledged (with the round trip), unconfirmed with a retry, failed.
 - Channel messages, with the sender's name split off the `Name: text` the firmware puts on the air.
 - Contacts: favourites, rename, forget route, path discovery, share on air, telemetry (Cayenne LPP decoded), remove.
-- Repeaters and rooms: sign in, sign out, request status (the repeater's stats decoded).
+- Nodes: the repeaters, rooms and sensors you manage, remotely through your radio. Sign in (the password kept in the system's credential store on the desktop, the phone's secure storage on a phone, the browser's storage in a browser); status with a week's trend of battery and noise floor; the neighbours a repeater hears; its settings as forms over its console, with a timed trial before a radio change; who may sign in, and as what; the console itself; a sensor's min, max and mean over a window. The radio carries one request to a remote node at a time, so they queue, visibly, and nothing asks the air on its own.
 - The radio's own settings: name, position, frequency/bandwidth/SF/CR with presets, transmit power, channels (name and 128-bit key), auto-add and telemetry policy, tuning, clock, adverts (zero-hop or flood), reboot, factory reset.
 - A log of pushes and, when asked, every frame in hex.
 - A demo radio (`?demo` in a browser, or any development build) for a look around with no hardware.

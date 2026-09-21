@@ -176,3 +176,37 @@ export function decodeLpp(bytes: Uint8Array): LppReading[] {
   }
   return out;
 }
+
+const TYPE_NAMES: Record<number, Exclude<LppReading["type"], "unknown">> = {
+  0x00: "digitalIn",
+  0x01: "digitalOut",
+  0x02: "analogIn",
+  0x03: "analogOut",
+  0x64: "genericSensor",
+  0x65: "luminosity",
+  0x66: "presence",
+  0x67: "temperature",
+  0x68: "humidity",
+  0x71: "accelerometer",
+  0x73: "barometer",
+  0x74: "voltage",
+  0x75: "current",
+  0x76: "frequency",
+  0x78: "percentage",
+  0x79: "altitude",
+  0x7d: "concentration",
+  0x80: "power",
+  0x82: "distance",
+  0x83: "energy",
+  0x84: "direction",
+  0x85: "unixTime",
+  0x86: "gyrometer",
+  0x87: "colour",
+  0x88: "gps",
+  0x8e: "switch",
+};
+
+/** The name `decodeLpp` gives a type code, or `unknown`. */
+export function lppTypeName(code: number): LppReading["type"] {
+  return TYPE_NAMES[code] ?? "unknown";
+}
