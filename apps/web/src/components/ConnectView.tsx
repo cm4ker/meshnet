@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { connectWith, useLink } from "../lib/link.js";
 import { shell } from "../lib/platform.js";
-import { autoConnectWanted, connectors, lastLink, setAutoConnect, type Connector, type FoundDevice } from "../transports/index.js";
+import { autoConnectWanted, connectors, lastLink, needsPairing, setAutoConnect, type Connector, type FoundDevice } from "../transports/index.js";
 import { Button } from "../ui/Button.js";
+import { Prompt } from "../ui/Dialog.js";
 import { Toggle } from "../ui/Field.js";
 import { BluetoothIcon, UsbIcon } from "./Icons.js";
 
@@ -102,9 +103,11 @@ function ConnectorPanel({ connector, lastDevice }: { connector: Connector; lastD
     };
   }, [connector]);
 
+  const scanAbort = useRef<AbortController | null>(null);
   useEffect(() => {
     if (connector.mode !== "scan" || !connector.scan) return;
     const abort = new AbortController();
+    scanAbort.current = abort;
     setScanning(true);
     setScanError(null);
     connector
@@ -114,7 +117,30 @@ function ConnectorPanel({ connector, lastDevice }: { connector: Connector; lastD
     return () => abort.abort();
   }, [connector, scanRun]);
 
+  const [pinFor, setPinFor] = useState<FoundDevice | null>(null);
+  const [pinError, setPinError] = useState<string | null>(null);
+
   const connect = (device: FoundDevice | null) => {
+    // The scan stops first: a radio being connected to is not one to keep listening for.
+    scanAbort.current?.abort();
+    setScanning(false);
+    void connectWith(connector, device).catch((error: unknown) => {
+      // A radio that wants a bond: ask for the PIN on its screen, pair, and try again.
+      if (device && connector.pair && needsPairing(error)) setPinFor(device);
+    });
+  };
+
+  const pairAndConnect = async (pin: string) => {
+    const device = pinFor;
+    if (!device || !connector.pair) return;
+    setPinError(null);
+    try {
+      await connector.pair(device, pin);
+    } catch (error) {
+      setPinError((error as Error).message);
+      return;
+    }
+    setPinFor(null);
     void connectWith(connector, device).catch(() => undefined);
   };
 
@@ -147,6 +173,20 @@ function ConnectorPanel({ connector, lastDevice }: { connector: Connector; lastD
       ) : null}
 
       {scanError ? <p className="connect-error">{scanError}</p> : null}
+
+      <Prompt
+        open={pinFor !== null}
+        title={`Pair with ${pinFor?.name ?? "the radio"}`}
+        label="PIN shown on the radio's screen"
+        placeholder="6 digits"
+        submitLabel="Pair"
+        onCancel={() => {
+          setPinFor(null);
+          setPinError(null);
+        }}
+        onSubmit={pairAndConnect}
+      />
+      {pinError && pinFor ? <p className="connect-error">{pinError}</p> : null}
 
       <div className="row-actions">
         {connector.mode === "picker" ? (

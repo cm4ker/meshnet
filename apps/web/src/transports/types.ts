@@ -27,6 +27,25 @@ export interface Connector {
   remembered(): Promise<FoundDevice[]>;
   /** `null` asks the picker; a device connects to it. */
   connect(device: FoundDevice | null): Promise<Transport>;
+  /**
+   * Bonds with a radio using the PIN on its screen, where the platform lets
+   * the client do that itself. A `connect` that fails with `needsPairing`
+   * set is the cue to ask for the PIN and call this.
+   */
+  pair?(device: FoundDevice, pin: string): Promise<void>;
+}
+
+/** A connect failure the client can do something about: pair, then try again. */
+export class NeedsPairingError extends Error {
+  readonly needsPairing = true;
+  constructor(message: string) {
+    super(message);
+    this.name = "NeedsPairingError";
+  }
+}
+
+export function needsPairing(error: unknown): boolean {
+  return error instanceof NeedsPairingError || /NEEDS_PAIRING|insufficient auth|ProtocolError/i.test(String((error as Error)?.message ?? error));
 }
 
 export interface RememberedLink {

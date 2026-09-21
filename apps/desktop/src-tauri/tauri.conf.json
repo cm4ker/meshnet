@@ -5,7 +5,7 @@
   "identifier": "dev.cm4ker.meshnet",
   "build": {
     "frontendDist": "../../web/dist",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:5180",
     "beforeDevCommand": "pnpm --filter @meshnet/meshcore build && pnpm --filter @meshnet/web dev",
     "beforeBuildCommand": "pnpm --filter @meshnet/meshcore build && pnpm --filter @meshnet/web build"
   },

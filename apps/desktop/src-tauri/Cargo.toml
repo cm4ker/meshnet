@@ -21,6 +21,34 @@ tauri-plugin-blec = "0.14"
 tauri-plugin-serialplugin = "3"
 # Links in messages open in the system browser, not in this window.
 tauri-plugin-opener = "2"
+# What the BLE and serial plugins say, on stderr when `RUST_LOG` is set. A
+# release build is a windowed application with no stderr to speak of, so this
+# costs nothing there; a debug build run from a terminal shows the link.
+log = "0.4"
+env_logger = "0.11"
+serde = { version = "1", features = ["derive"] }
+
+# On Windows the BLE link is the platform's own GATT API, not btleplug: the
+# firmware's UART characteristics demand an encrypted link, and btleplug's
+# characteristic discovery on such a service times out and wedges, whereas
+# WinRT raises the link to the bond's encryption on the first protected
+# operation and carries on. See `winble.rs`.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Devices_Bluetooth",
+    "Devices_Bluetooth_Advertisement",
+    "Devices_Bluetooth_GenericAttributeProfile",
+    "Devices_Enumeration",
+    "Foundation",
+    "Foundation_Collections",
+    "Storage_Streams",
+    # The BLE worker is a single-threaded apartment with a message pump; see `winble.rs`.
+    "Win32_Foundation",
+    "Win32_System_WinRT",
+    "Win32_UI_WindowsAndMessaging",
+] }
+# `IAsyncOperation` and `AsyncStatus` live here since windows 0.60.
+windows-future = "0.2"
 
 # A shipped binary is built once and run for months, so the slow settings are
 # the right ones here.

@@ -1,0 +1,555 @@
+//! Bluetooth LE through Windows' own GATT API.
+//!
+//! The MeshCore firmware guards its UART characteristics with
+//! `SECMODE_ENC_WITH_MITM`: they can only be used over a link encrypted with a
+//! bond made by PIN pairing. Windows handles that on its own — the first
+//! protected operation on a bonded device raises the link — but btleplug's
+//! discovery of such a service on Windows times out and leaves the plugin
+//! wedged, so on this platform the shell talks to WinRT directly.
+//!
+//! All of it happens on one worker thread that is a single-threaded apartment
+//! with a message pump. Discovery of the encrypted service was found to hang
+//! forever from a thread-pool (multi-threaded apartment) thread and to answer
+//! at once from an apartment thread, which is what the PowerShell probe that
+//! first got an answer out of the radio was running on. The worker owns the
+//! WinRT objects; commands send it closures and await the answer.
+//!
+//! Frames arrive on a `Channel` the page hands to `connect`; a drop is
+//! announced by an event. Every operation has a deadline, so a stack that
+//! goes quiet is reported rather than waited on forever.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
+use tauri::ipc::Channel;
+use tauri::{AppHandle, Emitter, State};
+use windows::core::{RuntimeType, GUID};
+use windows::Devices::Bluetooth::Advertisement::{
+    BluetoothLEAdvertisementReceivedEventArgs, BluetoothLEAdvertisementWatcher, BluetoothLEScanningMode,
+};
+use windows::Devices::Bluetooth::GenericAttributeProfile::{
+    GattCharacteristic, GattClientCharacteristicConfigurationDescriptorValue, GattCommunicationStatus,
+    GattDeviceService, GattValueChangedEventArgs,
+};
+use windows::core::HSTRING;
+use windows::Devices::Bluetooth::{BluetoothCacheMode, BluetoothConnectionStatus, BluetoothLEDevice};
+use windows::Devices::Enumeration::{
+    DeviceInformationCustomPairing, DevicePairingKinds, DevicePairingProtectionLevel, DevicePairingRequestedEventArgs,
+    DevicePairingResultStatus, DeviceUnpairingResultStatus,
+};
+use windows::Foundation::TypedEventHandler;
+use windows::Storage::Streams::{DataReader, DataWriter};
+use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_SINGLETHREADED};
+use windows::Win32::UI::WindowsAndMessaging::{DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE};
+use windows_future::{AsyncStatus, IAsyncOperation};
+
+const SERVICE: GUID = GUID::from_u128(0x6e400001_b5a3_f393_e0a9_e50e24dcca9e);
+const RX: GUID = GUID::from_u128(0x6e400002_b5a3_f393_e0a9_e50e24dcca9e);
+const TX: GUID = GUID::from_u128(0x6e400003_b5a3_f393_e0a9_e50e24dcca9e);
+const NAME_PREFIX: &str = "MeshCore-";
+const GATT_DEADLINE: Duration = Duration::from_secs(20);
+
+/// The event the page listens to for a dropped link.
+pub const CLOSED_EVENT: &str = "winble:closed";
+
+struct Link {
+    device: BluetoothLEDevice,
+    rx: GattCharacteristic,
+    tx: GattCharacteristic,
+    /// Event registration tokens, which this crate version hands out as plain integers.
+    value_token: i64,
+    status_token: i64,
+}
+
+/// What lives on the worker thread and nowhere else.
+#[derive(Default)]
+struct Worker {
+    link: Option<Link>,
+}
+
+type Job = Box<dyn FnOnce(&mut Worker) + Send + 'static>;
+
+pub struct WinBle {
+    jobs: Mutex<Sender<Job>>,
+    /// Scans run on their own thread, so a scan in progress never holds up a
+    /// frame; this is how a scan is told to stop early.
+    scanning: Arc<AtomicBool>,
+    /// Scans are serialised among themselves: one watcher at a time.
+    scan_lock: Arc<Mutex<()>>,
+}
+
+impl Default for WinBle {
+    fn default() -> Self {
+        let (sender, receiver) = mpsc::channel::<Job>();
+        std::thread::Builder::new()
+            .name("winble".into())
+            .spawn(move || worker_main(receiver))
+            .expect("the BLE worker thread");
+        Self {
+            jobs: Mutex::new(sender),
+            scanning: Arc::new(AtomicBool::new(false)),
+            scan_lock: Arc::new(Mutex::new(())),
+        }
+    }
+}
+
+fn worker_main(jobs: mpsc::Receiver<Job>) {
+    // SAFETY: called once, first thing, on a thread this module owns.
+    if let Err(error) = unsafe { RoInitialize(RO_INIT_SINGLETHREADED) } {
+        log::error!("winble: RoInitialize failed: {error}");
+    }
+    let mut worker = Worker::default();
+    loop {
+        match jobs.recv_timeout(Duration::from_millis(10)) {
+            Ok(job) => job(&mut worker),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+        pump();
+    }
+}
+
+/// Delivers whatever the apartment has queued: completions and events for the objects it owns.
+fn pump() {
+    // SAFETY: plain message-loop calls on the thread that owns the queue.
+    unsafe {
+        let mut msg = MSG::default();
+        while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+}
+
+/// Runs `f` on the worker and awaits its answer.
+async fn on_worker<T, F>(state: &WinBle, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&mut Worker) -> Result<T, String> + Send + 'static,
+{
+    let (answer, waiting) = mpsc::channel::<Result<T, String>>();
+    state
+        .jobs
+        .lock()
+        .map_err(|_| "worker lock")?
+        .send(Box::new(move |worker| {
+            let _ = answer.send(f(worker));
+        }))
+        .map_err(|_| "the BLE worker is gone")?;
+    tauri::async_runtime::spawn_blocking(move || waiting.recv().map_err(|_| "the BLE worker dropped the job".to_string())?)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Found {
+    /// Twelve hex digits, no separators.
+    address: String,
+    name: String,
+    rssi: i16,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Connected {
+    name: String,
+}
+
+fn hex_address(address: u64) -> String {
+    format!("{address:012X}")
+}
+
+fn parse_address(text: &str) -> Result<u64, String> {
+    let clean: String = text.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+    u64::from_str_radix(&clean, 16).map_err(|_| format!("not a Bluetooth address: {text}"))
+}
+
+fn err(context: &str, error: windows::core::Error) -> String {
+    format!("{context}: {} (0x{:08X})", error.message(), error.code().0 as u32)
+}
+
+/// Waits for a WinRT operation on the worker, pumping the apartment meanwhile,
+/// but not past the deadline: a stack that never completes is cancelled and
+/// reported, with how long it took to give up.
+fn wait<T: RuntimeType + 'static>(op: IAsyncOperation<T>, what: &str) -> Result<T, String> {
+    let started = Instant::now();
+    loop {
+        let status = op.Status().map_err(|e| err(what, e))?;
+        match status {
+            AsyncStatus::Started => {
+                if started.elapsed() > GATT_DEADLINE {
+                    let _ = op.Cancel();
+                    log::warn!("winble: {what} gave no answer in {:?}", started.elapsed());
+                    return Err(format!("{what}: Windows gave no answer in {} s", GATT_DEADLINE.as_secs()));
+                }
+                pump();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            AsyncStatus::Completed => {
+                log::debug!("winble: {what} done in {:?}", started.elapsed());
+                return op.GetResults().map_err(|e| err(what, e));
+            }
+            _ => {
+                let code = op.ErrorCode().map(|c| c.0 as u32).unwrap_or(0);
+                // 0x8065xxxx is the ATT error facility; 5, 8 and 0xF are the
+                // radio saying the link is not encrypted or authenticated —
+                // it is not paired with this computer, or no longer trusts
+                // the bond.
+                let hint = if code & 0xFFFF_0000 == 0x8065_0000 && matches!(code & 0xFFFF, 0x05 | 0x08 | 0x0F) {
+                    " NEEDS_PAIRING"
+                } else {
+                    ""
+                };
+                return Err(format!("{what}: {status:?} 0x{code:08X}{hint}"));
+            }
+        }
+    }
+}
+
+fn scan(timeout_ms: u64, keep_going: &AtomicBool) -> Result<Vec<Found>, String> {
+    let found = std::sync::Arc::new(Mutex::new(std::collections::HashMap::<u64, Found>::new()));
+    let watcher = BluetoothLEAdvertisementWatcher::new().map_err(|e| err("watcher", e))?;
+    watcher
+        .SetScanningMode(BluetoothLEScanningMode::Active)
+        .map_err(|e| err("scanning mode", e))?;
+    let sink = found.clone();
+    let token = watcher
+        .Received(&TypedEventHandler::new(
+            move |_: windows::core::Ref<BluetoothLEAdvertisementWatcher>,
+                  args: windows::core::Ref<BluetoothLEAdvertisementReceivedEventArgs>| {
+                let Some(args) = args.as_ref() else { return Ok(()) };
+                let address = args.BluetoothAddress()?;
+                let rssi = args.RawSignalStrengthInDBm()?;
+                let advert = args.Advertisement()?;
+                let name = advert.LocalName().map(|n| n.to_string()).unwrap_or_default();
+                let has_service = advert
+                    .ServiceUuids()
+                    .map(|uuids| uuids.into_iter().any(|u| u == SERVICE))
+                    .unwrap_or(false);
+                let mut map = sink.lock().expect("scan lock");
+                match map.entry(address) {
+                    std::collections::hash_map::Entry::Occupied(mut e) => {
+                        let f = e.get_mut();
+                        f.rssi = rssi;
+                        if f.name.is_empty() && !name.is_empty() {
+                            f.name = name;
+                        }
+                    }
+                    std::collections::hash_map::Entry::Vacant(v) => {
+                        if has_service || name.starts_with(NAME_PREFIX) {
+                            v.insert(Found { address: hex_address(address), name, rssi });
+                        }
+                    }
+                }
+                Ok(())
+            },
+        ))
+        .map_err(|e| err("watch", e))?;
+    watcher.Start().map_err(|e| err("scan start", e))?;
+    let until = Instant::now() + Duration::from_millis(timeout_ms.clamp(500, 30_000));
+    while Instant::now() < until && keep_going.load(Ordering::Relaxed) {
+        pump();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let _ = watcher.Stop();
+    let _ = watcher.RemoveReceived(token);
+    // A scan response with the name can land after the first advert; give it a moment.
+    let until = Instant::now() + Duration::from_millis(300);
+    while Instant::now() < until {
+        pump();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let map = found.lock().expect("scan lock");
+    let mut list: Vec<Found> = map.values().filter(|f| !f.name.is_empty()).cloned().collect();
+    list.sort_by(|a, b| b.rssi.cmp(&a.rssi));
+    Ok(list)
+}
+
+/// Radios advertising nearby, listened for over `timeout_ms`, or until `winble_stop_scan`.
+#[tauri::command]
+pub async fn winble_scan(state: State<'_, WinBle>, timeout_ms: u64) -> Result<Vec<Found>, String> {
+    let keep_going = state.scanning.clone();
+    let lock = state.scan_lock.clone();
+    keep_going.store(true, Ordering::Relaxed);
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<Found>, String> {
+        let _one_at_a_time = lock.lock().map_err(|_| "scan lock")?;
+        // Its own apartment: the watcher's events are delivered by its pump.
+        // SAFETY: first thing on this thread-pool thread; a second init is reported, not fatal.
+        let _ = unsafe { RoInitialize(RO_INIT_SINGLETHREADED) };
+        scan(timeout_ms, &keep_going)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Ends a scan in progress, so the adapter is free for a connection at once.
+#[tauri::command]
+pub async fn winble_stop_scan(state: State<'_, WinBle>) -> Result<(), String> {
+    state.scanning.store(false, Ordering::Relaxed);
+    Ok(())
+}
+
+fn find_service(device: &BluetoothLEDevice) -> Result<GattDeviceService, String> {
+    let result = wait(
+        device
+            .GetGattServicesWithCacheModeAsync(BluetoothCacheMode::Uncached)
+            .map_err(|e| err("services", e))?,
+        "service discovery",
+    )?;
+    let status = result.Status().map_err(|e| err("services", e))?;
+    if status != GattCommunicationStatus::Success {
+        return Err(format!("service discovery: {status:?}"));
+    }
+    let list = result.Services().map_err(|e| err("services", e))?;
+    let mut uuids = Vec::new();
+    for service in &list {
+        let uuid = service.Uuid().map_err(|e| err("services", e))?;
+        uuids.push(format!("{uuid:?}"));
+        if uuid == SERVICE {
+            log::debug!("winble: services: {}", uuids.join(", "));
+            return Ok(service);
+        }
+    }
+    Err(format!("this radio has no MeshCore UART service (it offers {})", uuids.join(", ")))
+}
+
+fn characteristics_in(
+    service: &GattDeviceService,
+    mode: BluetoothCacheMode,
+) -> Result<(Option<GattCharacteristic>, Option<GattCharacteristic>), String> {
+    let result = wait(
+        service.GetCharacteristicsWithCacheModeAsync(mode).map_err(|e| err("characteristics", e))?,
+        "characteristic discovery",
+    )?;
+    let status = result.Status().map_err(|e| err("characteristics", e))?;
+    if status != GattCommunicationStatus::Success {
+        return Err(format!("characteristic discovery: {status:?}. NEEDS_PAIRING"));
+    }
+    let mut rx = None;
+    let mut tx = None;
+    for c in &result.Characteristics().map_err(|e| err("characteristics", e))? {
+        let uuid = c.Uuid().map_err(|e| err("characteristics", e))?;
+        if uuid == RX {
+            rx = Some(c);
+        } else if uuid == TX {
+            tx = Some(c);
+        }
+    }
+    Ok((rx, tx))
+}
+
+/// The UART characteristics, from Windows' cache of the service first.
+///
+/// Asking the radio itself (`Uncached`) for the characteristics of a service
+/// that demands encryption never returns on this stack once the device is
+/// bonded — the encryption it starts in the middle of the discovery is never
+/// finished — while the cache Windows filled at pairing answers at once and
+/// the subscribe that follows raises the link without trouble. The radio is
+/// only asked when the cache has nothing, which is the case before a bond.
+fn find_characteristics(service: &GattDeviceService) -> Result<(GattCharacteristic, GattCharacteristic), String> {
+    if let (Some(rx), Some(tx)) = characteristics_in(service, BluetoothCacheMode::Cached)? {
+        log::debug!("winble: characteristics from the cache");
+        return Ok((rx, tx));
+    }
+    match characteristics_in(service, BluetoothCacheMode::Uncached)? {
+        (Some(rx), Some(tx)) => Ok((rx, tx)),
+        _ => Err("the UART service is missing its RX or TX characteristic".into()),
+    }
+}
+
+fn close_link(link: Link) {
+    let _ = link.tx.RemoveValueChanged(link.value_token);
+    let _ = link.device.RemoveConnectionStatusChanged(link.status_token);
+    if let Ok(op) = link
+        .tx
+        .WriteClientCharacteristicConfigurationDescriptorAsync(GattClientCharacteristicConfigurationDescriptorValue::None)
+    {
+        let _ = wait(op, "unsubscribe");
+    }
+    let _ = link.device.Close();
+    log::info!("winble: link closed");
+}
+
+fn open_link(app: AppHandle, mac: u64, address: &str, on_frame: Channel<Vec<u8>>) -> Result<Link, String> {
+    let device = wait(
+        BluetoothLEDevice::FromBluetoothAddressAsync(mac).map_err(|e| err("device", e))?,
+        "device lookup",
+    )?;
+    let name = device.Name().map(|n| n.to_string()).unwrap_or_default();
+    log::info!(
+        "winble: connecting to {name} ({address}), status {:?}",
+        device.ConnectionStatus().map(|s| s.0).unwrap_or(-1)
+    );
+
+    let service = find_service(&device)?;
+    let (rx, tx) = find_characteristics(&service)?;
+    log::debug!("winble: characteristics found");
+
+    let sink = on_frame;
+    let value_token = tx
+        .ValueChanged(&TypedEventHandler::new(
+            move |_: windows::core::Ref<GattCharacteristic>, args: windows::core::Ref<GattValueChangedEventArgs>| {
+                let Some(args) = args.as_ref() else { return Ok(()) };
+                let buffer = args.CharacteristicValue()?;
+                let len = buffer.Length()? as usize;
+                let reader = DataReader::FromBuffer(&buffer)?;
+                let mut bytes = vec![0u8; len];
+                reader.ReadBytes(&mut bytes)?;
+                log::trace!("winble: <- {len} bytes");
+                let _ = sink.send(bytes);
+                Ok(())
+            },
+        ))
+        .map_err(|e| err("notify", e))?;
+
+    let status = wait(
+        tx.WriteClientCharacteristicConfigurationDescriptorAsync(GattClientCharacteristicConfigurationDescriptorValue::Notify)
+            .map_err(|e| err("subscribe", e))?,
+        "subscribe",
+    )?;
+    if status != GattCommunicationStatus::Success {
+        let _ = tx.RemoveValueChanged(value_token);
+        // `ProtocolError` here is the radio refusing an unencrypted link: it
+        // is not paired with this computer, or no longer trusts the bond.
+        return Err(format!("subscribe: {status:?}. NEEDS_PAIRING"));
+    }
+
+    let status_token = device
+        .ConnectionStatusChanged(&TypedEventHandler::new(
+            move |sender: windows::core::Ref<BluetoothLEDevice>, _: windows::core::Ref<windows::core::IInspectable>| {
+                if let Some(device) = sender.as_ref() {
+                    if device.ConnectionStatus()? == BluetoothConnectionStatus::Disconnected {
+                        let _ = app.emit(CLOSED_EVENT, "Bluetooth device disconnected");
+                    }
+                }
+                Ok(())
+            },
+        ))
+        .map_err(|e| err("status", e))?;
+
+    log::info!("winble: link up to {name}");
+    Ok(Link { device, rx, tx, value_token, status_token })
+}
+
+/// Bonds with the radio using the PIN its screen shows (or its configured
+/// one). A bond that already exists is dropped first, since the only reason to
+/// be here with one is that the radio no longer honours it.
+fn pair(mac: u64, pin: &str) -> Result<String, String> {
+    let device = wait(
+        BluetoothLEDevice::FromBluetoothAddressAsync(mac).map_err(|e| err("device", e))?,
+        "device lookup",
+    )?;
+    let name = device.Name().map(|n| n.to_string()).unwrap_or_default();
+    let pairing = device
+        .DeviceInformation()
+        .and_then(|i| i.Pairing())
+        .map_err(|e| err("pairing", e))?;
+    if pairing.IsPaired().map_err(|e| err("pairing", e))? {
+        log::info!("winble: dropping the old bond with {name}");
+        let result = wait(pairing.UnpairAsync().map_err(|e| err("unpair", e))?, "unpair")?;
+        let status = result.Status().map_err(|e| err("unpair", e))?;
+        if status != DeviceUnpairingResultStatus::Unpaired {
+            return Err(format!("unpair: {status:?}"));
+        }
+    }
+    let custom: DeviceInformationCustomPairing = pairing.Custom().map_err(|e| err("pairing", e))?;
+    let pin = HSTRING::from(pin.trim());
+    let token = custom
+        .PairingRequested(&TypedEventHandler::new(
+            move |_: windows::core::Ref<DeviceInformationCustomPairing>, args: windows::core::Ref<DevicePairingRequestedEventArgs>| {
+                let Some(args) = args.as_ref() else { return Ok(()) };
+                let kind = args.PairingKind()?;
+                log::debug!("winble: pairing asks for {kind:?}");
+                if kind == DevicePairingKinds::ProvidePin {
+                    args.AcceptWithPin(&pin)?;
+                } else {
+                    args.Accept()?;
+                }
+                Ok(())
+            },
+        ))
+        .map_err(|e| err("pairing", e))?;
+    let kinds = DevicePairingKinds::ProvidePin | DevicePairingKinds::ConfirmOnly | DevicePairingKinds::ConfirmPinMatch;
+    let result = wait(
+        custom
+            .PairWithProtectionLevelAsync(kinds, DevicePairingProtectionLevel::EncryptionAndAuthentication)
+            .map_err(|e| err("pairing", e))?,
+        "pairing",
+    );
+    let _ = custom.RemovePairingRequested(token);
+    let result = result?;
+    let status = result.Status().map_err(|e| err("pairing", e))?;
+    if status != DevicePairingResultStatus::Paired {
+        return Err(format!("pairing {name}: {status:?}. Check the PIN on the radio's screen."));
+    }
+    log::info!("winble: paired with {name}");
+    Ok(name)
+}
+
+/// Pairs with a radio by address, with its PIN. Answers with the radio's name.
+#[tauri::command]
+pub async fn winble_pair(state: State<'_, WinBle>, address: String, pin: String) -> Result<String, String> {
+    let mac = parse_address(&address)?;
+    on_worker(&state, move |worker| {
+        if let Some(old) = worker.link.take() {
+            close_link(old);
+        }
+        pair(mac, &pin)
+    })
+    .await
+}
+
+/// Opens the link. Frames the radio sends arrive on `on_frame`; `winble:closed` says when it drops.
+#[tauri::command]
+pub async fn winble_connect(
+    app: AppHandle,
+    state: State<'_, WinBle>,
+    address: String,
+    on_frame: Channel<Vec<u8>>,
+) -> Result<Connected, String> {
+    let mac = parse_address(&address)?;
+    on_worker(&state, move |worker| {
+        if let Some(old) = worker.link.take() {
+            close_link(old);
+        }
+        let link = open_link(app, mac, &address, on_frame)?;
+        let name = link.device.Name().map(|n| n.to_string()).unwrap_or_default();
+        worker.link = Some(link);
+        Ok(Connected { name })
+    })
+    .await
+}
+
+/// One frame, written with response so a refusal is heard rather than dropped.
+#[tauri::command]
+pub async fn winble_send(state: State<'_, WinBle>, data: Vec<u8>) -> Result<(), String> {
+    on_worker(&state, move |worker| {
+        let link = worker.link.as_ref().ok_or("not connected")?;
+        let writer = DataWriter::new().map_err(|e| err("write", e))?;
+        writer.WriteBytes(&data).map_err(|e| err("write", e))?;
+        let buffer = writer.DetachBuffer().map_err(|e| err("write", e))?;
+        let result = wait(link.rx.WriteValueWithResultAsync(&buffer).map_err(|e| err("write", e))?, "write")?;
+        let status = result.Status().map_err(|e| err("write", e))?;
+        if status != GattCommunicationStatus::Success {
+            return Err(format!("write: {status:?}"));
+        }
+        log::trace!("winble: -> {} bytes", data.len());
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn winble_disconnect(state: State<'_, WinBle>) -> Result<(), String> {
+    on_worker(&state, |worker| {
+        if let Some(link) = worker.link.take() {
+            close_link(link);
+        }
+        Ok(())
+    })
+    .await
+}

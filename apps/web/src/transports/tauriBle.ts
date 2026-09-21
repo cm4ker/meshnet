@@ -26,7 +26,16 @@ class TauriBleTransport extends BaseTransport {
   }
 
   async send(frame: Uint8Array): Promise<void> {
-    await this.api.send(BLE.rx, Array.from(frame), "withoutResponse", BLE.service);
+    // With response, on purpose. The firmware's UART characteristics demand an
+    // encrypted, MITM-protected link (the PIN pairing); an unacknowledged
+    // write to one over a link that is not yet encrypted is dropped by the
+    // stack without a word, whereas an acknowledged write either makes
+    // Windows raise the link to the bond's encryption or fails out loud.
+    try {
+      await this.api.send(BLE.rx, Array.from(frame), "withResponse", BLE.service);
+    } catch (error) {
+      throw new Error(explainBleError(error));
+    }
   }
 
   receive(data: number[]): void {
@@ -50,6 +59,15 @@ class TauriBleTransport extends BaseTransport {
       // Already gone.
     }
   }
+}
+
+/** The words the stack uses when the bond is missing or stale, turned into what to do about it. */
+function explainBleError(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  if (/auth|encrypt|pair|bond|access.?denied|insufficient/i.test(text)) {
+    return `${text}. The radio wants a paired link: pair it in Windows Settings → Bluetooth with its PIN (123456 unless changed), or remove and pair again if it was re-flashed.`;
+  }
+  return text;
 }
 
 function looksLikeRadio(device: import("@mnlphlp/plugin-blec").BleDevice): boolean {

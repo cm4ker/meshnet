@@ -26,7 +26,7 @@ apps/mobile         Capacitor 8 shell: iOS and Android; BLE through a plugin
 ```
 pnpm install
 pnpm test          # protocol, client and session tests, no hardware needed
-pnpm web           # the client at http://localhost:5173 — Chrome or Edge for Web Bluetooth / Web Serial
+pnpm web           # the client at http://localhost:5180 — Chrome or Edge for Web Bluetooth / Web Serial
 ```
 
 Desktop (needs a Rust toolchain):
@@ -43,7 +43,7 @@ pnpm android         # builds the client, syncs it into apps/mobile/android, ope
 pnpm ios             # the same for Xcode; needs a Mac
 ```
 
-`CAP_SERVER_URL=http://<your-lan-ip>:5173 pnpm mobile:sync` points a development build at a running `pnpm web` instead of the bundled client.
+`CAP_SERVER_URL=http://<your-lan-ip>:5180 pnpm mobile:sync` points a development build at a running `pnpm web` instead of the bundled client.
 
 ## Where the protocol came from
 
@@ -53,6 +53,8 @@ Serial framing is `'<'`/`'>'`, a little-endian length and the payload; BLE is on
 
 ## Bluetooth notes
 
-- Windows: pair the radio in Settings → Bluetooth first if it has a PIN; the shell connects to what Windows already knows. A stale bond (re-paired with a phone since) shows as a connection that opens and answers nothing — remove the device and pair again.
-- Android: the BLE plugin asks for a 512-byte MTU on connect; the firmware's frames are up to 176 bytes.
+- The firmware's UART characteristics demand an encrypted, PIN-paired link. On Windows the shell pairs by itself: pick the radio, and when it asks, type the PIN from the radio's screen (or its configured one). A bond the radio no longer honours (it was re-flashed, or reset) shows up the same way and is replaced.
+- Windows talks to the radio through its own GATT API (`winble.rs`), not btleplug: once bonded, asking the radio itself for the characteristics of the encrypted service never returns on this stack, while Windows' cache of them, filled at pairing, answers at once. The shell asks the cache first.
+- USB on an nRF52 companion (T-Echo, RAK4631, Heltec T114) is only a link if the firmware is the `_usb` build; the `_ble` build's serial port is silent.
+- Android: the BLE plugin asks for a 512-byte MTU on connect; the firmware's frames are up to 176 bytes. The phone's own pairing prompt handles the PIN.
 - iOS: `bluetooth-central` is in the background modes so a connection outlives a switch to another app.

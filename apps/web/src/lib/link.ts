@@ -27,6 +27,10 @@ function set(patch: Partial<LinkState>): void {
   for (const listener of listeners) listener();
 }
 
+export function getLink(): LinkState {
+  return state;
+}
+
 export function useLink(): LinkState {
   return useSyncExternalStore(
     (listener) => {
@@ -37,12 +41,31 @@ export function useLink(): LinkState {
   );
 }
 
+/** A link that neither opens nor fails within this is reported as failed rather than spun on forever. */
+const OPEN_TIMEOUT_MS = 45_000;
+
+function withTimeout<T>(promise: Promise<T>, what: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${what} did not answer in ${OPEN_TIMEOUT_MS / 1000} s`)), OPEN_TIMEOUT_MS);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
+
 export async function connectWith(connector: Connector, device: FoundDevice | null): Promise<void> {
   cancelRetry();
   wantedLink = { connector, device };
   set({ phase: "connecting", error: null });
   try {
-    const transport = await connector.connect(device);
+    const transport = await withTimeout(connector.connect(device), device ? `${device.name}` : connector.title);
     await session.connect(transport);
     rememberLink({ connectorId: connector.id, device: device ?? { id: "", name: transport.label, detail: null, rssi: null } });
     set({ phase: "connected", error: null, retrying: false, attempt: 0 });
@@ -90,7 +113,7 @@ function scheduleRetry(): void {
     const link = wantedLink;
     if (!link) return;
     try {
-      const transport = await link.connector.connect(link.device);
+      const transport = await withTimeout(link.connector.connect(link.device), link.device?.name ?? link.connector.title);
       await session.connect(transport);
       set({ phase: "connected", retrying: false, attempt: 0, error: null });
     } catch (error) {

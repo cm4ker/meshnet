@@ -22,7 +22,8 @@ export default defineConfig({
     outDir: "dist",
   },
   server: {
-    port: 5173,
+    // 5180, not Vite's 5173: sovabox's dev server usually holds that on this machine.
+    port: 5180,
     strictPort: true,
     host: true,
   },

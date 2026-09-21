@@ -36,7 +36,10 @@ class CapacitorBleTransport extends BaseTransport {
 
   async send(frame: Uint8Array): Promise<void> {
     const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
-    await this.client.writeWithoutResponse(this.deviceId, BLE.service, BLE.rx, view);
+    // With response: the characteristic demands an encrypted link, and an
+    // acknowledged write is what makes the phone start the PIN pairing on an
+    // unpaired one instead of dropping the bytes.
+    await this.client.write(this.deviceId, BLE.service, BLE.rx, view);
   }
 
   receive(value: DataView): void {
