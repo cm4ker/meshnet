@@ -1911,10 +1911,6 @@ button.hop:hover {
   background: var(--panel);
   font: inherit;
 }
-/* OSM draws light tiles; in a dark theme they are turned over so the map sits in the palette. */
-:root[data-appearance="dark"] .map-view .leaflet-tile-pane {
-  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88) saturate(0.55);
-}
 .map-view .map .leaflet-control-attribution {
   background: color-mix(in oklab, var(--bg) 80%, transparent);
   color: var(--text-faint);
@@ -2137,4 +2133,45 @@ button.hop:hover {
 }
 .map-route {
   stroke: var(--accent);
+}
+
+/* Nodes too close to tell apart at this zoom, as one circle with their count. */
+/* Leaflet gives every marker `display: block`; the class pair outranks it. */
+.leaflet-marker-icon.map-group {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--accent) 88%, var(--bg));
+  color: var(--accent-contrast);
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 28%, transparent), 0 1px 3px rgb(0 0 0 / 0.35);
+  font: 600 12px/1 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+.leaflet-marker-icon.map-group.sel {
+  box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent);
+}
+.map-group-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 40vh;
+  overflow-y: auto;
+  margin: 0 calc(-1 * var(--space-3));
+}
+.map-group-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.map-group-row:hover {
+  background: var(--hover);
 }

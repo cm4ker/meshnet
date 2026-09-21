@@ -1,15 +1,19 @@
 /**
  * The nodes on a map: every contact whose last advert carried a position, and
  * this radio. Tiles are OpenStreetMap's, kept on the device as they are seen
- * (lib/tiles.ts). Picking a node shows how far and which way it is, and draws
- * the route the radio holds to it through the relays whose position is known.
- * Nothing here asks the air for anything.
+ * (lib/tiles.ts). Nodes that would overlap at the current zoom are gathered
+ * into one circle with their count (lib/cluster.ts); tapping it zooms in on
+ * them, or lists them when they share a spot. Picking a node shows how far
+ * and which way it is, and draws the route the radio holds to it through the
+ * relays whose position is known. Nothing here asks the air for anything.
  */
 
 import * as L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AdvType, contactConversation, contactRoute, contactTypeName, isConversationType, type ContactRecord } from "@meshnet/meshcore";
+import { clusterPoints, type Placed } from "../lib/cluster.js";
+import { darkenPixels } from "../lib/darkTile.js";
 import { candidatesOfHash, nameOfHash } from "../lib/echoes.js";
 import { ago, hue } from "../lib/format.js";
 import { bearingDeg, compass, distanceKm, formatDistance, freshness, hasPosition } from "../lib/geo.js";
@@ -20,27 +24,56 @@ import { Button, IconButton } from "../ui/Button.js";
 import { Avatar } from "./Avatar.js";
 import { FitIcon, LocateIcon, MinusIcon, PlusIcon } from "./Icons.js";
 
-/** Serves each tile from the device's copy when it has one (lib/tiles.ts). */
+function darkTheme(): boolean {
+  return document.documentElement.dataset["appearance"] === "dark";
+}
+
+function decode(blob: Blob): Promise<CanvasImageSource & { close?: () => void }> {
+  if (typeof createImageBitmap === "function") return createImageBitmap(blob);
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("tile did not decode"));
+    };
+    img.src = url;
+  });
+}
+
+/**
+ * Serves each tile from the device's copy when it has one (lib/tiles.ts), and
+ * draws it on a canvas, recoloured once for a dark theme (lib/darkTile.ts)
+ * rather than filtered live on every frame of a zoom.
+ */
 class CachedTileLayer extends L.TileLayer {
   protected override createTile(coords: L.Coords, done: L.DoneCallback): HTMLElement {
-    const img = document.createElement("img");
-    img.alt = "";
-    img.setAttribute("role", "presentation");
+    const canvas = document.createElement("canvas");
+    canvas.setAttribute("role", "presentation");
+    const size = this.getTileSize();
+    canvas.width = size.x;
+    canvas.height = size.y;
     tileBlob(this.getTileUrl(coords))
-      .then((blob) => {
-        const url = URL.createObjectURL(blob);
-        img.onload = () => {
-          URL.revokeObjectURL(url);
-          done(undefined, img);
-        };
-        img.onerror = () => {
-          URL.revokeObjectURL(url);
-          done(new Error("tile did not decode"), img);
-        };
-        img.src = url;
+      .then(decode)
+      .then((image) => {
+        const dark = darkTheme();
+        const context = canvas.getContext("2d", { willReadFrequently: dark });
+        if (!context) throw new Error("no canvas");
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        image.close?.();
+        if (dark) {
+          const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+          darkenPixels(pixels.data);
+          context.putImageData(pixels, 0, 0);
+        }
+        done(undefined, canvas);
       })
-      .catch((error: Error) => done(error, img));
-    return img;
+      .catch((error: Error) => done(error, canvas));
+    return canvas;
   }
 }
 
@@ -62,6 +95,12 @@ interface Point {
 /** Room for the filter chips above, the controls to the right and the sheet below, so no marker is fitted under them. */
 const FIT_PADDING: L.FitBoundsOptions = { paddingTopLeft: [40, 96], paddingBottomRight: [64, 160] };
 
+/** How close, in screen pixels, two markers may come before they are gathered: a marker and its name. */
+const CLUSTER_RADIUS = 44;
+
+/** A group spread less than this, in metres, is the same spot at any zoom, and is listed rather than zoomed into. */
+const SAME_SPOT_M = 25;
+
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
@@ -73,17 +112,28 @@ function glyph(contact: ContactRecord): string {
   return escapeHtml((contact.name || contact.prefix).slice(0, 1).toUpperCase());
 }
 
-function nodeIcon(contact: ContactRecord, nowSec: number, selected: boolean): L.DivIcon {
+/** What a node's marker shows, as a string: a marker is redrawn only when this changes. */
+function nodeLook(contact: ContactRecord, nowSec: number, selected: boolean): { look: string; make: () => L.DivIcon } {
   const age = contact.lastAdvert > 0 ? nowSec - contact.lastAdvert : Number.POSITIVE_INFINITY;
   const state = freshness(contact.type, age);
   const name = escapeHtml(contact.name || contact.prefix);
   const stale = state === "stale" && Number.isFinite(age) ? ` · ${ago(contact.lastAdvert * 1000)}` : "";
-  return L.divIcon({
-    className: ["map-node", `t-${contact.type}`, state, selected ? "sel" : ""].join(" "),
-    html: `<span class="map-pin" style="--hue:${hue(contact.name || contact.prefix)}">${glyph(contact)}</span><span class="map-name">${name}${stale}</span>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-  });
+  const className = ["map-node", `t-${contact.type}`, state, selected ? "sel" : ""].join(" ");
+  const html = `<span class="map-pin" style="--hue:${hue(contact.name || contact.prefix)}">${glyph(contact)}</span><span class="map-name">${name}${stale}</span>`;
+  return {
+    look: className + html,
+    make: () => L.divIcon({ className, html, iconSize: [22, 22], iconAnchor: [11, 11] }),
+  };
+}
+
+function groupLook(members: ContactRecord[], selected: boolean): { look: string; make: () => L.DivIcon } {
+  const n = members.length;
+  const size = n < 10 ? 32 : n < 100 ? 38 : 44;
+  const className = ["map-group", selected ? "sel" : ""].join(" ");
+  return {
+    look: `${className}|${n}`,
+    make: () => L.divIcon({ className, html: `<span class="map-group-count">${n}</span>`, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
+  };
 }
 
 function selfIcon(name: string): L.DivIcon {
@@ -109,24 +159,38 @@ function routePoints(contact: ContactRecord, contacts: Record<string, ContactRec
   return points.length >= 2 ? points : null;
 }
 
+interface Shown {
+  marker: L.Marker;
+  look: string;
+  /** A group's members; the click handler reads them from here, so it never holds a stale list. */
+  members: ContactRecord[];
+}
+
 export default function MapView() {
   const state = useSession();
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const nodesLayer = useRef<L.LayerGroup | null>(null);
+  const routeLayer = useRef<L.LayerGroup | null>(null);
+  const selfMarker = useRef<L.Marker | null>(null);
+  const markers = useRef(new Map<string, Shown>());
   const fitted = useRef(false);
+  const [zoom, setZoom] = useState(2);
   const [selected, setSelected] = useState<string | null>(null);
+  const [group, setGroup] = useState<ContactRecord[] | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [showUnplaced, setShowUnplaced] = useState(false);
 
   const contacts = state.contacts;
-  const self = state.self && hasPosition(state.self.lat, state.self.lon) ? { lat: state.self.lat, lon: state.self.lon } : null;
+  const selfLat = state.self && hasPosition(state.self.lat, state.self.lon) ? state.self.lat : null;
+  const selfLon = selfLat !== null ? state.self!.lon : null;
+  const self = useMemo(() => (selfLat !== null && selfLon !== null ? { lat: selfLat, lon: selfLon } : null), [selfLat, selfLon]);
   const selfName = state.self?.name ?? "This radio";
 
   const { placed, unplaced } = useMemo(() => {
     const all = Object.values(contacts);
     return {
-      placed: all.filter((c) => hasPosition(c.lat, c.lon)),
+      placed: all.filter((c) => hasPosition(c.lat, c.lon)).sort((a, b) => (a.key < b.key ? -1 : 1)),
       unplaced: all.filter((c) => !hasPosition(c.lat, c.lon)),
     };
   }, [contacts]);
@@ -138,59 +202,143 @@ export default function MapView() {
     if (!box.current) return;
     const m = L.map(box.current, { zoomControl: false, attributionControl: false, worldCopyJump: true, minZoom: 2, maxZoom: 19 });
     L.control.attribution({ prefix: false, position: "topright" }).addTo(m);
-    new CachedTileLayer(TILE_URL, { maxZoom: 19, attribution: TILE_ATTRIBUTION }).addTo(m);
+    const tiles = new CachedTileLayer(TILE_URL, { maxZoom: 19, attribution: TILE_ATTRIBUTION }).addTo(m);
+    routeLayer.current = L.layerGroup().addTo(m);
     nodesLayer.current = L.layerGroup().addTo(m);
     m.setView([20, 0], 2);
-    m.on("click", () => setSelected(null));
+    m.on("click", () => {
+      setSelected(null);
+      setGroup(null);
+    });
+    m.on("zoomend", () => setZoom(m.getZoom()));
     map.current = m;
     // The pane is sized by the layout, which changes when a phone turns or a desktop window is resized.
     const resize = new ResizeObserver(() => m.invalidateSize());
     resize.observe(box.current);
+    // Tiles are coloured when drawn, so a change of theme draws them again.
+    const theme = new MutationObserver(() => tiles.redraw());
+    theme.observe(document.documentElement, { attributes: true, attributeFilter: ["data-appearance"] });
+    const shownMarkers = markers.current;
     return () => {
+      theme.disconnect();
       resize.disconnect();
       m.remove();
       map.current = null;
       nodesLayer.current = null;
+      routeLayer.current = null;
+      selfMarker.current = null;
+      shownMarkers.clear();
       fitted.current = false;
     };
   }, []);
 
-  // The markers and the route, redrawn from the session.
+  // The markers: gathered for the zoom, then only what changed is touched.
   useEffect(() => {
     const m = map.current;
     const layer = nodesLayer.current;
     if (!m || !layer) return;
-    layer.clearLayers();
     const nowSec = Date.now() / 1000;
-
-    if (picked && hasPosition(picked.lat, picked.lon)) {
-      const points = routePoints(picked, contacts, self);
-      if (points) {
-        L.polyline(
-          points.map((p) => [p.lat, p.lon] as L.LatLngTuple),
-          { className: "map-route", weight: 3, dashArray: "6 8", interactive: false },
-        ).addTo(layer);
+    const z = m.getZoom();
+    const points: Placed<ContactRecord>[] = shown.map((c) => {
+      const p = m.project([c.lat, c.lon], z);
+      return { item: c, x: p.x, y: p.y };
+    });
+    const wanted = new Map<string, { at: L.LatLng; look: string; make: () => L.DivIcon; members: ContactRecord[] }>();
+    for (const g of clusterPoints(points, CLUSTER_RADIUS)) {
+      if (g.members.length === 1) {
+        const c = g.members[0]!;
+        wanted.set(c.key, { at: L.latLng(c.lat, c.lon), ...nodeLook(c, nowSec, c.key === selected), members: g.members });
+      } else {
+        const id = `g:${g.members.map((c) => c.key.slice(0, 16)).join(",")}`;
+        const holdsPick = g.members.some((c) => c.key === selected);
+        wanted.set(id, { at: m.unproject([g.x, g.y], z), ...groupLook(g.members, holdsPick), members: g.members });
       }
     }
-    for (const contact of shown) {
-      L.marker([contact.lat, contact.lon], { icon: nodeIcon(contact, nowSec, contact.key === selected), keyboard: true, title: contact.name })
-        .on("click", (e) => {
-          L.DomEvent.stopPropagation(e);
-          setSelected(contact.key);
-        })
-        .addTo(layer);
-    }
-    if (self) L.marker([self.lat, self.lon], { icon: selfIcon(selfName), interactive: false, zIndexOffset: 1000 }).addTo(layer);
 
-    // The first time there is something to show, show all of it.
-    if (!fitted.current) {
-      const points: L.LatLngTuple[] = placed.map((c) => [c.lat, c.lon]);
-      if (self) points.push([self.lat, self.lon]);
-      if (points.length === 1) m.setView(points[0]!, 13);
-      else if (points.length > 1) m.fitBounds(L.latLngBounds(points), { ...FIT_PADDING, maxZoom: 14 });
-      if (points.length > 0) fitted.current = true;
+    const current = markers.current;
+    for (const [id, shownMarker] of current) {
+      if (wanted.has(id)) continue;
+      layer.removeLayer(shownMarker.marker);
+      current.delete(id);
     }
-  }, [contacts, shown, placed, picked, selected, self?.lat, self?.lon, selfName]);
+    for (const [id, want] of wanted) {
+      const existing = current.get(id);
+      if (existing) {
+        if (!existing.marker.getLatLng().equals(want.at)) existing.marker.setLatLng(want.at);
+        if (existing.look !== want.look) {
+          existing.marker.setIcon(want.make());
+          existing.look = want.look;
+        }
+        existing.members = want.members;
+        continue;
+      }
+      const entry: Shown = { marker: L.marker(want.at, { icon: want.make(), keyboard: true }), look: want.look, members: want.members };
+      entry.marker.on("click", (e) => {
+        L.DomEvent.stopPropagation(e);
+        if (entry.members.length === 1) {
+          setGroup(null);
+          setSelected(entry.members[0]!.key);
+          return;
+        }
+        const bounds = L.latLngBounds(entry.members.map((c) => [c.lat, c.lon] as L.LatLngTuple));
+        const spread = bounds.getNorthEast().distanceTo(bounds.getSouthWest());
+        if (spread < SAME_SPOT_M || m.getZoom() >= m.getMaxZoom()) {
+          setSelected(null);
+          setGroup(entry.members);
+        } else {
+          m.fitBounds(bounds, { ...FIT_PADDING, maxZoom: m.getMaxZoom() });
+        }
+      });
+      entry.marker.addTo(layer);
+      current.set(id, entry);
+    }
+  }, [shown, selected, zoom]);
+
+  // This radio, kept as one marker so its pulse is not restarted by every change.
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    if (!self) {
+      selfMarker.current?.remove();
+      selfMarker.current = null;
+      return;
+    }
+    if (!selfMarker.current) {
+      selfMarker.current = L.marker([self.lat, self.lon], { icon: selfIcon(selfName), interactive: false, zIndexOffset: 1000 }).addTo(m);
+    } else {
+      selfMarker.current.setLatLng([self.lat, self.lon]);
+      selfMarker.current.setIcon(selfIcon(selfName));
+    }
+  }, [self, selfName]);
+
+  // The route to the picked node.
+  useEffect(() => {
+    const layer = routeLayer.current;
+    if (!layer) return;
+    layer.clearLayers();
+    if (!picked || !hasPosition(picked.lat, picked.lon)) return;
+    const points = routePoints(picked, contacts, self);
+    if (points) {
+      L.polyline(
+        points.map((p) => [p.lat, p.lon] as L.LatLngTuple),
+        { className: "map-route", weight: 3, dashArray: "6 8", interactive: false },
+      ).addTo(layer);
+    }
+  }, [picked, contacts, self]);
+
+  // The first time there is something to show, show all of it.
+  useEffect(() => {
+    const m = map.current;
+    if (!m || fitted.current) return;
+    const points: L.LatLngTuple[] = placed.map((c) => [c.lat, c.lon]);
+    if (self) points.push([self.lat, self.lon]);
+    if (points.length === 1) m.setView(points[0]!, 13);
+    else if (points.length > 1) m.fitBounds(L.latLngBounds(points), { ...FIT_PADDING, maxZoom: 14 });
+    if (points.length > 0) {
+      fitted.current = true;
+      setZoom(m.getZoom());
+    }
+  }, [placed, self]);
 
   const fitAll = () => {
     const points: L.LatLngTuple[] = shown.map((c) => [c.lat, c.lon]);
@@ -212,6 +360,7 @@ export default function MapView() {
             aria-pressed={filter === f.id}
             onClick={() => {
               setFilter(f.id);
+              setGroup(null);
               if (picked && f.id !== "all" && picked.type !== f.id) setSelected(null);
             }}
           >
@@ -240,6 +389,15 @@ export default function MapView() {
       <div className="map-sheet">
         {picked ? (
           <NodeSheet contact={picked} contacts={contacts} self={self} />
+        ) : group ? (
+          <GroupSheet
+            members={group}
+            self={self}
+            onPick={(key) => {
+              setGroup(null);
+              setSelected(key);
+            }}
+          />
         ) : (
           <>
             <div className="map-summary">
@@ -262,6 +420,28 @@ export default function MapView() {
         )}
       </div>
     </div>
+  );
+}
+
+/** Nodes that share one spot, which no zoom separates: listed by name. */
+function GroupSheet({ members, self, onPick }: { members: ContactRecord[]; self: Point | null; onPick: (key: string) => void }) {
+  const rows = [...members].sort((a, b) => (a.name || a.prefix).localeCompare(b.name || b.prefix));
+  return (
+    <>
+      <div className="map-summary">
+        <span>{members.length} nodes here</span>
+        {self ? <span>{formatDistance(distanceKm(self.lat, self.lon, rows[0]!.lat, rows[0]!.lon))} away</span> : null}
+      </div>
+      <div className="map-group-list">
+        {rows.map((c) => (
+          <button key={c.key} type="button" className="map-group-row" onClick={() => onPick(c.key)}>
+            <Avatar name={c.name || c.prefix} type={c.type} size={24} />
+            <span className="row-title">{c.name || c.prefix}</span>
+            <span className="muted small">{contactTypeName(c.type)}</span>
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 

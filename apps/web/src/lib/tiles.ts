@@ -59,7 +59,7 @@ async function write(tile: StoredTile): Promise<void> {
   if (++writes % 100 === 0) await prune(db);
 }
 
-/** Drops the tiles seen longest ago once there are more than the limit. */
+/** Drops the tiles fetched longest ago once there are more than the limit. */
 async function prune(db: IDBDatabase): Promise<void> {
   const store = db.transaction(STORE, "readwrite").objectStore(STORE);
   const count = await done(store.count());
@@ -84,11 +84,10 @@ async function prune(db: IDBDatabase): Promise<void> {
  */
 export async function tileBlob(url: string): Promise<Blob> {
   const cached = await read(url).catch(() => undefined);
-  if (cached && Date.now() - cached.at < MAX_AGE_MS) {
-    // Touch it, so the pruning keeps what is still looked at.
-    void write({ ...cached, at: Date.now() }).catch(() => undefined);
-    return new Blob([cached.bytes], { type: cached.type });
-  }
+  // Not rewritten when read: a zoom reads dozens of tiles, and writing each
+  // back only to move its date made every one of them a database write. The
+  // pruning goes by when a tile was fetched, which a month's refresh renews.
+  if (cached && Date.now() - cached.at < MAX_AGE_MS) return new Blob([cached.bytes], { type: cached.type });
   try {
     const response = await fetch(url, { mode: "cors", credentials: "omit" });
     if (!response.ok) throw new Error(`tile answered ${response.status}`);
