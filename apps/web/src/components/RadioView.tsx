@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { fromHex, TelemMode, AdvertLocPolicy, type ChannelRecord } from "@meshnet/meshcore";
 import { disconnect } from "../lib/link.js";
 import { bandwidth, battery, batteryPercent, frequency } from "../lib/format.js";
+import { useWide } from "../lib/layout.js";
+import { goSection } from "../lib/nav.js";
 import { session, storage, useSession } from "../lib/session.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Confirm, Dialog } from "../ui/Dialog.js";
@@ -30,6 +32,7 @@ export function RadioView() {
   const self = state.self;
   const device = state.device;
   const online = state.status === "ready";
+  const wide = useWide();
   const [ask, setAsk] = useState<"reboot" | "reset" | "forget" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -134,6 +137,14 @@ export function RadioView() {
       <Section title="Tuning">
         <TuningForm rxDelayBase={state.tuning?.rxDelayBase ?? 0} airtimeFactor={state.tuning?.airtimeFactor ?? 0} disabled={!online || !state.tuning} />
       </Section>
+
+      {wide ? null : (
+        <Section title="Log">
+          <Row label="Events and frames" onClick={() => goSection("log")}>
+            ›
+          </Row>
+        </Section>
+      )}
 
       <Section title="Power">
         <div className="row-actions wrap">

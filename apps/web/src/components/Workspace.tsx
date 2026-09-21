@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { useLink } from "../lib/link.js";
 import { useWide } from "../lib/layout.js";
 import { goSection, openContact, openConversation, openNode, useNav, type Section } from "../lib/nav.js";
@@ -8,7 +8,8 @@ import { ChatList } from "./ChatList.js";
 import { ChatView } from "./ChatView.js";
 import { ContactCard } from "./ContactCard.js";
 import { ContactsList } from "./ContactsList.js";
-import { ChatIcon, ContactsIcon, LogIcon, NodesIcon, RadioIcon, SettingsIcon } from "./Icons.js";
+import { IconButton } from "../ui/Button.js";
+import { BackIcon, ChatIcon, ContactsIcon, LogIcon, MapIcon, NodesIcon, RadioIcon, SettingsIcon } from "./Icons.js";
 import { LogView } from "./LogView.js";
 import { NodesList } from "./NodesList.js";
 import { NodeView } from "./node/NodeView.js";
@@ -16,9 +17,13 @@ import { RadioView } from "./RadioView.js";
 import { SettingsView } from "./SettingsView.js";
 import { StatusBar } from "./StatusBar.js";
 
+// Leaflet and its styles load with the map, not with the app.
+const MapView = lazy(() => import("./MapView.js"));
+
 const SECTIONS: { id: Section; label: string; icon: ReactNode }[] = [
   { id: "chats", label: "Chats", icon: <ChatIcon size={20} /> },
   { id: "contacts", label: "Contacts", icon: <ContactsIcon size={20} /> },
+  { id: "map", label: "Map", icon: <MapIcon size={20} /> },
   { id: "nodes", label: "Nodes", icon: <NodesIcon size={20} /> },
   { id: "radio", label: "Radio", icon: <RadioIcon size={20} /> },
   { id: "log", label: "Log", icon: <LogIcon size={20} /> },
@@ -35,7 +40,7 @@ export function Workspace() {
 
   const tabs = (
     <nav className={wide ? "rail" : "tabbar"} aria-label="Sections">
-      {SECTIONS.map((s) => (
+      {SECTIONS.filter((s) => wide || s.id !== "log").map((s) => (
         <button
           key={s.id}
           type="button"
@@ -121,6 +126,21 @@ export function Workspace() {
     screen = <ContactCard contactKey={nav.contact} onClose={() => openContact(null)} />;
   } else if (nav.section === "nodes" && nav.node) {
     screen = <NodeView key={nav.node} nodeKey={nav.node} onClose={() => openNode(null)} />;
+  } else if (nav.section === "log") {
+    // Six tabs fill a phone's bar, so the log gave its place to the map and opens from Radio.
+    screen = (
+      <div className="card">
+        <header className="chat-head">
+          <IconButton label="Back" onClick={() => goSection("radio")}>
+            <BackIcon size={18} />
+          </IconButton>
+          <div className="chat-title">
+            <span className="row-title">Log</span>
+          </div>
+        </header>
+        <LogView />
+      </div>
+    );
   } else {
     screen = (
       <>
@@ -138,7 +158,7 @@ export function Workspace() {
       </>
     );
   }
-  const detail = (nav.section === "chats" && nav.conversation) || (nav.section === "contacts" && nav.contact) || (nav.section === "nodes" && nav.node);
+  const detail = (nav.section === "chats" && nav.conversation) || (nav.section === "contacts" && nav.contact) || (nav.section === "nodes" && nav.node) || nav.section === "log";
   return (
     <div className={["app", "narrow", detail ? "detail" : ""].join(" ")}>
       <main className="content">{screen}</main>
@@ -149,6 +169,12 @@ export function Workspace() {
 
 function SectionBody({ section }: { section: Section }) {
   switch (section) {
+    case "map":
+      return (
+        <Suspense fallback={<div className="empty muted">Loading the map…</div>}>
+          <MapView />
+        </Suspense>
+      );
     case "radio":
       return <RadioView />;
     case "log":

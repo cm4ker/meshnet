@@ -1896,3 +1896,245 @@ button.hop:hover {
 .pick button.on {
   background: var(--selected);
 }
+
+/* ---- the map ---- */
+
+.map-view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.map-view .map {
+  position: absolute;
+  inset: 0;
+  background: var(--panel);
+  font: inherit;
+}
+/* OSM draws light tiles; in a dark theme they are turned over so the map sits in the palette. */
+:root[data-appearance="dark"] .map-view .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88) saturate(0.55);
+}
+.map-view .map .leaflet-control-attribution {
+  background: color-mix(in oklab, var(--bg) 80%, transparent);
+  color: var(--text-faint);
+  font-size: 10px;
+}
+.map-view .leaflet-control-attribution a {
+  color: var(--text-muted);
+}
+
+.map-chips {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  right: 120px;
+  z-index: 500;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  pointer-events: none;
+}
+.map-chip {
+  pointer-events: auto;
+  height: var(--control-h-sm);
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--bg) 90%, transparent);
+  color: var(--text);
+  font: 500 var(--text-sm) / 1 var(--font-ui);
+  cursor: pointer;
+}
+.map-chip[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.map-controls {
+  position: absolute;
+  right: var(--space-2);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.map-controls .icon-button {
+  background: color-mix(in oklab, var(--bg) 92%, transparent);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+}
+
+.map-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--elevated);
+  border-top: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: 0 -8px 24px -18px rgb(0 0 0 / 0.5);
+}
+.app.wide .map-sheet {
+  left: var(--space-3);
+  right: auto;
+  bottom: var(--space-3);
+  width: 360px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+}
+.map-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.map-node-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.map-node-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.map-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px var(--space-3);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.map-facts dt {
+  color: var(--text-faint);
+}
+.map-facts dd {
+  margin: 0;
+  min-width: 0;
+}
+.map-hops {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.map-hop {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.map-hop.unsure {
+  border-style: dashed;
+  color: var(--warning);
+  font-family: var(--font-mono);
+}
+
+/* Markers: a person is a circle, a repeater a mast's diamond, a room a square, a sensor a hexagon. */
+.map-node,
+.map-self {
+  overflow: visible;
+}
+.map-pin {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: oklch(var(--avatar-l) var(--avatar-c) var(--hue));
+  color: oklch(20% 0.03 var(--hue));
+  font: 600 10px/1 var(--font-ui);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+}
+.map-node.t-2 .map-pin {
+  width: 18px;
+  height: 18px;
+  margin: 2px;
+  border-radius: 3px;
+  transform: rotate(45deg);
+  background: var(--text);
+}
+.map-node.t-2 .map-pin::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--bg);
+}
+.map-node.t-3 .map-pin {
+  border-radius: 6px;
+}
+.map-node.t-4 .map-pin {
+  border: 0;
+  clip-path: polygon(50% 0, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+}
+.map-node.aging .map-pin {
+  opacity: 0.6;
+}
+.map-node.stale .map-pin {
+  background: var(--bg);
+  border-color: currentColor;
+  color: oklch(var(--avatar-l) var(--avatar-c) var(--hue));
+}
+.map-node.t-2.stale .map-pin {
+  color: var(--text);
+}
+.map-node.sel .map-pin {
+  box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent);
+}
+.map-name {
+  position: absolute;
+  left: 26px;
+  top: 3px;
+  white-space: nowrap;
+  font: 500 11px/16px var(--font-ui);
+  color: var(--text);
+  text-shadow: 0 0 2px var(--bg), 0 0 2px var(--bg), 0 0 3px var(--bg);
+  pointer-events: none;
+}
+.map-node.stale .map-name {
+  color: var(--text-muted);
+}
+.map-self-dot {
+  position: absolute;
+  inset: 4px;
+  border: 2.5px solid var(--bg);
+  border-radius: 50%;
+  background: var(--accent);
+}
+.map-self-pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.3;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .map-self-pulse {
+    animation: map-pulse 2.4s ease-out infinite;
+  }
+}
+@keyframes map-pulse {
+  from {
+    transform: scale(0.6);
+    opacity: 0.5;
+  }
+  to {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+.map-route {
+  stroke: var(--accent);
+}

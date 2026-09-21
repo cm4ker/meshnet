@@ -13,6 +13,8 @@ const config: CapacitorConfig = {
   appName: "Ommesh",
   webDir: "../web/dist",
   backgroundColor: "#282c33",
+  // OpenStreetMap's tile policy asks every client to say who it is; the map's tiles go out with this.
+  appendUserAgent: "Ommesh (+https://github.com/cm4ker/meshnet)",
   ios: {
     // The client lays itself out under the notch with `env(safe-area-inset-*)`; an inset here would count it twice.
     contentInset: "never",

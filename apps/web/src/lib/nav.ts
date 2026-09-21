@@ -7,7 +7,7 @@
 import { useSyncExternalStore } from "react";
 import { readSetting, writeSetting } from "./storage.js";
 
-export type Section = "chats" | "contacts" | "nodes" | "radio" | "log" | "settings";
+export type Section = "chats" | "contacts" | "map" | "nodes" | "radio" | "log" | "settings";
 
 export interface Nav {
   section: Section;
