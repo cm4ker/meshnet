@@ -41,22 +41,34 @@ export function setNodeNotificationsWanted(on: boolean): void {
   void tellWatch();
 }
 
+/**
+ * The iPhone's native watch (`MeshWatch.swift`): it announces what the radio
+ * pushes while the page is asleep in the background, as a stand-in that waits
+ * a few seconds for the page to announce the same thing itself.
+ */
 interface MeshWatchPlugin {
   configure(options: { messages: boolean; nodes: boolean }): Promise<void>;
+  /** The page has announced this tag itself, so the watch withdraws its own notice for it. */
+  announced(options: { tag: string }): Promise<void>;
 }
 
 let watch: MeshWatchPlugin | null = null;
 
-/** Hands the two switches to the iPhone's native watch, which cannot read the page's storage. */
-export async function tellWatch(): Promise<void> {
+/** Runs `use` with the watch, on an iPhone only. */
+async function withWatch(use: (watch: MeshWatchPlugin) => Promise<void>): Promise<void> {
   if (shell() !== "capacitor" || nativePlatform() !== "ios") return;
+  const { registerPlugin } = await import("@capacitor/core");
+  // A Capacitor plugin is a Proxy that manufactures methods for every
+  // property, including `then`. Never resolve a Promise with that proxy:
+  // Promise assimilation calls the nonexistent native `then` and hangs.
+  watch ??= registerPlugin<MeshWatchPlugin>("MeshWatch");
+  await use(watch);
+}
+
+/** Hands the two switches to the watch, which cannot read the page's storage. */
+export async function tellWatch(): Promise<void> {
   try {
-    const { registerPlugin } = await import("@capacitor/core");
-    // A Capacitor plugin is a Proxy that manufactures methods for every
-    // property, including `then`. Never resolve a Promise with that proxy:
-    // Promise assimilation calls the nonexistent native `then` and hangs.
-    watch ??= registerPlugin<MeshWatchPlugin>("MeshWatch");
-    await watch.configure({ messages: notificationsWanted(), nodes: nodeNotificationsWanted() });
+    await withWatch((w) => w.configure({ messages: notificationsWanted(), nodes: nodeNotificationsWanted() }));
   } catch (error) {
     console.warn("Could not configure iOS background notifications", error);
   }
@@ -119,14 +131,21 @@ export async function notify(title: string, body: string, tag: string): Promise<
       await invoke("announce", { title, body, tag }).catch(() => undefined);
       return;
     case "capacitor":
-      await localNotifications()
-        .then(({ LocalNotifications: api }) => api.schedule({ notifications: [{
+      try {
+        const { LocalNotifications: api } = await localNotifications();
+        await api.schedule({ notifications: [{
           id: ++nextId, title, body, extra: { tag },
           // Without a sound iOS delivers silently. A missing named sound
           // uses the system default; Android already supplies its own.
           ...(nativePlatform() === "ios" ? { sound: "default", foreground: true } : {}),
-        }] }))
-        .catch((error: unknown) => console.warn("Could not show notification", error));
+        }] });
+      } catch (error) {
+        // Nothing shown, so the watch's stand-in, if any, is left to show.
+        console.warn("Could not show notification", error);
+        return;
+      }
+      // One notice per message: the watch's "New message" for the same news goes.
+      await withWatch((w) => w.announced({ tag })).catch(() => undefined);
       return;
     default:
       if (!("Notification" in window) || Notification.permission !== "granted") return;

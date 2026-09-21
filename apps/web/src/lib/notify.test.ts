@@ -17,7 +17,7 @@ Object.assign(Capacitor, {
   getPlatform: () => platform,
   PluginHeaders: [
     { name: "LocalNotifications", methods: ["schedule", "checkPermissions", "requestPermissions"].map((name) => ({ name, rtype: "promise" })) },
-    { name: "MeshWatch", methods: [{ name: "configure", rtype: "promise" }] },
+    { name: "MeshWatch", methods: ["configure", "announced"].map((name) => ({ name, rtype: "promise" })) },
   ],
   nativePromise: async (plugin: string, method: string, options: unknown) => {
     calls.push({ plugin, method, options });
@@ -47,13 +47,20 @@ test("an iOS message outside the open chat reaches the native notifier with soun
   const nav = { section: "chats", conversation: "ch:0" } as const;
   assert.equal(conversationIsVisible("ch:1", nav), false);
   await notify("Field team", "New message", "c:ch:1");
-  assert.equal(calls.length, 1);
   assert.equal(calls[0]?.plugin, "LocalNotifications");
   assert.equal(calls[0]?.method, "schedule");
   const notice = (calls[0]?.options as ScheduleOptions).notifications[0];
   assert.equal(notice?.sound, "default");
   assert.equal(notice?.foreground, true);
   assert.deepEqual(notice?.extra, { tag: "c:ch:1" });
+});
+
+test("an iOS notice the page shows withdraws the native watch's stand-in for it, after it is scheduled", async () => {
+  await notify("Field team", "New message", "c:ch:1");
+  assert.deepEqual(calls.map(({ plugin, method, options }) => ({ plugin, method, tag: method === "announced" ? options : undefined })), [
+    { plugin: "LocalNotifications", method: "schedule", tag: undefined },
+    { plugin: "MeshWatch", method: "announced", tag: { tag: "c:ch:1" } },
+  ]);
 });
 
 test("only a visible, focused chat suppresses its incoming messages", () => {
@@ -71,7 +78,7 @@ test("only a visible, focused chat suppresses its incoming messages", () => {
 test("an iOS notice is also scheduled when the page is hidden", async () => {
   page.visibilityState = "hidden";
   await notify("Field team", "New message", "c:ch:1");
-  assert.equal(calls.length, 1);
+  assert.equal(calls.filter((c) => c.method === "schedule").length, 1);
 });
 
 test("the first connection checks and requests iOS notification permission", async () => {

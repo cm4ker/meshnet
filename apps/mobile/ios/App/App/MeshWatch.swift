@@ -24,6 +24,12 @@ import UserNotifications
 /// holds: it only subscribes to the radio's TX characteristic and never
 /// writes, so the page's own traffic is untouched. Its notices are sent only
 /// while the app is in the background; in front, the page does its own.
+///
+/// The page is often still awake for a while in the background, and then it
+/// announces the same message itself, with its text. So the watch is the
+/// stand-in: its notices wait a few seconds before they show, and the page
+/// withdraws the watch's notice for anything it has announced (`announced`).
+/// A page that is asleep withdraws nothing, and the watch's notice shows.
 final class MeshWatch: NSObject {
     static let shared = MeshWatch()
 
@@ -32,11 +38,16 @@ final class MeshWatch: NSObject {
     private static let msgWaiting: UInt8 = 0x83
     private static let newAdvert: UInt8 = 0x8A
     private static let waitingId = "meshnet.waiting"
+    /// How long a notice waits for the page to announce the same thing itself.
+    private static let grace: TimeInterval = 5
 
     private var central: CBCentralManager?
     private var peripheral: CBPeripheral?
     private var inBackground = false
     private var waiting = 0
+    /// Nodes the page has announced, by notice id: the page can be quicker
+    /// than the watch here, since the push itself carries the node.
+    private var pageAnnounced: [String: Date] = [:]
 
     func start() {
         guard central == nil else { return }
@@ -66,7 +77,34 @@ final class MeshWatch: NSObject {
         inBackground = false
         waiting = 0
         // The page reads the queue now and shows the messages themselves.
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [MeshWatch.waitingId])
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: [MeshWatch.waitingId])
+        center.getPendingNotificationRequests { requests in
+            center.removePendingNotificationRequests(withIdentifiers: requests.map(\.identifier).filter { $0.hasPrefix("meshnet.") })
+        }
+    }
+
+    /// The page announced something itself (its tag: `c:<conversation>` or
+    /// `n:<key hex>`), so the watch's notice for it is withdrawn, shown or not.
+    func announced(tag: String) {
+        let id: String
+        if tag.hasPrefix("c:") {
+            id = MeshWatch.waitingId
+            waiting = 0
+        } else if tag.hasPrefix("n:") {
+            id = MeshWatch.nodeId(String(tag.dropFirst(2).prefix(16)))
+            pageAnnounced = pageAnnounced.filter { Date().timeIntervalSince($0.value) < 60 }
+            pageAnnounced[id] = Date()
+        } else {
+            return
+        }
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [id])
+        center.removeDeliveredNotifications(withIdentifiers: [id])
+    }
+
+    private static func nodeId(_ keyHex: String) -> String {
+        "meshnet.node.\(keyHex)"
     }
 
     /// Finds the radio the plugin is connected to and subscribes alongside it.
@@ -95,7 +133,9 @@ final class MeshWatch: NSObject {
             let kind = [1: "contact", 2: "repeater", 3: "room", 4: "sensor"][Int(bytes[33])] ?? "node"
             let name = String(decoding: bytes[100..<132].prefix { $0 != 0 }, as: UTF8.self)
             let key = bytes[1..<9].map { String(format: "%02x", $0) }.joined()
-            post(id: "meshnet.node.\(key)", title: "New \(kind): \(name.isEmpty ? key : name)", body: "Heard for the first time.")
+            let id = MeshWatch.nodeId(key)
+            if let at = pageAnnounced[id], Date().timeIntervalSince(at) < 60 { return }
+            post(id: id, title: "New \(kind): \(name.isEmpty ? key : name)", body: "Heard for the first time.")
         default:
             return
         }
@@ -106,7 +146,9 @@ final class MeshWatch: NSObject {
         content.title = title
         content.body = body
         content.sound = .default
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+        // Another request with the same id replaces this one and starts the wait again.
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: MeshWatch.grace, repeats: false)
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
     }
 }
 
@@ -147,18 +189,29 @@ extension MeshWatch: CBPeripheralDelegate {
     }
 }
 
-/// The page's way to tell the watch which notices the reader wants:
-/// `window.Capacitor.Plugins.MeshWatch.configure({ messages, nodes })`.
+/// The page's way to tell the watch which notices the reader wants,
+/// `configure({ messages, nodes })`, and which it has just announced itself,
+/// `announced({ tag })`.
 @objc(MeshWatchPlugin)
 final class MeshWatchPlugin: CAPPlugin, CAPBridgedPlugin {
     let identifier = "MeshWatchPlugin"
     let jsName = "MeshWatch"
     let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "configure", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "announced", returnType: CAPPluginReturnPromise),
     ]
 
     @objc func configure(_ call: CAPPluginCall) {
         MeshWatch.shared.configure(messages: call.getBool("messages") ?? true, nodes: call.getBool("nodes") ?? true)
         call.resolve()
+    }
+
+    @objc func announced(_ call: CAPPluginCall) {
+        let tag = call.getString("tag") ?? ""
+        // The watch's state belongs to the main queue, where its central manager delivers.
+        DispatchQueue.main.async {
+            MeshWatch.shared.announced(tag: tag)
+            call.resolve()
+        }
     }
 }
