@@ -6,9 +6,25 @@ the "Meshnet App Store" profile).
 
 Capacitor 8 around the built client (`apps/web/dist`), for iOS and Android. The
 shell carries the client rather than loading it from a server: a radio in a field
-has no network, and the app must open without one. The only native code is the
-two plugins the client calls, BLE (`@capacitor-community/bluetooth-le`) and the
-secure storage that keeps node passwords.
+has no network, and the app must open without one. The native code is the
+plugins the client calls: BLE (`@capacitor-community/bluetooth-le`), the secure
+storage that keeps node passwords, and the app's own `MeshTcp`.
+
+## Wi-Fi
+
+Companion firmware built with Wi-Fi (ESP32 boards, `WIFI_SSID` at build time)
+listens on TCP port 5000 and speaks what its USB serial speaks. `MeshTcp` is a
+socket and nothing more: `ios/App/App/MeshTcpPlugin.swift` (Network.framework)
+and `android/app/src/main/java/dev/cm4ker/meshnet/MeshTcpPlugin.java`, the same
+methods and events on both. The framing is the client's
+(`apps/web/src/transports/capacitorTcp.ts`).
+
+- iOS registers it in `MeshViewController`, which `Main.storyboard` names in
+  place of Capacitor's own bridge view controller. Android registers it in
+  `MainActivity`.
+- iOS asks for Local Network access the first time a radio's address is dialled
+  (`NSLocalNetworkUsageDescription`). A connection waits through the prompt, up
+  to its 10-second timeout.
 
 ## Android
 

@@ -13,14 +13,15 @@ export interface FoundDevice {
 /**
  * One way of reaching a radio on this platform. `picker` connectors hand the
  * choice to the browser's own chooser (Web Bluetooth, Web Serial); `scan`
- * connectors list what they find and connect to one.
+ * connectors list what they find and connect to one; `address` connectors
+ * take an address typed in (a radio on the network).
  */
 export interface Connector {
   id: string;
   kind: TransportKind;
   title: string;
   description: string;
-  mode: "picker" | "scan";
+  mode: "picker" | "scan" | "address";
   /** Lists devices as they are found until the signal aborts. `scan` connectors only. */
   scan?(onFound: (devices: FoundDevice[]) => void, signal: AbortSignal): Promise<void>;
   /** Devices this platform can reconnect to without a scan or a chooser. */

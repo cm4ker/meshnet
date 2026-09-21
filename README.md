@@ -11,7 +11,7 @@ apps/mobile         Capacitor 8 shell: iOS and Android; BLE through a plugin
 
 ## What it does
 
-- Connects to a radio over BLE (everywhere) or a USB cable (desktop, and a browser with Web Serial).
+- Connects to a radio over BLE (everywhere), a USB cable (desktop, and a browser with Web Serial), or Wi-Fi (phone; companion firmware built with Wi-Fi, TCP port 5000).
 - Reads the radio's contacts and channels, and drains its message queue; keeps history on the device, per radio, in IndexedDB. The radio only ever holds what has not been read.
 - Direct messages with delivery: sent, acknowledged (with the round trip), unconfirmed with a retry, failed. A message that went unacknowledged along a learned route is retried as a flood.
 - Routes you can steer: a contact pinned to flood (handy on the move), and a time limit after which a learned route is dropped so the next message floods and finds a fresh one; a default for every chat and room, and one per contact.

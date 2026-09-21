@@ -5,6 +5,7 @@
 import { hasWebBluetooth, hasWebSerial, shell } from "../lib/platform.js";
 import { readSetting, writeSetting } from "../lib/storage.js";
 import { capacitorBleConnector } from "./capacitorBle.js";
+import { capacitorTcpConnector } from "./capacitorTcp.js";
 import { demoConnector, demoWanted } from "./demo.js";
 import { tauriBleConnector } from "./tauriBle.js";
 import { tauriSerialConnector } from "./tauriSerial.js";
@@ -15,6 +16,7 @@ import { webSerialConnector } from "./webSerial.js";
 
 export type { Connector, FoundDevice, RememberedLink } from "./types.js";
 export { NeedsPairingError, needsPairing } from "./types.js";
+export { addressDevice } from "./capacitorTcp.js";
 
 export function connectors(): Connector[] {
   const list: Connector[] = [];
@@ -24,7 +26,7 @@ export function connectors(): Connector[] {
       list.push(navigator.userAgent.includes("Windows") ? tauriWinBleConnector : tauriBleConnector, tauriSerialConnector);
       break;
     case "capacitor":
-      list.push(capacitorBleConnector);
+      list.push(capacitorBleConnector, capacitorTcpConnector);
       break;
     default:
       if (hasWebBluetooth()) list.push(webBluetoothConnector);

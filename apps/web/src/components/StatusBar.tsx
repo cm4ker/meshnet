@@ -1,6 +1,6 @@
 import { battery, batteryPercent } from "../lib/format.js";
 import { useSession } from "../lib/session.js";
-import { BluetoothIcon, UsbIcon } from "./Icons.js";
+import { LinkIcon } from "./Icons.js";
 
 /** The radio's name and link at the top of every list. */
 export function StatusBar() {
@@ -15,7 +15,7 @@ export function StatusBar() {
           <span title={battery(state.battery.mv)}>{batteryPercent(state.battery.mv)}%</span>
         ) : null}
         {state.link ? (
-          <span title={state.link.label}>{state.link.kind === "ble" ? <BluetoothIcon size={14} /> : <UsbIcon size={14} />}</span>
+          <span title={state.link.label}><LinkIcon kind={state.link.kind} size={14} /></span>
         ) : null}
       </span>
     </header>

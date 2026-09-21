@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { connectWith, useLink } from "../lib/link.js";
 import { shell } from "../lib/platform.js";
-import { autoConnectWanted, connectors, lastLink, needsPairing, setAutoConnect, type Connector, type FoundDevice } from "../transports/index.js";
+import { addressDevice, autoConnectWanted, connectors, lastLink, needsPairing, setAutoConnect, type Connector, type FoundDevice } from "../transports/index.js";
 import { Button } from "../ui/Button.js";
 import { Prompt } from "../ui/Dialog.js";
-import { Toggle } from "../ui/Field.js";
-import { BluetoothIcon, UsbIcon } from "./Icons.js";
+import { Input, Toggle } from "../ui/Field.js";
+import { LinkIcon } from "./Icons.js";
 
 export function ConnectView() {
   const list = useMemo(connectors, []);
@@ -42,7 +42,7 @@ export function ConnectView() {
                     className={active?.id === c.id ? "on" : ""}
                     onClick={() => setActive(c)}
                   >
-                    {c.kind === "ble" ? <BluetoothIcon /> : <UsbIcon />}
+                    <LinkIcon kind={c.kind} />
                     {c.title}
                   </button>
                 ))}
@@ -69,6 +69,36 @@ export function ConnectView() {
         />
       </div>
     </div>
+  );
+}
+
+/** A radio on the network: `host` or `host:port`, the firmware's port when none is given. */
+function AddressForm({ busy, onConnect }: { busy: boolean; onConnect: (device: FoundDevice) => void }) {
+  const [text, setText] = useState("");
+  const device = addressDevice(text);
+  return (
+    <form
+      className="address-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (device) onConnect(device);
+      }}
+    >
+      <Input
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        placeholder="192.168.1.50 or radio.local:5000"
+        aria-label="The radio's address"
+        inputMode="url"
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+        enterKeyHint="go"
+      />
+      <Button type="submit" variant="primary" busy={busy} disabled={!device}>
+        Connect
+      </Button>
+    </form>
   );
 }
 
@@ -189,7 +219,9 @@ function ConnectorPanel({ connector, lastDevice }: { connector: Connector; lastD
       {pinError && pinFor ? <p className="connect-error">{pinError}</p> : null}
 
       <div className="row-actions">
-        {connector.mode === "picker" ? (
+        {connector.mode === "address" ? (
+          <AddressForm busy={busy} onConnect={connect} />
+        ) : connector.mode === "picker" ? (
           <Button variant="primary" busy={busy} onClick={() => connect(null)}>
             Choose {connector.kind === "ble" ? "a radio" : "a port"}…
           </Button>

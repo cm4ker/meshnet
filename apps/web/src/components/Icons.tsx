@@ -31,6 +31,14 @@ export const BackIcon = icon('<path d="M15 5l-7 7 7 7"/>');
 export const SendIcon = icon('<path d="M4 12l16-8-6 16-2-6z"/>');
 export const BluetoothIcon = icon('<path d="M7 7l10 10-5 4V3l5 4L7 17"/>');
 export const UsbIcon = icon('<path d="M12 3v18"/><path d="M12 21l-3-3M12 21l3-3"/><path d="M12 9l4-2v4M12 13l-4-2V7"/><circle cx="12" cy="3" r="1"/>');
+export const WifiIcon = icon('<path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="0.75"/>');
+
+/** The icon for how the radio is reached. */
+export function LinkIcon({ kind, size = 16 }: { kind: "ble" | "serial" | "tcp"; size?: number }) {
+  if (kind === "ble") return <BluetoothIcon size={size} />;
+  if (kind === "tcp") return <WifiIcon size={size} />;
+  return <UsbIcon size={size} />;
+}
 export const StarIcon = icon('<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1.1 5.9L12 16.9l-5.3 2.8 1.1-5.9-4.3-4.1 5.9-.8z"/>');
 export const StarFilledIcon = icon('<path fill="currentColor" d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1.1 5.9L12 16.9l-5.3 2.8 1.1-5.9-4.3-4.1 5.9-.8z"/>');
 export const RefreshIcon = icon('<path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/>');
