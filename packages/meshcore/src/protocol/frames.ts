@@ -8,7 +8,7 @@
  * notes kept where a field was added.
  */
 
-import { ByteReader, pathByteLength } from "./bytes.js";
+import { ByteReader, pathByteLength, pathHashCount } from "./bytes.js";
 import { MAX_PATH_SIZE, PUB_KEY_PREFIX_SIZE, PUB_KEY_SIZE, Push, Resp, StatsType, TxtType } from "./codes.js";
 import { decodeLpp, type LppReading } from "./lpp.js";
 
@@ -235,9 +235,13 @@ export function isPushFrame(frame: Frame): frame is PushFrame {
   return PUSH_KINDS.has(frame.kind);
 }
 
-/** The firmware writes `0xff` for "direct" and the hop count otherwise. */
+/**
+ * The firmware writes `0xff` when the packet was routed direct, and the raw
+ * `path_len` byte otherwise. Its top two bits carry the hash size, so the hop
+ * count is the low six: `0x41` is one hop over two-byte hashes, not 65.
+ */
 function hops(pathLen: number): number | null {
-  return pathLen === 0xff ? null : pathLen;
+  return pathLen === 0xff ? null : pathHashCount(pathLen);
 }
 
 /** SNR travels as a signed byte in quarter-decibels. */

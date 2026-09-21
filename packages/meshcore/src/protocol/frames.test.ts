@@ -183,6 +183,23 @@ test("a channel message keeps the sender prefix the firmware put in the text", (
   assert.equal(frame.text, "Alice: hi all");
 });
 
+test("the hop count is the low six bits of path_len; the top two are the hash size", () => {
+  const bytes = new ByteWriter()
+    .u8(Resp.ChannelMsgRecvV3)
+    .i8(16)
+    .u8(0)
+    .u8(0)
+    .u8(0)
+    .u8(0x41) // one two-byte hash
+    .u8(TxtType.Plain)
+    .u32(1_700_000_000)
+    .string("DGG-Bratskaya: hi")
+    .toBytes();
+  const frame = decodeFrame(bytes);
+  if (frame.kind !== "channelMessage") throw new Error(frame.kind);
+  assert.equal(frame.pathLen, 1);
+});
+
 test("sent, and the confirmation that matches it by tag", () => {
   const sent = decodeFrame(new ByteWriter().u8(Resp.Sent).u8(1).u32(0xcafebabe).u32(4200).toBytes());
   assert.deepEqual(sent, { kind: "sent", flood: true, ackTag: 0xcafebabe, estTimeoutMs: 4200 });

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AdvType, contactHops, contactTypeName, isFavourite, type LppReading, type RepeaterStats } from "@meshnet/meshcore";
+import { AdvType, contactHops, contactTypeName, isFavourite, pathByteLength, type LppReading, type RepeaterStats } from "@meshnet/meshcore";
 import { contactConversation } from "../lib/conversations.js";
 import { ago, battery } from "../lib/format.js";
 import { openConversation } from "../lib/nav.js";
@@ -90,7 +90,7 @@ export function ContactCard({ contactKey, onClose }: { contactKey: string; onClo
             </IconButton>
           </Row>
           <Row label="Last heard">{ago(Math.max(contact.lastHeardAt ?? 0, contact.lastAdvert * 1000) || null)}</Row>
-          <Row label="Route">{hops === null ? "unknown, messages flood" : hops === 0 ? "direct" : `${hops} hop${hops === 1 ? "" : "s"} (${contact.outPath.slice(0, hops * 2)})`}</Row>
+          <Row label="Route">{hops === null ? "unknown, messages flood" : hops === 0 ? "direct" : `${hops} hop${hops === 1 ? "" : "s"} (${contact.outPath.slice(0, pathByteLength(contact.outPathLen) * 2)})`}</Row>
           {contact.lat || contact.lon ? (
             <Row label="Position">
               <a href={`https://www.openstreetmap.org/?mlat=${contact.lat}&mlon=${contact.lon}#map=14/${contact.lat}/${contact.lon}`} target="_blank" rel="noreferrer">
