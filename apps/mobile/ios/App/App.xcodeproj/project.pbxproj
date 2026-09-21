@@ -18,6 +18,7 @@
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
 		7E5A1C012F9A00000000A001 /* MeshTcpPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5A1C012F9A00000000A002 /* MeshTcpPlugin.swift */; };
 		7E5A1C012F9A00000000A003 /* MeshViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5A1C012F9A00000000A004 /* MeshViewController.swift */; };
+		7E5A1C012F9A00000000A005 /* MeshWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5A1C012F9A00000000A006 /* MeshWatch.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -33,6 +34,7 @@
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		7E5A1C012F9A00000000A002 /* MeshTcpPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshTcpPlugin.swift; sourceTree = "<group>"; };
 		7E5A1C012F9A00000000A004 /* MeshViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshViewController.swift; sourceTree = "<group>"; };
+		7E5A1C012F9A00000000A006 /* MeshWatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshWatch.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -73,6 +75,7 @@
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				7E5A1C012F9A00000000A004 /* MeshViewController.swift */,
 				7E5A1C012F9A00000000A002 /* MeshTcpPlugin.swift */,
+				7E5A1C012F9A00000000A006 /* MeshWatch.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
@@ -168,6 +171,7 @@
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 				7E5A1C012F9A00000000A001 /* MeshTcpPlugin.swift in Sources */,
 				7E5A1C012F9A00000000A003 /* MeshViewController.swift in Sources */,
+				7E5A1C012F9A00000000A005 /* MeshWatch.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

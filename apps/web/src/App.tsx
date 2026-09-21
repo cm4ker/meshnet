@@ -4,7 +4,7 @@ import { ConnectView } from "./components/ConnectView.js";
 import { Workspace } from "./components/Workspace.js";
 import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "./lib/geo.js";
 import { useLink } from "./lib/link.js";
-import { askPermissionOnce, nodeNotificationsWanted, notificationsWanted, notify, onNotificationClick } from "./lib/notify.js";
+import { askPermissionOnce, nodeNotificationsWanted, notificationsWanted, notify, onNotificationClick, tellWatch } from "./lib/notify.js";
 import { session, useSession } from "./lib/session.js";
 import { titleOf } from "./lib/conversations.js";
 import { getNav, openContact, openConversation } from "./lib/nav.js";
@@ -68,6 +68,21 @@ export function App() {
       if (tag.startsWith("c:")) openConversation(tag.slice(2));
       else if (tag.startsWith("n:")) openContact(tag.slice(2));
     });
+  }, []);
+
+  // The iPhone's native watch learns the switches at every start.
+  useEffect(() => tellWatch(), []);
+
+  // Back on screen, the queue is read again: a phone suspends the page in the
+  // background, and a "message waiting" push that arrived meanwhile may never
+  // reach it. Reading an empty queue costs one short exchange.
+  useEffect(() => {
+    const resume = () => {
+      if (document.visibilityState !== "visible" || session.getState().status !== "ready") return;
+      session.syncMessages().catch(() => undefined);
+    };
+    document.addEventListener("visibilitychange", resume);
+    return () => document.removeEventListener("visibilitychange", resume);
   }, []);
 
   // The phone asks for permission the first time a radio is connected.

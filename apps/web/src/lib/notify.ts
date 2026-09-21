@@ -6,7 +6,10 @@
  * - a browser tab, with the Web Notification API;
  * - the desktop shell, natively (`announce.rs`), since WebView2 draws none;
  * - the phone app, with Capacitor's local notifications, since neither
- *   WKWebView nor Android's WebView has a `Notification` at all.
+ *   WKWebView nor Android's WebView has a `Notification` at all. On iOS the
+ *   page's scripts are suspended soon after the app leaves the screen, so a
+ *   native watch (`MeshWatch.swift`) announces what the radio pushes while
+ *   the phone is locked; the page tells it which notices are wanted.
  *
  * Each notice carries a tag saying what it is about, `c:<conversation>` or
  * `n:<contact key>`, and a click on it hands the tag back to open that.
@@ -14,7 +17,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { shell } from "./platform.js";
+import { nativePlatform, shell } from "./platform.js";
 import { readSetting, writeSetting } from "./storage.js";
 
 const MESSAGES_KEY = "meshnet.notify";
@@ -26,6 +29,7 @@ export function notificationsWanted(): boolean {
 
 export function setNotificationsWanted(on: boolean): void {
   writeSetting(MESSAGES_KEY, on);
+  tellWatch();
 }
 
 export function nodeNotificationsWanted(): boolean {
@@ -34,6 +38,20 @@ export function nodeNotificationsWanted(): boolean {
 
 export function setNodeNotificationsWanted(on: boolean): void {
   writeSetting(NODES_KEY, on);
+  tellWatch();
+}
+
+interface MeshWatchPlugin {
+  configure(options: { messages: boolean; nodes: boolean }): Promise<void>;
+}
+
+let watch: Promise<MeshWatchPlugin> | null = null;
+
+/** Hands the two switches to the iPhone's native watch, which cannot read the page's storage. */
+export function tellWatch(): void {
+  if (shell() !== "capacitor" || nativePlatform() !== "ios") return;
+  watch ??= import("@capacitor/core").then(({ registerPlugin }) => registerPlugin<MeshWatchPlugin>("MeshWatch"));
+  void watch.then((w) => w.configure({ messages: notificationsWanted(), nodes: nodeNotificationsWanted() })).catch(() => undefined);
 }
 
 type LocalNotificationsModule = typeof import("@capacitor/local-notifications");
