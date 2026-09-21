@@ -1,16 +1,14 @@
 /**
- * A radio on the network, from a phone. Companion firmware built with Wi-Fi
- * (ESP32 boards, `WIFI_SSID` at build time) listens on TCP port 5000 and
- * speaks exactly what its USB serial speaks: `'<'`/`'>'`, a little-endian
- * length and the frame. The socket is the app's own plugin, `MeshTcp`
+ * A radio on the network, from a phone (see `tcp.ts` for what the firmware
+ * serves). The socket is the app's own plugin, `MeshTcp`
  * (`MeshTcpPlugin.swift` on iOS, `MeshTcpPlugin.java` on Android); the
  * framing is done here.
  */
 
 import type { PluginListenerHandle } from "@capacitor/core";
 import { BaseTransport, frameForStream, StreamFrameDecoder } from "@meshnet/meshcore";
-import type { Connector, FoundDevice } from "./types.js";
-import { readSetting, writeSetting } from "../lib/storage.js";
+import { addressOf, knownAddresses, rememberAddress, TCP_CONNECT_TIMEOUT_S } from "./tcp.js";
+import type { Connector } from "./types.js";
 
 interface MeshTcpPlugin {
   open(options: { host: string; port: number; timeout?: number }): Promise<{ id: string }>;
@@ -25,9 +23,6 @@ function tcp(): Promise<MeshTcpPlugin> {
   plugin ??= import("@capacitor/core").then(({ registerPlugin }) => registerPlugin<MeshTcpPlugin>("MeshTcp"));
   return plugin;
 }
-
-/** The port companion firmware listens on unless it was built with another. */
-export const DEFAULT_TCP_PORT = 5000;
 
 function toBase64(bytes: Uint8Array): string {
   let text = "";
@@ -89,38 +84,6 @@ class CapacitorTcpTransport extends BaseTransport {
   }
 }
 
-/** `host:port`, with the port the firmware uses when none is given. Brackets keep an IPv6 address whole. */
-export function parseAddress(text: string): { host: string; port: number } | null {
-  const value = text.trim();
-  if (!value) return null;
-  const bracketed = /^\[([^\]]+)\](?::(\d+))?$/.exec(value);
-  if (bracketed) return { host: bracketed[1]!, port: bracketed[2] ? Number(bracketed[2]) : DEFAULT_TCP_PORT };
-  const colons = value.split(":").length - 1;
-  if (colons === 1) {
-    const [host, port] = value.split(":") as [string, string];
-    if (!host || !/^\d+$/.test(port)) return null;
-    return { host, port: Number(port) };
-  }
-  // No colon is a bare host; several are an IPv6 address with no port.
-  return { host: value, port: DEFAULT_TCP_PORT };
-}
-
-export function addressLabel(host: string, port: number): string {
-  const shown = host.includes(":") ? `[${host}]` : host;
-  return port === DEFAULT_TCP_PORT ? shown : `${shown}:${port}`;
-}
-
-/** Addresses connected to before, newest first. */
-const KNOWN_KEY = "meshnet.tcp.known";
-
-function known(): FoundDevice[] {
-  return readSetting<FoundDevice[]>(KNOWN_KEY, []);
-}
-
-function remember(device: FoundDevice): void {
-  writeSetting(KNOWN_KEY, [device, ...known().filter((d) => d.id !== device.id)].slice(0, 8));
-}
-
 export const capacitorTcpConnector: Connector = {
   id: "cap-tcp",
   kind: "tcp",
@@ -129,26 +92,17 @@ export const capacitorTcpConnector: Connector = {
   mode: "address",
 
   async remembered() {
-    return known();
+    return knownAddresses();
   },
 
   async connect(device) {
     if (!device) throw new Error("type the radio's address");
-    const address = parseAddress(device.id);
-    if (!address || address.port < 1 || address.port > 65535) throw new Error(`${device.id} is not an address`);
+    const address = addressOf(device);
     const api = await tcp();
     await listen(api);
-    const { id } = await api.open({ ...address, timeout: 10 });
+    const { id } = await api.open({ ...address, timeout: TCP_CONNECT_TIMEOUT_S });
     const transport = new CapacitorTcpTransport(api, id, device.name);
-    remember(device);
+    rememberAddress(device);
     return transport;
   },
 };
-
-/** What the connect screen hands `connect` for a typed address. */
-export function addressDevice(text: string): FoundDevice | null {
-  const address = parseAddress(text);
-  if (!address) return null;
-  const label = addressLabel(address.host, address.port);
-  return { id: label, name: label, detail: null, rssi: null };
-}

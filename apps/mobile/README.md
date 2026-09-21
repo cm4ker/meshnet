@@ -17,7 +17,8 @@ listens on TCP port 5000 and speaks what its USB serial speaks. `MeshTcp` is a
 socket and nothing more: `ios/App/App/MeshTcpPlugin.swift` (Network.framework)
 and `android/app/src/main/java/dev/cm4ker/meshnet/MeshTcpPlugin.java`, the same
 methods and events on both. The framing is the client's
-(`apps/web/src/transports/capacitorTcp.ts`).
+(`apps/web/src/transports/capacitorTcp.ts`, with what the desktop shares in
+`tcp.ts`).
 
 - iOS registers it in `MeshViewController`, which `Main.storyboard` names in
   place of Capacitor's own bridge view controller. Android registers it in

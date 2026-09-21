@@ -31,7 +31,7 @@
     "targets": "all",
     "publisher": "Meshnet",
     "shortDescription": "A MeshCore companion",
-    "longDescription": "Chat over a MeshCore LoRa mesh through a radio on Bluetooth or USB.",
+    "longDescription": "Chat over a MeshCore LoRa mesh through a radio on Bluetooth, USB or Wi-Fi.",
     "windows": {
       "nsis": {
         "installMode": "currentUser"

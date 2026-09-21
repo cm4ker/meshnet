@@ -9,6 +9,7 @@ import { capacitorTcpConnector } from "./capacitorTcp.js";
 import { demoConnector, demoWanted } from "./demo.js";
 import { tauriBleConnector } from "./tauriBle.js";
 import { tauriSerialConnector } from "./tauriSerial.js";
+import { tauriTcpConnector } from "./tauriTcp.js";
 import { tauriWinBleConnector } from "./tauriWinBle.js";
 import type { Connector, RememberedLink } from "./types.js";
 import { webBluetoothConnector } from "./webBluetooth.js";
@@ -16,14 +17,14 @@ import { webSerialConnector } from "./webSerial.js";
 
 export type { Connector, FoundDevice, RememberedLink } from "./types.js";
 export { NeedsPairingError, needsPairing } from "./types.js";
-export { addressDevice } from "./capacitorTcp.js";
+export { addressDevice } from "./tcp.js";
 
 export function connectors(): Connector[] {
   const list: Connector[] = [];
   switch (shell()) {
     case "tauri":
       // Windows gets the shell's own GATT path; see tauriWinBle.ts for why.
-      list.push(navigator.userAgent.includes("Windows") ? tauriWinBleConnector : tauriBleConnector, tauriSerialConnector);
+      list.push(navigator.userAgent.includes("Windows") ? tauriWinBleConnector : tauriBleConnector, tauriSerialConnector, tauriTcpConnector);
       break;
     case "capacitor":
       list.push(capacitorBleConnector, capacitorTcpConnector);

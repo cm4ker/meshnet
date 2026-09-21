@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addressDevice, parseAddress } from "./capacitorTcp.js";
+import { addressDevice, parseAddress } from "./tcp.js";
 
 test("an address without a port gets the firmware's 5000", () => {
   assert.deepEqual(parseAddress("192.168.1.50"), { host: "192.168.1.50", port: 5000 });
