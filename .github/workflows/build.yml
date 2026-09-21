@@ -2,7 +2,8 @@
 # Windows installers for x64 and ARM64, a debug Android APK and the web
 # bundle. They land on the rolling `dev` pre-release; a `v*` tag makes a
 # proper release from the same files. Pull requests get the same builds as
-# workflow artifacts. iOS is left out: it needs a Mac and a signing identity.
+# workflow artifacts. iOS is left out: it is built on a Mac and uploaded to
+# TestFlight by hand (apps/mobile/README.md).
 name: Build
 
 on:

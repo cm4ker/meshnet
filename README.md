@@ -50,7 +50,7 @@ pnpm ios             # the same for Xcode; needs a Mac
 
 ## Builds
 
-Every push to `master` runs the checks and builds the Windows installers (x64 and ARM64), a debug Android APK and the web bundle. They land on the rolling `dev` pre-release under Releases, replaced each time; a `v*` tag makes a proper release from the same workflow. Pull requests get the same builds as workflow artifacts. iOS is not built: it needs a Mac and a signing identity.
+Every push to `master` runs the checks and builds the Windows installers (x64 and ARM64), a debug Android APK and the web bundle. They land on the rolling `dev` pre-release under Releases, replaced each time; a `v*` tag makes a proper release from the same workflow. Pull requests get the same builds as workflow artifacts. iOS is not built there: it is built on a Mac and uploaded to TestFlight by hand, see [apps/mobile/README.md](apps/mobile/README.md).
 
 ## Where the protocol came from
 

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "//": "The phone shell, iOS and Android: Capacitor around the built client, with the BLE plugin the client calls. No `build`, `typecheck` or `test` script: `pnpm -r` runs on machines with no Xcode and no Android SDK. An iOS build needs a Mac.",
+  "//": "The phone shell, iOS and Android: Capacitor around the built client, with the BLE plugin the client calls. No `build`, `typecheck` or `test` script: `pnpm -r` runs on machines with no Xcode and no Android SDK. An iOS build needs a Mac; see README.md here.",
   "scripts": {
     "sync": "pnpm --filter @meshnet/meshcore build && pnpm --filter @meshnet/web build && cap sync",
     "android": "pnpm sync && cap open android",
