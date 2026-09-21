@@ -6,6 +6,7 @@
 
 import { BaseTransport, BLE } from "@meshnet/meshcore";
 import type { Connector, FoundDevice } from "./types.js";
+import { nativePlatform } from "../lib/platform.js";
 import { readSetting, writeSetting } from "../lib/storage.js";
 
 type BleModule = typeof import("@capacitor-community/bluetooth-le");
@@ -65,6 +66,8 @@ class CapacitorBleTransport extends BaseTransport {
   }
 }
 
+const SCAN_MS = 10_000;
+
 /** Radios connected to before, by the id the phone gave them, so they can be reached without a scan. */
 const KNOWN_KEY = "meshnet.ble.known";
 
@@ -86,6 +89,16 @@ export const capacitorBleConnector: Connector = {
   async scan(onFound, signal) {
     const client = await ble();
     const seen = new Map<string, FoundDevice>();
+    // A radio already connected to this phone, by another app or by the
+    // system, stops advertising, and iOS leaves it out of every scan. iOS
+    // hands those over by service instead. Android's list is every GATT
+    // connection, watches and headphones included, so it is not asked.
+    const connected = nativePlatform() === "ios" ? await client.getConnectedDevices([BLE.service]).catch(() => []) : [];
+    for (const device of connected) {
+      seen.set(device.deviceId, { id: device.deviceId, name: device.name ?? "MeshCore", detail: "connected to this phone", rssi: null });
+    }
+    if (seen.size > 0) onFound([...seen.values()]);
+    if (signal.aborted) return;
     await client.requestLEScan({ services: [BLE.service], allowDuplicates: false }, (result) => {
       seen.set(result.device.deviceId, {
         id: result.device.deviceId,
@@ -95,7 +108,18 @@ export const capacitorBleConnector: Connector = {
       });
       onFound([...seen.values()]);
     });
-    signal.addEventListener("abort", () => void client.stopLEScan().catch(() => undefined), { once: true });
+    // The plugin scans until told to stop and resolves as soon as it starts.
+    // This one stops after a while, and resolves then, so the screen can tell
+    // "still looking" from "nothing found".
+    await new Promise<void>((resolve) => {
+      const stop = () => {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", stop);
+        void client.stopLEScan().catch(() => undefined).finally(resolve);
+      };
+      const timer = setTimeout(stop, SCAN_MS);
+      signal.addEventListener("abort", stop, { once: true });
+    });
   },
 
   async remembered() {
@@ -105,6 +129,10 @@ export const capacitorBleConnector: Connector = {
   async connect(device) {
     if (!device) throw new Error("pick a radio from the list");
     const client = await ble();
+    // iOS connects only to a peripheral the plugin has met since launch. A
+    // remembered radio, or the one "Reconnect at launch" reaches for, is met
+    // by asking the system for it by id.
+    await client.getDevices([device.id]).catch(() => []);
     let transport: CapacitorBleTransport | null = null;
     await client.connect(device.id, () => transport?.onDropped());
     transport = new CapacitorBleTransport(client, device.id, device.name);

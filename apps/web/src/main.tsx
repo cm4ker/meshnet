@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.js";
 import { autoConnect, connectWith, disconnect, getLink } from "./lib/link.js";
+import { isCapacitor } from "./lib/platform.js";
 import { session } from "./lib/session.js";
 import { connectors } from "./transports/index.js";
 import { initTheme } from "./theme/store.js";
@@ -13,6 +14,15 @@ Object.assign(window, { meshnet: { session, getLink, connectWith, disconnect, co
 
 // Before the first render, so the page never paints in one palette and resolves into another.
 initTheme();
+
+// In the phone app the page is the whole app, laid out to the screen, and a
+// pinch that zooms it only leaves it scrolling sideways. The same cap stops
+// iOS zooming in on a field it thinks too small to type in. A browser tab
+// keeps its zoom.
+if (isCapacitor()) {
+  const viewport = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+  if (viewport) viewport.content += ", maximum-scale=1, user-scalable=no";
+}
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");
