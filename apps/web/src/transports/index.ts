@@ -1,0 +1,56 @@
+/**
+ * The connectors this platform has, and the link the client last used.
+ */
+
+import { hasWebBluetooth, hasWebSerial, shell } from "../lib/platform.js";
+import { readSetting, writeSetting } from "../lib/storage.js";
+import { capacitorBleConnector } from "./capacitorBle.js";
+import { demoConnector, demoWanted } from "./demo.js";
+import { tauriBleConnector } from "./tauriBle.js";
+import { tauriSerialConnector } from "./tauriSerial.js";
+import type { Connector, RememberedLink } from "./types.js";
+import { webBluetoothConnector } from "./webBluetooth.js";
+import { webSerialConnector } from "./webSerial.js";
+
+export type { Connector, FoundDevice, RememberedLink } from "./types.js";
+
+export function connectors(): Connector[] {
+  const list: Connector[] = [];
+  switch (shell()) {
+    case "tauri":
+      list.push(tauriBleConnector, tauriSerialConnector);
+      break;
+    case "capacitor":
+      list.push(capacitorBleConnector);
+      break;
+    default:
+      if (hasWebBluetooth()) list.push(webBluetoothConnector);
+      if (hasWebSerial()) list.push(webSerialConnector);
+  }
+  if (demoWanted()) list.push(demoConnector);
+  return list;
+}
+
+export function connectorById(id: string): Connector | undefined {
+  return connectors().find((c) => c.id === id);
+}
+
+const LAST_KEY = "meshnet.link.last";
+
+export function lastLink(): RememberedLink | null {
+  return readSetting<RememberedLink | null>(LAST_KEY, null);
+}
+
+export function rememberLink(link: RememberedLink | null): void {
+  writeSetting(LAST_KEY, link);
+}
+
+const AUTO_KEY = "meshnet.link.auto";
+
+export function autoConnectWanted(): boolean {
+  return readSetting<boolean>(AUTO_KEY, true);
+}
+
+export function setAutoConnect(on: boolean): void {
+  writeSetting(AUTO_KEY, on);
+}

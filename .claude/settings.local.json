@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(dir:*)",
+      "Bash(powershell -NoProfile -Command:*)",
+      "Bash(dotnet run:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(powershell -File:*)",
+      "Bash(dotnet script eval \"var asm = System.Reflection.Assembly.LoadFrom\\(@\"\"C:\\\\Users\\\\cmake\\\\.nuget\\\\packages\\\\mapsui.avalonia\\\\5.0.2\\\\lib\\\\net8.0\\\\Mapsui.Avalonia.dll\"\"\\); foreach\\(var t in asm.ExportedTypes.Where\\(t => t.Name.Contains\\(\"\"Map\"\"\\)\\)\\) Console.WriteLine\\(t.FullName\\);\")",
+      "Bash(dotnet script eval:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(curl:*)",
+      "Read(//c/Users/cmake/.nuget/packages/**)"
+    ]
+  }
+}

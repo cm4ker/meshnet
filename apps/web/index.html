@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- Under the notch and the home indicator; the stylesheet's safe-area insets keep the chrome out from under them. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <title>Meshnet</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#dcdcdd" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#3b414d" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Meshnet" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <!-- What the window shows until the client has loaded: the ground of the theme, nothing else. -->
+    <style>
+      html {
+        --boot-ground: #fafafa;
+        background: var(--boot-ground);
+      }
+      @media (prefers-color-scheme: dark) {
+        html {
+          --boot-ground: #282c33;
+        }
+      }
+    </style>
+    <script>
+      try {
+        var ground = localStorage.getItem("meshnet.theme.ground");
+        if (ground) document.documentElement.style.setProperty("--boot-ground", ground);
+      } catch (error) {
+        // A private window: the system's colours will do.
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./src/main.tsx"></script>
+  </body>
+</html>

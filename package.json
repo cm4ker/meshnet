@@ -1,0 +1,32 @@
+{
+  "name": "meshnet",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.17.1",
+  "scripts": {
+    "build": "pnpm -r build",
+    "//": "@meshnet/meshcore is consumed through its dist, so every entry point that loads it rebuilds it first. Without this an edit to the protocol is invisible to the web app until someone remembers to build by hand.",
+    "meshcore": "pnpm --filter @meshnet/meshcore build",
+    "pretypecheck": "pnpm run meshcore",
+    "typecheck": "pnpm -r typecheck",
+    "pretest": "pnpm run meshcore",
+    "test": "pnpm -r test",
+    "preweb": "pnpm run meshcore",
+    "web": "pnpm --filter @meshnet/web dev",
+    "///": "The shells bundle the built client, so a shell build needs `pnpm build` first. Neither is part of `pnpm -r build`: a workspace-wide build has no reason to want a Rust toolchain, Xcode or the Android SDK.",
+    "desktop": "pnpm --filter @meshnet/desktop desktop",
+    "desktop:bundle": "pnpm --filter @meshnet/desktop desktop:bundle",
+    "mobile:sync": "pnpm --filter @meshnet/mobile sync",
+    "android": "pnpm --filter @meshnet/mobile android",
+    "ios": "pnpm --filter @meshnet/mobile ios"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.9.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

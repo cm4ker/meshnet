@@ -1,0 +1,16 @@
+{
+  "name": "@meshnet/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "//": "No `build`, `typecheck` or `test` script on purpose: `pnpm -r build` runs on machines without a Rust toolchain, and a workspace-wide build should not start a native bundle. The desktop scripts are only ever asked for by name.",
+  "scripts": {
+    "desktop": "tauri dev",
+    "desktop:bundle": "tauri build",
+    "desktop:icon": "tauri icon ../web/public/icon.svg",
+    "desktop:check": "cargo check --manifest-path src-tauri/Cargo.toml"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.5"
+  }
+}

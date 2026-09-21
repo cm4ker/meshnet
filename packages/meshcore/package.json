@@ -1,0 +1,22 @@
+{
+  "name": "@meshnet/meshcore",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "//": "The MeshCore Companion Radio Protocol and a session over it, with no dependency on a platform: the transports (BLE, USB serial) are handed in by whichever shell is running. Consumed through `dist`, like sovabox's shared package.",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.2"
+  }
+}

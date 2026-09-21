@@ -1,0 +1,31 @@
+[package]
+name = "meshnet-desktop"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "A MeshCore companion in a window of its own"
+
+[lib]
+name = "meshnet_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# The two links a desktop has to a radio. WebView2 and WebKit have neither
+# Web Bluetooth nor Web Serial, so the shell carries them: btleplug for BLE,
+# serialport for the cable. The client calls them through the plugins' JS.
+tauri-plugin-blec = "0.14"
+tauri-plugin-serialplugin = "3"
+# Links in messages open in the system browser, not in this window.
+tauri-plugin-opener = "2"
+
+# A shipped binary is built once and run for months, so the slow settings are
+# the right ones here.
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
