@@ -1,0 +1,135 @@
+# Every push to master is checked and built for every home the client has:
+# Windows installers for x64 and ARM64, a debug Android APK and the web
+# bundle. They land on the rolling `dev` pre-release; a `v*` tag makes a
+# proper release from the same files. Pull requests get the same builds as
+# workflow artifacts. iOS is left out: it needs a Mac and a signing identity.
+name: Build
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Typecheck, test, web bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm --filter @meshnet/web build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meshnet-web
+          path: apps/web/dist
+          if-no-files-found: error
+
+  desktop-windows:
+    name: Windows ${{ matrix.arch }}
+    needs: check
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-pc-windows-msvc
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          key: ${{ matrix.target }}
+      - run: pnpm install --frozen-lockfile
+      # NSIS only: WiX has no ARM64 installer, and one installer kind is enough for a test build.
+      - run: pnpm --filter @meshnet/desktop exec tauri build --target ${{ matrix.target }} --bundles nsis
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meshnet-windows-${{ matrix.arch }}
+          path: apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  android:
+    name: Android APK
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @meshnet/mobile android:apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meshnet-android
+          path: apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  release:
+    name: Publish
+    needs: [check, desktop-windows, android]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Lay out the files
+        run: |
+          mkdir out
+          cp artifacts/meshnet-windows-x64/*.exe out/
+          cp artifacts/meshnet-windows-arm64/*.exe out/
+          cp artifacts/meshnet-android/app-debug.apk out/Meshnet_android-debug.apk
+          (cd artifacts/meshnet-web && zip -qr ../../out/Meshnet_web.zip .)
+          ls -l out
+      - name: Rolling dev pre-release
+        if: github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete dev --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh release create dev --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+            --title "Dev build ${GITHUB_SHA::7}" \
+            --notes "Built from ${GITHUB_SHA} on $(date -u +%Y-%m-%d\ %H:%M) UTC. Replaced on every push to master." \
+            out/*
+      - name: Tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes out/*

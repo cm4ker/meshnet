@@ -45,6 +45,10 @@ pnpm ios             # the same for Xcode; needs a Mac
 
 `CAP_SERVER_URL=http://<your-lan-ip>:5180 pnpm mobile:sync` points a development build at a running `pnpm web` instead of the bundled client.
 
+## Builds
+
+Every push to `master` runs the checks and builds the Windows installers (x64 and ARM64), a debug Android APK and the web bundle. They land on the rolling `dev` pre-release under Releases, replaced each time; a `v*` tag makes a proper release from the same workflow. Pull requests get the same builds as workflow artifacts. iOS is not built: it needs a Mac and a signing identity.
+
 ## Where the protocol came from
 
 Every opcode and layout in `packages/meshcore/src/protocol` is copied from the firmware's `examples/companion_radio/MyMesh.cpp` (v1.17.1, protocol version 13). The client announces protocol version 3 to the radio, which is where the message frames gained an SNR byte; nothing above it changes what the firmware sends. Frames this client does not know are reported, never thrown on.
