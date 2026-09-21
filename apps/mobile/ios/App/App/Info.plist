@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>Meshnet</string>
+        <string>Ommesh</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -27,9 +27,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Meshnet talks to your MeshCore radio over Bluetooth.</string>
+	<string>Ommesh talks to your MeshCore radio over Bluetooth.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>Meshnet talks to your MeshCore radio over Bluetooth.</string>
+	<string>Ommesh talks to your MeshCore radio over Bluetooth.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

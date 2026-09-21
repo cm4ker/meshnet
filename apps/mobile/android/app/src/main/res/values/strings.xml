@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Meshnet</string>
-    <string name="title_activity_main">Meshnet</string>
+    <string name="app_name">Ommesh</string>
+    <string name="title_activity_main">Ommesh</string>
     <string name="package_name">dev.cm4ker.meshnet</string>
     <string name="custom_url_scheme">dev.cm4ker.meshnet</string>
 </resources>

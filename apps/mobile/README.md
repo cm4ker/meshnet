@@ -1,5 +1,9 @@
 # The phone shell
 
+On a phone the app is called Ommesh: in App Store Connect, under its icon on iOS
+and Android, and in the Bluetooth prompt. The bundle ID stays `dev.cm4ker.meshnet`, and so do the internal names (the App ID,
+the "Meshnet App Store" profile).
+
 Capacitor 8 around the built client (`apps/web/dist`), for iOS and Android. The
 shell carries the client rather than loading it from a server: a radio in a field
 has no network, and the app must open without one. The only native code is the

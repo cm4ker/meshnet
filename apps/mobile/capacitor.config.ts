@@ -10,7 +10,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
  */
 const config: CapacitorConfig = {
   appId: "dev.cm4ker.meshnet",
-  appName: "Meshnet",
+  appName: "Ommesh",
   webDir: "../web/dist",
   backgroundColor: "#282c33",
   ios: {
