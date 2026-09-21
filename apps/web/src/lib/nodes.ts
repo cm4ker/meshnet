@@ -192,16 +192,17 @@ export function parseRadio(value: string | undefined): RadioValue | null {
   const parts = value.split(",").map((p) => p.trim());
   if (parts.length !== 4) return null;
   const [freq, bw, sf, cr] = parts as [string, string, string, string];
-  return { freq: trimNumber(freq), bw: trimNumber(bw), sf, cr };
+  // The node keeps the frequency as a float and prints it whole: 869.1610107 is 869.161.
+  return { freq: trimNumber(freq, 3), bw: trimNumber(bw, 3), sf, cr };
 }
 
 export function formatRadio(radio: RadioValue): string {
   return `${radio.freq},${radio.bw},${radio.sf},${radio.cr}`;
 }
 
-function trimNumber(text: string): string {
+function trimNumber(text: string, decimals: number): string {
   const n = Number(text);
-  return Number.isFinite(n) ? String(n) : text;
+  return Number.isFinite(n) ? String(Number(n.toFixed(decimals))) : text;
 }
 
 /** What is wrong with a value before it goes on the air, or null. */

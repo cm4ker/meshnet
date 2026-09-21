@@ -32,6 +32,8 @@ test("the node's clock drift is ours at sign-in less its own", () => {
 
 test("get radio's answer splits into four fields, numbers trimmed", () => {
   assert.deepEqual(parseRadio("869.618,62.500,8,8"), { freq: "869.618", bw: "62.5", sf: "8", cr: "8" });
+  // As a repeater on 869.161 answers it: the float, printed whole.
+  assert.deepEqual(parseRadio("869.1610107,62.5,7,7"), { freq: "869.161", bw: "62.5", sf: "7", cr: "7" });
   assert.equal(parseRadio("nonsense"), null);
 });
 

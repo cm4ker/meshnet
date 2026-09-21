@@ -1487,7 +1487,8 @@ textarea.input {
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: var(--space-3);
 }
-.field.wide {
+.field.wide,
+.toggle.wide {
   grid-column: 1 / -1;
 }
 .field-label {

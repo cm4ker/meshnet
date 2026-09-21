@@ -374,7 +374,7 @@ function FieldInput({
   const className = ["input", dirty ? "dirty" : ""].join(" ");
   if (field.kind === "toggle") {
     return (
-      <label className={["toggle", "field", "wide", dirty ? "dirty" : ""].join(" ")} htmlFor={id}>
+      <label className={["toggle", "wide", dirty ? "dirty" : ""].join(" ")} htmlFor={id}>
         <span className="toggle-text">
           <span>
             {field.label} <code className="muted small">{field.name}</code>
