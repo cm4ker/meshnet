@@ -246,6 +246,21 @@ test("what was heard survives a reconnect through the storage, keyed by the radi
   assert.equal(fetch.length, 5);
 });
 
+test("history saved with the raw path_len byte is read back as a hop count", async () => {
+  const storage = new MemoryStorage();
+  const session = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  const radio = new ScriptedRadio();
+  radio.queue.push(dmFrame(BOB, "one hop, two-byte hashes"));
+  await session.connect(radio);
+  await session.disconnect();
+  const saved = storage.saved.get(session.getState().self!.key)!;
+  saved.messages[0]!.hops = 0x41; // what the client stored before it masked the byte
+
+  const second = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  await second.connect(new ScriptedRadio());
+  assert.equal(second.getState().messages[0]?.hops, 1);
+});
+
 test("a message from a sender not yet in the contacts is filed under its prefix, then moved", async () => {
   const radio = new ScriptedRadio();
   radio.contacts = [];

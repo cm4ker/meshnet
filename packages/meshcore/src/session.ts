@@ -327,7 +327,9 @@ export class MeshSession {
         contacts: persisted?.contacts ?? {},
         contactsCursor: persisted?.contactsCursor ?? 0,
         channels: persisted?.channels ?? [],
-        messages: persisted?.messages ?? [],
+        // History saved before the hop count was masked holds the raw path_len
+        // byte; the low six bits are the hops either way.
+        messages: (persisted?.messages ?? []).map((m) => (m.hops === null ? m : { ...m, hops: m.hops & 63 })),
         unread: persisted?.unread ?? {},
       });
       this.log("link", `connected to ${self.name} (${device.firmwareVersion})`);
