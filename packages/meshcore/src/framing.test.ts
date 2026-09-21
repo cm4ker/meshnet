@@ -37,3 +37,26 @@ test("the direction byte for the app is not mistaken for a frame from the radio"
   const decoder = new StreamFrameDecoder();
   assert.equal(decoder.push(new Uint8Array([0x3c, 1, 0, 5])).length, 0);
 });
+
+test("a partial USB frame expires so the next reply is not swallowed as its body", () => {
+  for (const partial of [[0x3e], [0x3e, 50], [0x3e, 50, 0, 17, 0]]) {
+    const decoder = new StreamFrameDecoder();
+    assert.deepEqual(decoder.push(new Uint8Array(partial), 0), []);
+    assert.deepEqual(decoder.push(new Uint8Array(), 999), []);
+    assert.deepEqual(decoder.push(new Uint8Array([0x3e, 1, 0, 10]), 1000), [new Uint8Array([10])]);
+  }
+});
+
+test("short gaps and markers inside binary payloads preserve a fragmented frame", () => {
+  const decoder = new StreamFrameDecoder();
+  assert.deepEqual(decoder.push(new Uint8Array([0x3e, 4, 0, 17]), 0), []);
+  assert.deepEqual(decoder.push(new Uint8Array([0x3e, 1]), 100), []);
+  assert.deepEqual(decoder.push(new Uint8Array([0]), 200), [new Uint8Array([17, 0x3e, 1, 0])]);
+});
+
+test("impossible lengths and overlapping headers do not hide the next reply", () => {
+  for (const prefix of [[0x3e, 177, 0], [0x3e], [0x3e, 100]]) {
+    const decoder = new StreamFrameDecoder();
+    assert.deepEqual(decoder.push(new Uint8Array([...prefix, 0x3e, 1, 0, 10])), [new Uint8Array([10])]);
+  }
+});

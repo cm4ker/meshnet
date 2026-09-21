@@ -14,6 +14,9 @@ import { MAX_FRAME_SIZE } from "./protocol/codes.js";
 
 const APP_TO_RADIO = 0x3c; // '<'
 const RADIO_TO_APP = 0x3e; // '>'
+// At 115200 baud a whole frame takes under 16 ms. An unfinished frame after
+// a second without bytes is a truncated write, not a frame still arriving.
+const PARTIAL_FRAME_TIMEOUT_MS = 1000;
 
 export function frameForStream(payload: Uint8Array): Uint8Array {
   if (payload.length > MAX_FRAME_SIZE) {
@@ -32,9 +35,13 @@ export class StreamFrameDecoder {
   private length = 0;
   private body = new Uint8Array(0);
   private filled = 0;
+  private lastChunkAt = 0;
 
   /** Feeds a chunk and returns every complete frame it finished. */
-  push(chunk: Uint8Array): Uint8Array[] {
+  push(chunk: Uint8Array, now = Date.now()): Uint8Array[] {
+    if (chunk.length === 0) return [];
+    if (this.state !== "idle" && now - this.lastChunkAt >= PARTIAL_FRAME_TIMEOUT_MS) this.reset();
+    this.lastChunkAt = now;
     const frames: Uint8Array[] = [];
     for (const byte of chunk) {
       switch (this.state) {
@@ -47,10 +54,16 @@ export class StreamFrameDecoder {
           break;
         case "len2":
           this.length |= byte << 8;
-          if (this.length === 0 || this.length > MAX_FRAME_SIZE * 4) {
+          if (this.length === 0 || this.length > MAX_FRAME_SIZE) {
             // An empty frame is nothing; an absurd length is a marker byte
             // inside a boot log. Both go back to looking for a marker.
-            this.state = "idle";
+            // A marker can overlap a rejected header after a truncated write.
+            if ((this.length & 0xff) === RADIO_TO_APP) {
+              this.length = byte;
+              this.state = "len2";
+            } else {
+              this.state = byte === RADIO_TO_APP ? "len1" : "idle";
+            }
           } else {
             this.body = new Uint8Array(this.length);
             this.filled = 0;

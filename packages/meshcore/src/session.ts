@@ -9,7 +9,7 @@
  * phone do not mix.
  */
 
-import { MeshCoreClient, MeshCoreError, type TextSendResult } from "./client.js";
+import { MeshCoreClient, MeshCoreError, TimeoutError, type TextSendResult } from "./client.js";
 import { bytesEqual, fromHex, toHex, unixNow } from "./protocol/bytes.js";
 import { groupTextPayload } from "./protocol/group.js";
 import { PayloadType, parseRawPacket } from "./protocol/packet.js";
@@ -593,8 +593,10 @@ export class MeshSession {
       void this.refreshBattery();
     } catch (error) {
       const message = (error as Error).message;
-      this.set({ error: message });
-      this.log("error", `connect failed: ${message}`);
+      if (this.client === client) {
+        this.set({ error: message });
+        this.log("error", `connect failed: ${message}`);
+      }
       await client.close().catch(() => undefined);
       throw error;
     }
@@ -831,17 +833,34 @@ export class MeshSession {
     }
     const client = this.need();
     this.set({ syncing: true });
+    let retries = 0;
     try {
       do {
         this.syncQueued = false;
         for (;;) {
-          const frame = await client.syncNextMessage();
+          let frame;
+          try {
+            frame = await client.syncNextMessage();
+          } catch (error) {
+            // A lost USB frame need not mean a lost link. Give the stream a
+            // quiet interval to discard its partial frame, then resume draining.
+            if (
+              !(error instanceof TimeoutError) || client.transport.kind !== "serial" ||
+              retries >= 2 || this.client !== client || client.isClosed
+            ) throw error;
+            retries += 1;
+            this.log("error", `${error.message}; retrying message sync (${retries}/2)`);
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            if (this.client !== client || client.isClosed) throw error;
+            continue;
+          }
+          retries = 0;
           if (!frame) break;
           this.receive(frame);
         }
       } while (this.syncQueued);
     } finally {
-      this.set({ syncing: false });
+      if (this.client === client) this.set({ syncing: false });
     }
   }
 

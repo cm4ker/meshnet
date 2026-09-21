@@ -5,13 +5,18 @@ import { Cmd, Push, Resp, TxtType } from "./protocol/codes.js";
 import { groupTextPayload } from "./protocol/group.js";
 import { channelConversation, contactConversation, MeshSession, splitChannelText, type PersistedState } from "./session.js";
 import { BaseTransport } from "./transport.js";
+import { TimeoutError, TransportClosedError } from "./client.js";
 
 const SELF = fromHex("a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf");
 const BOB = fromHex("0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20");
 
 /** A radio with one contact, one channel, and whatever is put in its queue. */
 class ScriptedRadio extends BaseTransport {
-  readonly kind = "ble" as const;
+  readonly kind: "ble" | "serial";
+  constructor(kind: "ble" | "serial" = "ble") {
+    super();
+    this.kind = kind;
+  }
   readonly label = "MeshCore-test";
   sent: Uint8Array[] = [];
   queue: Uint8Array[] = [];
@@ -169,6 +174,89 @@ class MemoryStorage {
 function tick(ms = 0): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+test("USB message sync retries a lost reply and keeps the session connected", async () => {
+  const radio = new ScriptedRadio("serial");
+  radio.queue.push(channelFrame(0, "Alice: after the lost reply"));
+  const send = radio.send.bind(radio);
+  let attempts = 0;
+  radio.send = async (frame) => {
+    if (frame[0] === Cmd.SyncNextMessage && ++attempts === 1) throw new TimeoutError("syncNextMessage", 8000);
+    await send(frame);
+  };
+  const session = new MeshSession();
+  await session.connect(radio);
+  assert.equal(session.getState().status, "ready");
+  assert.equal(session.getState().messages.length, 1);
+  assert.equal(attempts, 3); // lost reply, message, queue empty
+  assert.ok(session.getState().log.some((entry) => entry.text.includes("retrying message sync (1/2)")));
+  await session.disconnect();
+});
+
+test("persistent USB silence still fails after bounded message sync retries", async () => {
+  const radio = new ScriptedRadio("serial");
+  const send = radio.send.bind(radio);
+  let attempts = 0;
+  radio.send = async (frame) => {
+    if (frame[0] === Cmd.SyncNextMessage) {
+      attempts += 1;
+      throw new TimeoutError("syncNextMessage", 8000);
+    }
+    await send(frame);
+  };
+  const session = new MeshSession();
+  await assert.rejects(session.connect(radio), TimeoutError);
+  assert.equal(attempts, 3);
+  assert.equal(session.getState().status, "closed");
+});
+
+test("a USB transport failure is not retried as a message timeout", async () => {
+  const radio = new ScriptedRadio("serial");
+  const send = radio.send.bind(radio);
+  let attempts = 0;
+  radio.send = async (frame) => {
+    if (frame[0] === Cmd.SyncNextMessage) {
+      attempts += 1;
+      throw new TransportClosedError(new Error("cable out"));
+    }
+    await send(frame);
+  };
+  const session = new MeshSession();
+  await assert.rejects(session.connect(radio), TransportClosedError);
+  assert.equal(attempts, 1);
+  assert.equal(session.getState().status, "closed");
+});
+
+test("disconnect during a USB retry cannot send again or change a new session", async () => {
+  const radio = new ScriptedRadio("serial");
+  const send = radio.send.bind(radio);
+  let attempts = 0;
+  radio.send = async (frame) => {
+    if (frame[0] === Cmd.SyncNextMessage) {
+      attempts += 1;
+      throw new TimeoutError("syncNextMessage", 8000);
+    }
+    await send(frame);
+  };
+  const session = new MeshSession();
+  const retryStarted = new Promise<void>((resolve) => {
+    const off = session.subscribe(() => {
+      if (session.getState().log.some((entry) => entry.text.includes("retrying message sync"))) {
+        off();
+        resolve();
+      }
+    });
+  });
+  const oldConnect = assert.rejects(session.connect(radio), TimeoutError);
+  await retryStarted;
+  await session.disconnect();
+  await session.connect(new ScriptedRadio());
+  await oldConnect;
+  assert.equal(attempts, 1);
+  assert.equal(session.getState().status, "ready");
+  assert.equal(session.getState().error, null);
+  await session.disconnect();
+});
 
 test("connecting queries the radio, reads its contacts and channels, and drains the queue", async () => {
   const radio = new ScriptedRadio();

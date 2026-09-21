@@ -14,33 +14,47 @@ function serial(): Promise<SerialModule> {
   return plugin;
 }
 
-class TauriSerialTransport extends BaseTransport {
+export class TauriSerialTransport extends BaseTransport {
   readonly kind = "serial" as const;
   private readonly decoder = new StreamFrameDecoder();
 
   constructor(
-    private readonly port: InstanceType<SerialModule["SerialPort"]>,
+    private readonly port: Pick<InstanceType<SerialModule["SerialPort"]>, "open" | "watch" | "writeBinary" | "close">,
     readonly label: string,
   ) {
     super();
   }
 
   async open(): Promise<void> {
-    await this.port.open();
-    await this.port.watch(
-      {
-        onData: (data) => {
-          const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
-          for (const frame of this.decoder.push(bytes)) this.emitFrame(frame);
+    try {
+      await this.port.open();
+      await this.port.watch(
+        {
+          onData: (data) => {
+            const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
+            for (const frame of this.decoder.push(bytes)) this.emitFrame(frame);
+          },
+          onDisconnect: (reason) => this.fail(new Error(reason || "the port closed")),
+          onError: (message) => this.fail(new Error(message)),
         },
-        onDisconnect: (reason) => this.emitClose(new Error(reason || "the port closed")),
-        onError: (message) => this.emitClose(new Error(message)),
-      },
-      { decode: false, timeout: 20 },
-    );
+        { decode: false, routeUrc: false, timeout: 20 },
+      );
+    } catch (error) {
+      await this.close();
+      throw error;
+    }
+  }
+
+  private fail(reason: Error): void {
+    // BaseTransport.close() is a no-op after emitClose, so release the native
+    // port here too; otherwise the next connection can find it still occupied.
+    if (this.isClosed) return;
+    this.emitClose(reason);
+    void this.shutdown();
   }
 
   async send(frame: Uint8Array): Promise<void> {
+    if (this.isClosed) throw new Error("port closed");
     await this.port.writeBinary(frameForStream(frame));
   }
 
