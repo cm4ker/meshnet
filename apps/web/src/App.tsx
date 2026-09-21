@@ -4,7 +4,7 @@ import { ConnectView } from "./components/ConnectView.js";
 import { Workspace } from "./components/Workspace.js";
 import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "./lib/geo.js";
 import { useLink } from "./lib/link.js";
-import { askPermissionOnce, nodeNotificationsWanted, notificationsWanted, notify, onNotificationClick, tellWatch } from "./lib/notify.js";
+import { askPermissionOnce, conversationIsVisible, nodeNotificationsWanted, notificationsWanted, notify, onNotificationClick, tellWatch } from "./lib/notify.js";
 import { session, useSession } from "./lib/session.js";
 import { titleOf } from "./lib/conversations.js";
 import { getNav, openContact, openConversation } from "./lib/nav.js";
@@ -31,8 +31,8 @@ export function App() {
   const state = useSession();
   const link = useLink();
 
-  // A message that arrives while the window is elsewhere is announced by the
-  // system. Watched here, once, rather than in a view that may not be mounted.
+  // Announce messages unless their conversation is visible and focused.
+  // Watched here, once, rather than in a view that may not be mounted.
   useEffect(() => {
     let known = new Set(session.getState().messages.map((m) => m.id));
     return session.subscribe(() => {
@@ -41,10 +41,10 @@ export function App() {
       const nav = getNav();
       for (const m of current.messages) {
         if (known.has(m.id) || m.direction !== "in") continue;
-        const focused = document.hasFocus() && nav.section === "chats" && nav.conversation === m.conversation;
+        const focused = conversationIsVisible(m.conversation, nav);
         if (!focused && notificationsWanted()) {
           const title = titleOf(current, m.conversation);
-          notify(m.sender && m.conversation.startsWith("ch:") ? `${m.sender} in ${title}` : title, m.text, `c:${m.conversation}`);
+          void notify(m.sender && m.conversation.startsWith("ch:") ? `${m.sender} in ${title}` : title, m.text, `c:${m.conversation}`);
         }
       }
       known = new Set(current.messages.map((m) => m.id));
@@ -57,7 +57,7 @@ export function App() {
       session.onDiscovered((contact) => {
         if (!nodeNotificationsWanted()) return;
         const name = contact.name || contact.prefix;
-        notify(`New ${KIND[contact.type] ?? "node"}: ${name}`, discoveredBody(contact), `n:${contact.key}`);
+        void notify(`New ${KIND[contact.type] ?? "node"}: ${name}`, discoveredBody(contact), `n:${contact.key}`);
       }),
     [],
   );
@@ -71,7 +71,7 @@ export function App() {
   }, []);
 
   // The iPhone's native watch learns the switches at every start.
-  useEffect(() => tellWatch(), []);
+  useEffect(() => { void tellWatch(); }, []);
 
   // Back on screen, the queue is read again: a phone suspends the page in the
   // background, and a "message waiting" push that arrived meanwhile may never

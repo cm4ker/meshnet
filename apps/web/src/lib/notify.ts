@@ -1,7 +1,6 @@
 /**
- * System notifications, for a message that arrives or a node heard for the
- * first time while the window is not in front. Each shell draws them its own
- * way:
+ * System notifications, for a message outside the visible chat or a node
+ * heard for the first time. Each shell draws them its own way:
  *
  * - a browser tab, with the Web Notification API;
  * - the desktop shell, natively (`announce.rs`), since WebView2 draws none;
@@ -19,6 +18,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { nativePlatform, shell } from "./platform.js";
 import { readSetting, writeSetting } from "./storage.js";
+import type { Nav } from "./nav.js";
 
 const MESSAGES_KEY = "meshnet.notify";
 const NODES_KEY = "meshnet.notify.nodes";
@@ -29,7 +29,7 @@ export function notificationsWanted(): boolean {
 
 export function setNotificationsWanted(on: boolean): void {
   writeSetting(MESSAGES_KEY, on);
-  tellWatch();
+  void tellWatch();
 }
 
 export function nodeNotificationsWanted(): boolean {
@@ -38,27 +38,36 @@ export function nodeNotificationsWanted(): boolean {
 
 export function setNodeNotificationsWanted(on: boolean): void {
   writeSetting(NODES_KEY, on);
-  tellWatch();
+  void tellWatch();
 }
 
 interface MeshWatchPlugin {
   configure(options: { messages: boolean; nodes: boolean }): Promise<void>;
 }
 
-let watch: Promise<MeshWatchPlugin> | null = null;
+let watch: MeshWatchPlugin | null = null;
 
 /** Hands the two switches to the iPhone's native watch, which cannot read the page's storage. */
-export function tellWatch(): void {
+export async function tellWatch(): Promise<void> {
   if (shell() !== "capacitor" || nativePlatform() !== "ios") return;
-  watch ??= import("@capacitor/core").then(({ registerPlugin }) => registerPlugin<MeshWatchPlugin>("MeshWatch"));
-  void watch.then((w) => w.configure({ messages: notificationsWanted(), nodes: nodeNotificationsWanted() })).catch(() => undefined);
+  try {
+    const { registerPlugin } = await import("@capacitor/core");
+    // A Capacitor plugin is a Proxy that manufactures methods for every
+    // property, including `then`. Never resolve a Promise with that proxy:
+    // Promise assimilation calls the nonexistent native `then` and hangs.
+    watch ??= registerPlugin<MeshWatchPlugin>("MeshWatch");
+    await watch.configure({ messages: notificationsWanted(), nodes: nodeNotificationsWanted() });
+  } catch (error) {
+    console.warn("Could not configure iOS background notifications", error);
+  }
 }
 
 type LocalNotificationsModule = typeof import("@capacitor/local-notifications");
 
-let local: Promise<LocalNotificationsModule["LocalNotifications"]> | null = null;
-function localNotifications(): Promise<LocalNotificationsModule["LocalNotifications"]> {
-  local ??= import("@capacitor/local-notifications").then((m) => m.LocalNotifications);
+let local: Promise<LocalNotificationsModule> | null = null;
+function localNotifications(): Promise<LocalNotificationsModule> {
+  // Resolve with the module, never the thenable native plugin proxy inside it.
+  local ??= import("@capacitor/local-notifications");
   return local;
 }
 
@@ -71,7 +80,7 @@ export async function askPermission(): Promise<boolean> {
     case "tauri":
       return true;
     case "capacitor": {
-      const api = await localNotifications();
+      const { LocalNotifications: api } = await localNotifications();
       const { display } = await api.checkPermissions();
       if (display === "granted") return true;
       if (display === "denied") return false;
@@ -97,23 +106,27 @@ export async function askPermissionOnce(): Promise<void> {
   await askPermission().catch(() => false);
 }
 
-function inFront(): boolean {
-  return document.visibilityState === "visible" && document.hasFocus();
-}
-
 let nextId = Math.floor(Date.now() / 1000) % 1_000_000_000;
 
-/** Shows a notice unless the window is in front. The caller checks which kind the reader wants. */
-export function notify(title: string, body: string, tag: string): void {
-  if (inFront()) return;
+export function conversationIsVisible(conversation: string, nav: Pick<Nav, "section" | "conversation">): boolean {
+  return document.visibilityState === "visible" && document.hasFocus() && nav.section === "chats" && nav.conversation === conversation;
+}
+
+/** The caller checks preferences and whether the message's conversation is already on screen. */
+export async function notify(title: string, body: string, tag: string): Promise<void> {
   switch (shell()) {
     case "tauri":
-      void invoke("announce", { title, body, tag }).catch(() => undefined);
+      await invoke("announce", { title, body, tag }).catch(() => undefined);
       return;
     case "capacitor":
-      void localNotifications()
-        .then((api) => api.schedule({ notifications: [{ id: ++nextId, title, body, extra: { tag } }] }))
-        .catch(() => undefined);
+      await localNotifications()
+        .then(({ LocalNotifications: api }) => api.schedule({ notifications: [{
+          id: ++nextId, title, body, extra: { tag },
+          // Without a sound iOS delivers silently. A missing named sound
+          // uses the system default; Android already supplies its own.
+          ...(nativePlatform() === "ios" ? { sound: "default", foreground: true } : {}),
+        }] }))
+        .catch((error: unknown) => console.warn("Could not show notification", error));
       return;
     default:
       if (!("Notification" in window) || Notification.permission !== "granted") return;
@@ -143,7 +156,7 @@ export function onNotificationClick(open: (tag: string) => void): void {
       return;
     case "capacitor":
       void localNotifications()
-        .then((api) =>
+        .then(({ LocalNotifications: api }) =>
           api.addListener("localNotificationActionPerformed", (action) => {
             const tag = (action.notification.extra as { tag?: string } | undefined)?.tag;
             if (tag) open(tag);

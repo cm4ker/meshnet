@@ -63,7 +63,7 @@ export function SettingsView() {
       <Section title="Behaviour">
         <Toggle
           label="Announce messages"
-          hint="A system notification for a message that arrives while the window is elsewhere."
+          hint="A system notification for a message in a chat you are not currently viewing."
           checked={notifyOn}
           onChange={async (v) => {
             if (v && !(await askPermission())) return;
