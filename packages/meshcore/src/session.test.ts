@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ByteWriter, fromHex } from "./protocol/bytes.js";
 import { Cmd, Push, Resp, TxtType } from "./protocol/codes.js";
-import { groupTextPayload } from "./protocol/group.js";
+import { groupTextPayload, heardGroupTextPayload } from "./protocol/group.js";
 import { channelConversation, contactConversation, MeshSession, splitChannelText, type PersistedState } from "./session.js";
 import { BaseTransport } from "./transport.js";
 import { TimeoutError, TransportClosedError } from "./client.js";
@@ -24,6 +24,8 @@ class ScriptedRadio extends BaseTransport {
   time = 1_700_000_000;
   nextAck = 0x11223344;
   binaryTag = 0x55667788;
+  /** Whether the radio says a text went out as a flood. */
+  sendsFlood = false;
 
   async send(frame: Uint8Array): Promise<void> {
     this.sent.push(frame);
@@ -93,7 +95,13 @@ class ScriptedRadio extends BaseTransport {
       case Cmd.GetBattAndStorage:
         return [new ByteWriter().u8(Resp.BattAndStorage).u16(4100).u32(1).u32(2).toBytes()];
       case Cmd.SendTxtMsg:
-        return [new ByteWriter().u8(Resp.Sent).u8(0).u32(this.nextAck).u32(2000).toBytes()];
+        return [new ByteWriter().u8(Resp.Sent).u8(this.sendsFlood ? 1 : 0).u32(this.nextAck).u32(2000).toBytes()];
+      case Cmd.ResetPath:
+        return [new Uint8Array([Resp.Ok])];
+      case Cmd.GetContactByKey: {
+        const found = this.contacts.find((c) => c.subarray(1, 33).every((b, i) => b === frame[1 + i]));
+        return [found ?? new Uint8Array([Resp.Err, 2])];
+      }
       case Cmd.SendChannelTxtMsg:
         return [new Uint8Array([Resp.Ok])];
       case Cmd.SendLogin:
@@ -117,14 +125,17 @@ class ScriptedRadio extends BaseTransport {
   protected async shutdown(): Promise<void> {}
 }
 
-function contactFrame(key: Uint8Array, name: string, lastMod: number, type = 1): Uint8Array {
+/** `path` is the route the radio holds, one-byte hashes; none when absent. */
+function contactFrame(key: Uint8Array, name: string, lastMod: number, type = 1, path?: number[]): Uint8Array {
+  const route = new Uint8Array(64);
+  route.set(path ?? []);
   return new ByteWriter()
     .u8(Resp.Contact)
     .bytes(key)
     .u8(type)
     .u8(0)
-    .u8(0xff)
-    .zeros(64)
+    .u8(path ? path.length : 0xff)
+    .bytes(route)
     .fixedString(name, 32)
     .u32(0)
     .i32(0)
@@ -642,4 +653,176 @@ test("the role from a sign-in survives a reconnect", async () => {
   const second = new MeshSession({ storage, now: () => 1_700_000_000_000 });
   await second.connect(again);
   assert.equal(second.getState().logins[HILL_KEY]?.role, 3);
+});
+
+// ---- routes ----
+
+/** A flooded packet as the radio hands it up on LOG_RX_DATA: header, path_len, one-byte hashes, payload. */
+function heardPacket(payloadType: number, hashes: number[], payload: Uint8Array, snr = 8): Uint8Array {
+  return new ByteWriter()
+    .u8(Push.LogRxData)
+    .i8(snr)
+    .i8(-90)
+    .u8((payloadType << 2) | 1)
+    .u8(hashes.length)
+    .bytes(new Uint8Array(hashes))
+    .bytes(payload)
+    .toBytes();
+}
+
+test("pinning a contact to flood drops its route now, and again whenever the radio learns one", async () => {
+  const radio = new ScriptedRadio();
+  radio.contacts = [contactFrame(BOB, "Bob", 1_699_999_000, 1, [0xa3, 0x7f])];
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  assert.equal(session.getState().contacts[bobKey()]?.outPathLen, 2);
+
+  await session.setFloodPinned(bobKey(), true);
+  assert.equal(radio.sent.filter((f) => f[0] === Cmd.ResetPath).length, 1);
+  assert.equal(session.getState().contacts[bobKey()]?.outPathLen, 0xff);
+  assert.deepEqual(session.getState().routing.contacts[bobKey()], { flood: true });
+
+  radio.push(new ByteWriter().u8(Push.PathUpdated).bytes(BOB).toBytes());
+  await tick(5);
+  assert.equal(radio.sent.filter((f) => f[0] === Cmd.ResetPath).length, 2);
+  assert.equal(session.getState().contacts[bobKey()]?.outPathLen, 0xff);
+
+  await session.setFloodPinned(bobKey(), false);
+  assert.deepEqual(session.getState().routing.contacts, {});
+  await session.disconnect();
+});
+
+test("a route older than its time limit is dropped before the next message goes", async () => {
+  let clock = 1_700_000_000_000;
+  const radio = new ScriptedRadio();
+  // The radio learned the route a minute ago, while nobody was listening.
+  radio.contacts = [contactFrame(BOB, "Bob", 1_699_999_940, 1, [0x7f])];
+  const session = new MeshSession({ now: () => clock });
+  await session.connect(radio);
+  assert.equal(session.getState().contacts[bobKey()]?.pathSince, 1_699_999_940_000);
+
+  session.setDefaultRouteReset(15);
+  await tick(5);
+  assert.equal(radio.sent.filter((f) => f[0] === Cmd.ResetPath).length, 0);
+  assert.equal(session.routeExpiresAt(bobKey()), 1_699_999_940_000 + 15 * 60_000);
+
+  clock += 20 * 60_000;
+  await session.sendText(contactConversation(bobKey()), "still there?");
+  const codes = radio.sent.map((f) => f[0]);
+  const reset = codes.lastIndexOf(Cmd.ResetPath);
+  assert.ok(reset >= 0 && reset < codes.lastIndexOf(Cmd.SendTxtMsg), "the route goes before the message");
+  assert.equal(session.getState().contacts[bobKey()]?.pathSince, null);
+
+  // A contact of its own that never drops its route is left alone.
+  session.setRouteReset(bobKey(), null);
+  assert.equal(session.routePolicy(bobKey()).resetAfterMin, null);
+  await session.disconnect();
+});
+
+test("a direct message that went unacknowledged along a route is retried as a flood", async () => {
+  const storage = new MemoryStorage();
+  const first = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  const routed = () => {
+    const radio = new ScriptedRadio();
+    radio.contacts = [contactFrame(BOB, "Bob", 1_699_999_990, 1, [0x7f])];
+    return radio;
+  };
+  await first.connect(routed());
+  const sent = await first.sendText(contactConversation(bobKey()), "hello?");
+  assert.equal(sent.flood, false);
+  assert.deepEqual(sent.route, ["7f"]);
+  await first.disconnect();
+  // What the ack timer would have done.
+  const saved = storage.saved.get(first.getState().self!.key)!;
+  saved.messages[0]!.status = "unconfirmed";
+
+  const radio = routed();
+  const session = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  const message = session.getState().messages[0]!;
+  assert.equal(session.retryFloods(message), true);
+  await session.retry(message.id);
+  const codes = radio.sent.map((f) => f[0]);
+  assert.ok(codes.indexOf(Cmd.ResetPath) >= 0 && codes.indexOf(Cmd.ResetPath) < codes.indexOf(Cmd.SendTxtMsg));
+  assert.equal(session.getState().messages[0]?.attempt, 1);
+  await session.disconnect();
+});
+
+test("a flood's acknowledgement brings back the route it took", async () => {
+  const radio = new ScriptedRadio();
+  radio.sendsFlood = true;
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  const sent = await session.sendText(contactConversation(bobKey()), "anyone?");
+  assert.equal(sent.flood, true);
+  assert.equal(sent.route, null);
+  // The path return: the radio learns the route, then matches the ack inside it.
+  radio.contacts = [contactFrame(BOB, "Bob", 1_700_000_000, 1, [0xe0, 0x7f])];
+  radio.push(new ByteWriter().u8(Push.PathUpdated).bytes(BOB).toBytes());
+  radio.push(new ByteWriter().u8(Push.SendConfirmed).u32(0x11223344).u32(4800).toBytes());
+  await tick(5);
+  const message = session.getState().messages.find((m) => m.id === sent.id)!;
+  assert.equal(message.status, "delivered");
+  assert.deepEqual(message.route, ["e0", "7f"]);
+  assert.equal(session.getState().contacts[bobKey()]?.pathSince, 1_700_000_000_000);
+  await session.disconnect();
+});
+
+test("an incoming channel message gathers every copy the radio heard, before it and after", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  const secret = fromHex(session.getState().channels[0]!.secret);
+  const payload = await heardGroupTextPayload(secret, 1_700_000_060, TxtType.Plain, "Alice: who hears me?");
+  radio.push(heardPacket(5, [0x7f, 0xa3], payload, 12));
+  radio.push(heardPacket(5, [0x9d], payload.map((b, i) => (i === 3 ? b ^ 1 : b)))); // somebody else's
+  radio.queue.push(channelFrame(0, "Alice: who hears me?"));
+  radio.push(new Uint8Array([Push.MsgWaiting]));
+  await tick(10);
+  radio.push(heardPacket(5, [0x9d], payload, -20));
+  radio.push(heardPacket(5, [0x7f, 0xa3], payload)); // the same path again
+  await tick(5);
+  const message = session.getState().messages.find((m) => m.direction === "in")!;
+  assert.equal(message.sender, "Alice");
+  assert.deepEqual(message.echoes, [
+    { path: ["7f", "a3"], snr: 3 },
+    { path: ["9d"], snr: -5 },
+  ]);
+  await session.disconnect();
+});
+
+test("an incoming flooded direct message takes the packet addressed from its sender to us", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  const sealed = (to: number, from: number) => new Uint8Array([to, from, 0x12, 0x34, ...new Uint8Array(16).fill(from)]);
+  radio.push(heardPacket(2, [0x44], sealed(0xa0, 0x99))); // from somebody else
+  radio.push(heardPacket(2, [0x7f], sealed(0xa0, 0x01)));
+  radio.push(heardPacket(2, [0x55], sealed(0xb0, 0x01))); // to somebody else
+  radio.queue.push(dmFrame(BOB, "one hop away"));
+  radio.push(new Uint8Array([Push.MsgWaiting]));
+  await tick(5);
+  radio.push(heardPacket(2, [0x4b], sealed(0xa0, 0x01), -12));
+  await tick(5);
+  const message = session.getState().messages[0]!;
+  assert.equal(message.hops, 1);
+  assert.deepEqual(message.echoes, [
+    { path: ["7f"], snr: 2 },
+    { path: ["4b"], snr: -3 },
+  ]);
+  await session.disconnect();
+});
+
+test("the routing settings survive a reconnect", async () => {
+  const storage = new MemoryStorage();
+  const session = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  await session.connect(new ScriptedRadio());
+  session.setDefaultRouteReset(30);
+  session.setRouteReset(bobKey(), 5);
+  await session.disconnect();
+
+  const second = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  await second.connect(new ScriptedRadio());
+  assert.deepEqual(second.getState().routing, { resetAfterMin: 30, contacts: { [bobKey()]: { resetAfterMin: 5 } } });
+  await second.disconnect();
 });

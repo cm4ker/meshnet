@@ -1,5 +1,8 @@
 import { useState, useSyncExternalStore } from "react";
+import { setLookalikePrefs, useLookalikePrefs } from "../lib/lookalikes.js";
 import { askPermission, notificationsWanted, setNotificationsWanted } from "../lib/notify.js";
+import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
+import { session, useSession } from "../lib/session.js";
 import { shell } from "../lib/platform.js";
 import { autoConnectWanted, setAutoConnect } from "../transports/index.js";
 import { Field, Row, Section, Select, Toggle } from "../ui/Field.js";
@@ -9,6 +12,8 @@ export function SettingsView() {
   const preference = useSyncExternalStore(subscribeTheme, getPreference);
   const [notifyOn, setNotifyOn] = useState(notificationsWanted);
   const [auto, setAuto] = useState(autoConnectWanted);
+  const lookalikes = useLookalikePrefs();
+  const state = useSession();
   return (
     <div className="card-scroll">
       <Section title="Appearance">
@@ -18,6 +23,37 @@ export function SettingsView() {
             {listThemes().map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </Section>
+      <Section title="Messages">
+        <Toggle
+          label="Swap lookalike letters"
+          hint="а е о р с х and А В Е К М Н О Р С Т Х go out as their Latin twins: they look the same and take one byte instead of two, so about a fifth more text fits."
+          checked={lookalikes.on}
+          onChange={(v) => setLookalikePrefs({ on: v })}
+        />
+        {lookalikes.on ? (
+          <Toggle label="Also у and У" hint="The same as y and Y in most fonts, not in every one." checked={lookalikes.near} onChange={(v) => setLookalikePrefs({ near: v })} />
+        ) : null}
+        <Field
+          label="Drop direct-message routes after"
+          hint={
+            state.self
+              ? "Chats and rooms. A route the radio learned this long ago is dropped, and the next message floods to find a fresh one. A contact can set its own."
+              : "Kept per radio: connect to change it."
+          }
+        >
+          <Select
+            value={limitValue(state.routing.resetAfterMin)}
+            disabled={!state.self}
+            onChange={(e) => session.setDefaultRouteReset(parseLimit(e.target.value) ?? null)}
+          >
+            {ROUTE_LIMITS.map((m) => (
+              <option key={limitValue(m)} value={limitValue(m)}>
+                {limitLabel(m)}
               </option>
             ))}
           </Select>

@@ -13,8 +13,11 @@ apps/mobile         Capacitor 8 shell: iOS and Android; BLE through a plugin
 
 - Connects to a radio over BLE (everywhere) or a USB cable (desktop, and a browser with Web Serial).
 - Reads the radio's contacts and channels, and drains its message queue; keeps history on the device, per radio, in IndexedDB. The radio only ever holds what has not been read.
-- Direct messages with delivery: sent, acknowledged (with the round trip), unconfirmed with a retry, failed.
+- Direct messages with delivery: sent, acknowledged (with the round trip), unconfirmed with a retry, failed. A message that went unacknowledged along a learned route is retried as a flood.
+- Routes you can steer: a contact pinned to flood (handy on the move), and a time limit after which a learned route is dropped so the next message floods and finds a fresh one; a default for every chat and room, and one per contact.
 - Channel messages, with the sender's name split off the `Name: text` the firmware puts on the air.
+- Tap a message for how it travelled: the relays of its route, named from the contacts where a hash is unambiguous; every copy the radio heard, with its signal; for ours, who relayed it, or the route a flood's acknowledgement brought back.
+- Cyrillic letters that look exactly like Latin ones (а е о р с х, А В Е К М Н О Р С Т Х) go out as their one-byte Latin twins, so about a fifth more Russian fits in a message and reads the same.
 - Contacts: favourites, rename, forget route, path discovery, share on air, telemetry (Cayenne LPP decoded), remove.
 - Nodes: the repeaters, rooms and sensors you manage, remotely through your radio. Sign in (the password kept in the system's credential store on the desktop, the phone's secure storage on a phone, the browser's storage in a browser); status with a week's trend of battery and noise floor; the neighbours a repeater hears; its settings as forms over its console, with a timed trial before a radio change; who may sign in, and as what; the console itself; a sensor's min, max and mean over a window. The radio carries one request to a remote node at a time, so they queue, visibly, and nothing asks the air on its own.
 - The radio's own settings: name, position, frequency/bandwidth/SF/CR with presets, transmit power, channels (name and 128-bit key), auto-add and telemetry policy, tuning, clock, adverts (zero-hop or flood), reboot, factory reset.

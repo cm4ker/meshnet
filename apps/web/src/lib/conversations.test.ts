@@ -23,6 +23,7 @@ function message(conversation: string, text: string, receivedAt: number, directi
     attempt: 0,
     error: null,
     echoes: [],
+    route: null,
   };
 }
 
@@ -48,6 +49,7 @@ function state(messages: MessageRecord[]): SessionState {
         lon: 0,
         lastMod: 0,
         lastHeardAt: null,
+        pathSince: null,
       },
     },
     contactsCursor: 0,
@@ -70,6 +72,7 @@ function state(messages: MessageRecord[]): SessionState {
     nodeSettings: {},
     consoles: {},
     remote: { active: null, queued: [] },
+    routing: { resetAfterMin: null, contacts: {} },
     log: [],
     error: null,
     syncing: false,

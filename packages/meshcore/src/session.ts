@@ -11,8 +11,8 @@
 
 import { MeshCoreClient, MeshCoreError, TimeoutError, type TextSendResult } from "./client.js";
 import { bytesEqual, fromHex, toHex, unixNow } from "./protocol/bytes.js";
-import { groupTextPayload } from "./protocol/group.js";
-import { PayloadType, parseRawPacket } from "./protocol/packet.js";
+import { groupTextPayload, heardGroupTextPayload } from "./protocol/group.js";
+import { PayloadType, parseRawPacket, type RawPacket } from "./protocol/packet.js";
 import { AclRole, AdvType, ContactFlag, MAX_TEXT_LEN, PUB_KEY_PREFIX_SIZE, TxtType } from "./protocol/codes.js";
 import {
   accessListRequest,
@@ -54,6 +54,12 @@ export interface ContactRecord {
   lastMod: number;
   /** Local clock, ms: the last time the radio heard from this contact while we were listening. */
   lastHeardAt: number | null;
+  /**
+   * Local clock, ms: when the radio learned the route it holds, so it can be
+   * dropped once stale. `lastMod` cannot say: adverts and messages move it too.
+   * Null while there is no route.
+   */
+  pathSince: number | null;
 }
 
 export interface ChannelRecord {
@@ -65,7 +71,10 @@ export interface ChannelRecord {
 
 export type MessageStatus = "sending" | "sent" | "delivered" | "unconfirmed" | "failed";
 
-/** A copy of one of our channel messages the radio overheard on its way through the mesh. */
+/**
+ * A copy of a message the radio heard: for one of ours on a channel, a repeater
+ * sending it on; for one that came in, each copy that reached us.
+ */
 export interface MessageEcho {
   /** The relays it had passed, first relay first, each as the hex hash it signs the path with. */
   path: string[];
@@ -94,8 +103,34 @@ export interface MessageRecord {
   flood: boolean | null;
   attempt: number;
   error: string | null;
-  /** Copies heard back from repeaters, one per distinct path. Empty for incoming messages. */
+  /**
+   * Copies the radio heard, one per distinct path. For ours on a channel, the
+   * repeaters sending it on; for an incoming flood, every copy that reached us,
+   * the one delivered first. Empty when the radio heard none while we listened.
+   */
   echoes: MessageEcho[];
+  /**
+   * Our direct message: the relays it went along, as hex hashes, first relay
+   * first. A flood has none until its acknowledgement brings back the route it
+   * took. Empty for a neighbour heard direct; null when not known.
+   */
+  route: string[] | null;
+  /** What was typed, when the text sent was reworked to fit (lookalike letters packed). */
+  original?: string;
+}
+
+/** How direct messages to one contact are routed; unset fields follow the defaults. */
+export interface RoutePolicy {
+  /** Every message floods: the learned route is dropped before each send, and whenever the radio learns one. */
+  flood?: boolean;
+  /** Minutes a learned route is kept before it is dropped; null keeps it. Absent follows `RoutingSettings.resetAfterMin`. */
+  resetAfterMin?: number | null;
+}
+
+export interface RoutingSettings {
+  /** Minutes a route to a chat or a room is kept after the radio learned it; null keeps it until the radio replaces it. */
+  resetAfterMin: number | null;
+  contacts: Record<string, RoutePolicy>;
 }
 
 export interface LogEntry {
@@ -225,6 +260,8 @@ export interface SessionState {
   consoles: Record<string, ConsoleEntry[]>;
   /** The radio carries one request to a remote node at a time; the rest wait here. */
   remote: { active: RemoteJobInfo | null; queued: RemoteJobInfo[] };
+  /** How direct messages are routed: a flood pinned per contact, and how long a learned route is trusted. */
+  routing: RoutingSettings;
   /** The most recent pushes and errors, newest last, for a log pane. */
   log: LogEntry[];
   error: string | null;
@@ -241,6 +278,8 @@ export interface PersistedState {
   /** Absent in history saved before remote nodes were managed. */
   logins?: Record<string, NodeLogin>;
   statusHistory?: Record<string, StatusSample[]>;
+  /** Absent in history saved before routes could be pinned or timed out. */
+  routing?: RoutingSettings;
 }
 
 export interface SessionStorage {
@@ -286,6 +325,21 @@ export function isFavourite(contact: ContactRecord): boolean {
 
 export function contactHops(contact: ContactRecord): number | null {
   return contact.outPathLen === 0xff ? null : contact.outPathLen & 63;
+}
+
+/** The relays of the route the radio holds for a contact, as hex hashes, first relay first; null with none. */
+export function contactRoute(contact: Pick<ContactRecord, "outPathLen" | "outPath">): string[] | null {
+  if (contact.outPathLen === 0xff) return null;
+  const count = contact.outPathLen & 63;
+  const size = ((contact.outPathLen >> 6) + 1) * 2;
+  const hashes: string[] = [];
+  for (let i = 0; i < count; i++) hashes.push(contact.outPath.slice(i * size, (i + 1) * size));
+  return hashes;
+}
+
+/** The contacts one writes to, whose direct messages the routing settings govern: chats and rooms. */
+export function isConversationType(type: number): boolean {
+  return type === AdvType.Chat || type === AdvType.Room;
 }
 
 export function contactTypeName(type: number): string {
@@ -351,21 +405,43 @@ export function cliValue(reply: string): string | null {
   return trimmed.startsWith("> ") ? trimmed.slice(2) : trimmed === ">" ? "" : null;
 }
 
-function toRecord(contact: Contact, lastHeardAt: number | null): ContactRecord {
+/**
+ * When a route the radio learned while nobody was listening came to be: the
+ * contact's `lastMod`, if it is a time at all, and now otherwise, so a route
+ * of unknown age is not dropped the moment it is seen.
+ */
+function guessPathSince(lastMod: number, now: number): number {
+  const at = lastMod * 1000;
+  return at > now - 7 * 24 * 3600 * 1000 && at <= now ? at : now;
+}
+
+/**
+ * `previous` is what was known of the contact: its route's age carries over
+ * while the route is the same. `learnedAt` is set when the radio has just said
+ * it learned this route.
+ */
+function toRecord(contact: Contact, lastHeardAt: number | null, previous: ContactRecord | undefined, now: number, learnedAt?: number): ContactRecord {
   const key = toHex(contact.publicKey);
+  const outPath = toHex(contact.outPath);
+  let pathSince: number | null = null;
+  if (contact.outPathLen !== 0xff) {
+    const same = previous !== undefined && previous.outPathLen === contact.outPathLen && previous.outPath === outPath && previous.pathSince !== null;
+    pathSince = learnedAt ?? (same ? previous.pathSince : guessPathSince(contact.lastMod, now));
+  }
   return {
     key,
     prefix: key.slice(0, PUB_KEY_PREFIX_SIZE * 2),
     type: contact.type,
     flags: contact.flags,
     outPathLen: contact.outPathLen,
-    outPath: toHex(contact.outPath),
+    outPath,
     name: contact.name,
     lastAdvert: contact.lastAdvert,
     lat: contact.lat,
     lon: contact.lon,
     lastMod: contact.lastMod,
     lastHeardAt,
+    pathSince,
   };
 }
 
@@ -402,6 +478,7 @@ const EMPTY: SessionState = {
   nodeSettings: {},
   consoles: {},
   remote: { active: null, queued: [] },
+  routing: { resetAfterMin: null, contacts: {} },
   log: [],
   error: null,
   syncing: false,
@@ -409,6 +486,19 @@ const EMPTY: SessionState = {
 
 /** How long after sending a channel message its echoes are still looked for. */
 const ECHO_WINDOW_MS = 15 * 60 * 1000;
+
+/** How often learned routes are checked against their time limit while connected. */
+const ROUTE_SWEEP_MS = 30 * 1000;
+
+/** How long a packet the radio overheard is kept, to find the copies of a message that arrives after it. */
+const HEARD_WINDOW_MS = 30 * 1000;
+const HEARD_LIMIT = 64;
+
+/** How long after an incoming message later copies of it are still looked for. */
+const IN_ECHO_WINDOW_MS = 60 * 1000;
+
+/** How far back a direct message's packet may have been heard before the radio handed the message up. */
+const DM_MATCH_MS = 15 * 1000;
 
 /** How far back status answers are kept, and at most how many a node. */
 const HISTORY_MS = 7 * 24 * 3600 * 1000;
@@ -461,8 +551,20 @@ export class MeshSession {
   private contactsRefreshQueued = false;
   private focused: string | null = null;
   private ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  /** What our recent channel messages look like on the air (payload hex), to know their echoes by. */
-  private echoWatch = new Map<string, { id: string; at: number }>();
+  /**
+   * What recent messages look like on the air (payload hex), to know their
+   * copies by: ours on a channel, and incoming ones whose packet was found.
+   */
+  private echoWatch = new Map<string, { id: string; at: number; incoming: boolean }>();
+  /** Packets the radio overheard lately, newest last; a message's packet is heard before the message is handed up. */
+  private heard: { at: number; snr: number; packet: RawPacket; hex: string }[] = [];
+  /** Payloads already matched to an incoming direct message, so a second one from the same sender takes the next. */
+  private claimed = new Set<string>();
+  /** The last route the radio said it learned: the acknowledgement of a flood rides in on it. */
+  private lastPathUpdate: { key: string; at: number; record: Promise<ContactRecord | null> } | null = null;
+  private routeTimer: ReturnType<typeof setInterval> | null = null;
+  /** Contacts whose route is being dropped right now, so the sweep and a send do not both do it. */
+  private droppingRoutes = new Set<string>();
   private remoteQueue: RemoteJob[] = [];
   private remoteActive: RemoteJob | null = null;
   private jobCounter = 0;
@@ -498,7 +600,8 @@ export class MeshSession {
       "messages" in patch ||
       "unread" in patch ||
       "logins" in patch ||
-      "statusHistory" in patch
+      "statusHistory" in patch ||
+      "routing" in patch
     ) {
       this.scheduleSave();
     }
@@ -521,9 +624,9 @@ export class MeshSession {
 
   private async saveNow(): Promise<void> {
     if (!this.storage || !this.state.self) return;
-    const { contacts, contactsCursor, channels, messages, unread, logins, statusHistory } = this.state;
+    const { contacts, contactsCursor, channels, messages, unread, logins, statusHistory, routing } = this.state;
     try {
-      await this.storage.save(this.state.self.key, { contacts, contactsCursor, channels, messages, unread, logins, statusHistory });
+      await this.storage.save(this.state.self.key, { contacts, contactsCursor, channels, messages, unread, logins, statusHistory, routing });
     } catch (error) {
       this.log("error", `could not save: ${(error as Error).message}`);
     }
@@ -556,6 +659,8 @@ export class MeshSession {
       this.client = null;
       for (const timer of this.ackTimers.values()) clearTimeout(timer);
       this.ackTimers.clear();
+      if (this.routeTimer) clearInterval(this.routeTimer);
+      this.routeTimer = null;
       this.dropRemoteJobs(reason ? `link dropped: ${reason.message}` : "disconnected");
       this.set({ status: "closed", syncing: false, error: reason ? reason.message : this.state.error });
       this.log("link", reason ? `link dropped: ${reason.message}` : "disconnected");
@@ -569,19 +674,27 @@ export class MeshSession {
       const self = { ...rest, key, prefix: key.slice(0, PUB_KEY_PREFIX_SIZE * 2) };
 
       const persisted = this.storage ? await this.storage.load(key) : null;
+      const now = this.now();
+      // Contacts saved before route ages were kept have none: a route of theirs
+      // is dated as a route learned while nobody was listening.
+      const contacts: Record<string, ContactRecord> = {};
+      for (const [k, c] of Object.entries(persisted?.contacts ?? {})) {
+        contacts[k] = c.pathSince !== undefined ? c : { ...c, pathSince: c.outPathLen === 0xff ? null : guessPathSince(c.lastMod, now) };
+      }
       this.set({
         device,
         self,
-        contacts: persisted?.contacts ?? {},
+        contacts,
         contactsCursor: persisted?.contactsCursor ?? 0,
         channels: persisted?.channels ?? [],
         // History saved before the hop count was masked holds the raw path_len
         // byte (the low six bits are the hops either way), and history saved
         // before echoes were kept has none.
-        messages: (persisted?.messages ?? []).map((m) => ({ ...m, hops: m.hops === null ? null : m.hops & 63, echoes: m.echoes ?? [] })),
+        messages: (persisted?.messages ?? []).map((m) => ({ ...m, hops: m.hops === null ? null : m.hops & 63, echoes: m.echoes ?? [], route: m.route ?? null })),
         unread: persisted?.unread ?? {},
         logins: persisted?.logins ?? {},
         statusHistory: persisted?.statusHistory ?? {},
+        routing: persisted?.routing ?? EMPTY.routing,
       });
       this.log("link", `connected to ${self.name} (${device.firmwareVersion})`);
 
@@ -589,8 +702,12 @@ export class MeshSession {
       await this.refreshContacts();
       await this.refreshChannels();
       this.set({ status: "ready" });
+      this.routeTimer = setInterval(() => void this.sweepRoutes(), ROUTE_SWEEP_MS);
+      // Node keeps a process alive for an interval; a browser has no such notion.
+      (this.routeTimer as { unref?: () => void }).unref?.();
       await this.syncMessages();
       void this.refreshBattery();
+      void this.sweepRoutes();
     } catch (error) {
       const message = (error as Error).message;
       if (this.client === client) {
@@ -631,8 +748,10 @@ export class MeshSession {
     const since = full || this.state.contactsCursor === 0 ? undefined : this.state.contactsCursor;
     const { total, contacts: fresh, mostRecentLastMod } = await client.getContacts(since);
     const contacts = { ...this.state.contacts };
+    const now = this.now();
     for (const c of fresh) {
-      const record = toRecord(c, contacts[toHex(c.publicKey)]?.lastHeardAt ?? null);
+      const previous = contacts[toHex(c.publicKey)];
+      const record = toRecord(c, previous?.lastHeardAt ?? null, previous, now);
       contacts[record.key] = record;
     }
     const cursor = Math.max(this.state.contactsCursor, mostRecentLastMod);
@@ -648,9 +767,11 @@ export class MeshSession {
   private async reconcileContacts(client: MeshCoreClient): Promise<void> {
     const { contacts: fresh, mostRecentLastMod } = await client.getContacts();
     const contacts: Record<string, ContactRecord> = {};
+    const now = this.now();
     for (const c of fresh) {
       const key = toHex(c.publicKey);
-      contacts[key] = toRecord(c, this.state.contacts[key]?.lastHeardAt ?? null);
+      const previous = this.state.contacts[key];
+      contacts[key] = toRecord(c, previous?.lastHeardAt ?? null, previous, now);
     }
     this.set({ contacts, contactsCursor: mostRecentLastMod });
   }
@@ -688,9 +809,11 @@ export class MeshSession {
     this.set({ messages, unread });
   }
 
-  private upsertContact(contact: Contact, heard: boolean): ContactRecord {
+  /** `learnedAt` is set when the radio has just said it learned this contact's route. */
+  private upsertContact(contact: Contact, heard: boolean, learnedAt?: number): ContactRecord {
     const key = toHex(contact.publicKey);
-    const record = toRecord(contact, heard ? this.now() : (this.state.contacts[key]?.lastHeardAt ?? null));
+    const previous = this.state.contacts[key];
+    const record = toRecord(contact, heard ? this.now() : (previous?.lastHeardAt ?? null), previous, this.now(), learnedAt);
     this.set({ contacts: { ...this.state.contacts, [key]: record } });
     this.rebindOrphans();
     return record;
@@ -752,9 +875,108 @@ export class MeshSession {
   }
 
   async resetPath(key: string): Promise<void> {
-    await this.need().resetPath(this.contactBytes(key));
-    const contact = this.state.contacts[key]!;
-    this.set({ contacts: { ...this.state.contacts, [key]: { ...contact, outPathLen: 0xff } } });
+    await this.dropRoute(this.need(), key, "forgotten by hand");
+  }
+
+  // ---- routes ----
+  //
+  // The radio sends a direct message along the route it last learned for the
+  // contact, and floods only when it knows none. It keeps a route until a new
+  // one replaces it, however long ago the contact moved away. So the session
+  // drops routes: before every message to a contact whose flood is pinned, and
+  // once a route is older than its time limit. A dropped route costs nothing
+  // on the air; the next message floods and its acknowledgement brings a
+  // fresh route back.
+
+  /** What governs this contact's route once the defaults are filled in. */
+  routePolicy(key: string): { flood: boolean; resetAfterMin: number | null } {
+    const own = this.state.routing.contacts[key] ?? {};
+    return {
+      flood: own.flood ?? false,
+      resetAfterMin: own.resetAfterMin !== undefined ? own.resetAfterMin : this.state.routing.resetAfterMin,
+    };
+  }
+
+  /** Local ms at which the route to this contact will be dropped for its age; null when it will not be. */
+  routeExpiresAt(key: string): number | null {
+    const contact = this.state.contacts[key];
+    if (!contact || contact.outPathLen === 0xff || contact.pathSince === null || !isConversationType(contact.type)) return null;
+    const { flood, resetAfterMin } = this.routePolicy(key);
+    if (flood || resetAfterMin === null) return null;
+    return contact.pathSince + resetAfterMin * 60_000;
+  }
+
+  /** Pins every message to this contact to a flood, or lets it use learned routes again. */
+  async setFloodPinned(key: string, flood: boolean): Promise<void> {
+    const contact = this.needContact(key);
+    this.setPolicy(key, { flood });
+    this.log("path", `${contact.name || key.slice(0, 12)}: ${flood ? "messages always flood" : "learned routes are used again"}`);
+    if (flood && this.isReady && contact.outPathLen !== 0xff) await this.dropRoute(this.need(), key, "flood pinned");
+  }
+
+  /** Minutes a learned route to this contact is kept; null keeps it; undefined follows the default. */
+  setRouteReset(key: string, minutes: number | null | undefined): void {
+    this.needContact(key);
+    this.setPolicy(key, { resetAfterMin: minutes });
+    void this.sweepRoutes();
+  }
+
+  /** Minutes a learned route to a chat or a room is kept unless the contact says otherwise; null keeps it. */
+  setDefaultRouteReset(minutes: number | null): void {
+    this.set({ routing: { ...this.state.routing, resetAfterMin: minutes } });
+    void this.sweepRoutes();
+  }
+
+  private setPolicy(key: string, patch: { flood?: boolean; resetAfterMin?: number | null | undefined }): void {
+    const current = this.state.routing.contacts[key] ?? {};
+    const flood = "flood" in patch ? patch.flood : current.flood;
+    const resetAfterMin = "resetAfterMin" in patch ? patch.resetAfterMin : current.resetAfterMin;
+    // What follows the default is stored as absence.
+    const policy: RoutePolicy = {};
+    if (flood) policy.flood = true;
+    if (resetAfterMin !== undefined) policy.resetAfterMin = resetAfterMin;
+    const contacts = { ...this.state.routing.contacts };
+    if (Object.keys(policy).length === 0) delete contacts[key];
+    else contacts[key] = policy;
+    this.set({ routing: { ...this.state.routing, contacts } });
+  }
+
+  /** Why the route to this contact should go now, or null if it may stay. */
+  private staleReason(contact: ContactRecord): string | null {
+    if (contact.outPathLen === 0xff || !isConversationType(contact.type)) return null;
+    const { flood, resetAfterMin } = this.routePolicy(contact.key);
+    if (flood) return "flood pinned";
+    if (resetAfterMin === null || contact.pathSince === null) return null;
+    return this.now() - contact.pathSince >= resetAfterMin * 60_000 ? `older than ${resetAfterMin} min` : null;
+  }
+
+  private async dropRoute(client: MeshCoreClient, key: string, reason: string): Promise<void> {
+    if (this.droppingRoutes.has(key)) return;
+    this.droppingRoutes.add(key);
+    try {
+      await client.resetPath(this.contactBytes(key));
+      const contact = this.state.contacts[key];
+      if (!contact) return;
+      this.set({ contacts: { ...this.state.contacts, [key]: { ...contact, outPathLen: 0xff, pathSince: null } } });
+      this.log("path", `route to ${contact.name || key.slice(0, 12)} dropped: ${reason}`);
+    } finally {
+      this.droppingRoutes.delete(key);
+    }
+  }
+
+  /** Drops every route past its time or pinned to a flood. Runs on a timer while connected. */
+  private async sweepRoutes(): Promise<void> {
+    const client = this.client;
+    if (!client || client.isClosed || this.state.status !== "ready") return;
+    for (const contact of Object.values(this.state.contacts)) {
+      const reason = this.staleReason(contact);
+      if (!reason) continue;
+      try {
+        await this.dropRoute(client, contact.key, reason);
+      } catch (error) {
+        this.log("error", `could not drop the route to ${contact.name}: ${(error as Error).message}`);
+      }
+    }
   }
 
   async shareContact(key: string): Promise<void> {
@@ -897,6 +1119,7 @@ export class MeshSession {
         attempt: 0,
         error: null,
         echoes: [],
+        route: null,
       };
     } else if (frame.kind === "channelMessage") {
       const { sender, text } = splitChannelText(frame.text);
@@ -919,6 +1142,7 @@ export class MeshSession {
         attempt: 0,
         error: null,
         echoes: [],
+        route: null,
       };
     } else {
       this.log("channelData", `channel ${frame.channelIndex} type ${frame.dataType}: ${toHex(frame.data)}`);
@@ -929,6 +1153,75 @@ export class MeshSession {
         ? this.state.unread
         : { ...this.state.unread, [message.conversation]: (this.state.unread[message.conversation] ?? 0) + 1 };
     this.set({ messages: [...this.state.messages, message], unread });
+    if (frame.kind === "channelMessage") {
+      void this.findChannelCopies(message.id, frame.channelIndex, frame.timestamp, frame.txtType, frame.text);
+    } else if (frame.pathLen !== null && message.senderPrefix) {
+      this.findDirectCopies(message.id, toHex(frame.senderPrefix), frame.pathLen);
+    }
+  }
+
+  // ---- the copies the radio heard ----
+  //
+  // The radio hands up a message with its hop count only; the path it took is
+  // in the packet, which the radio also hands up whole (`logRxData`) as it
+  // hears it, a moment before the message itself, and once more for every
+  // other copy a repeater sends its way. Those packets are kept for a little
+  // while and matched to messages: a channel message by its payload, which
+  // can be worked out exactly; a direct message, sealed with a key this side
+  // does not hold, by who it is to and from and how far it came.
+
+  private async findChannelCopies(id: string, channelIndex: number, timestamp: number, txtType: number, text: string): Promise<void> {
+    const channel = this.state.channels.find((c) => c.index === channelIndex);
+    if (!channel) return;
+    try {
+      const payload = await heardGroupTextPayload(fromHex(channel.secret), timestamp, txtType, text);
+      this.adoptCopies(id, toHex(payload));
+    } catch (error) {
+      this.log("echo", `cannot work out the payload: ${(error as Error).message}`);
+    }
+  }
+
+  /** A flooded direct message: its packet names us and the sender by their first key byte, and came as many hops. */
+  private findDirectCopies(id: string, senderPrefix: string, hops: number): void {
+    const self = this.state.self;
+    if (!self) return;
+    const to = parseInt(self.key.slice(0, 2), 16);
+    const from = parseInt(senderPrefix.slice(0, 2), 16);
+    const now = this.now();
+    const first = this.heard.find(
+      (h) =>
+        now - h.at <= DM_MATCH_MS &&
+        h.packet.payloadType === PayloadType.TxtMsg &&
+        h.packet.path.length === hops &&
+        h.packet.payload[0] === to &&
+        h.packet.payload[1] === from &&
+        !this.claimed.has(h.hex),
+    );
+    if (!first) return;
+    this.claimed.add(first.hex);
+    this.adoptCopies(id, first.hex);
+  }
+
+  /** Every copy of this payload heard so far goes on the message, and later ones will. */
+  private adoptCopies(id: string, hex: string): void {
+    const now = this.now();
+    this.pruneWatch(now);
+    this.echoWatch.set(hex, { id, at: now, incoming: true });
+    for (const h of this.heard) if (h.hex === hex) this.addEcho(id, h.packet.path, h.snr);
+  }
+
+  private pruneWatch(now: number): void {
+    for (const [key, watch] of this.echoWatch) {
+      if (now - watch.at > (watch.incoming ? IN_ECHO_WINDOW_MS : ECHO_WINDOW_MS)) this.echoWatch.delete(key);
+    }
+  }
+
+  private addEcho(id: string, path: string[], snr: number): void {
+    const message = this.state.messages.find((m) => m.id === id);
+    if (!message) return;
+    const key = path.join(",");
+    if (message.echoes.some((e) => e.path.join(",") === key)) return;
+    this.patchMessage(id, { echoes: [...message.echoes, { path, snr }] });
   }
 
   private patchMessage(id: string, patch: Partial<MessageRecord>): void {
@@ -936,8 +1229,11 @@ export class MeshSession {
     this.set({ messages });
   }
 
-  /** Sends text to a conversation and records it; the record's status follows the ack. */
-  async sendText(conversation: string, text: string): Promise<MessageRecord> {
+  /**
+   * Sends text to a conversation and records it; the record's status follows
+   * the ack. `original` is what was typed, when `text` was reworked to fit.
+   */
+  async sendText(conversation: string, text: string, options: { original?: string } = {}): Promise<MessageRecord> {
     const client = this.need();
     const target = parseConversation(conversation);
     if (target.kind === "prefix") throw new Error("this sender is not in the contacts yet");
@@ -961,26 +1257,39 @@ export class MeshSession {
       attempt: 0,
       error: null,
       echoes: [],
+      route: null,
+      ...(options.original !== undefined && options.original !== text ? { original: options.original } : {}),
     };
     this.set({ messages: [...this.state.messages, message] });
     await this.transmit(client, message, target);
     return this.state.messages.find((m) => m.id === message.id) ?? message;
   }
 
-  /** Sends an unconfirmed or failed message again, one attempt up. */
+  /**
+   * Sends an unconfirmed or failed message again, one attempt up. A direct
+   * message that went unacknowledged along a learned route floods this time:
+   * the route is the likeliest thing to have broken.
+   */
   async retry(id: string): Promise<void> {
     const message = this.state.messages.find((m) => m.id === id);
     if (!message || message.direction !== "out") throw new Error("not an outgoing message");
     const client = this.need();
     const attempt = message.attempt + 1;
-    this.patchMessage(id, { status: "sending", error: null, attempt, ackTag: null, roundTripMs: null });
-    await this.transmit(client, { ...message, attempt }, parseConversation(message.conversation));
+    const flood = message.status === "unconfirmed" && message.flood === false;
+    this.patchMessage(id, { status: "sending", error: null, attempt, ackTag: null, roundTripMs: null, route: null });
+    await this.transmit(client, { ...message, attempt }, parseConversation(message.conversation), flood);
+  }
+
+  /** Whether a retry of this message will drop the route and flood. */
+  retryFloods(message: MessageRecord): boolean {
+    return message.direction === "out" && message.status === "unconfirmed" && message.flood === false && message.conversation.startsWith("c:");
   }
 
   private async transmit(
     client: MeshCoreClient,
     message: MessageRecord,
     target: ReturnType<typeof parseConversation>,
+    dropRoute = false,
   ): Promise<void> {
     try {
       if (target.kind === "channel") {
@@ -995,11 +1304,22 @@ export class MeshSession {
       if (target.kind !== "contact") throw new Error("unreachable");
       const contact = this.state.contacts[target.key];
       if (!contact) throw new Error("unknown contact");
+      // The sweep runs every half minute and a phone may have slept through
+      // it, so a route past its time is caught here too.
+      const reason = contact.outPathLen === 0xff ? null : dropRoute ? "no acknowledgement" : this.staleReason(contact);
+      if (reason) {
+        try {
+          await this.dropRoute(client, contact.key, reason);
+        } catch (error) {
+          this.log("error", `could not drop the route to ${contact.name}: ${(error as Error).message}`);
+        }
+      }
+      const route = contactRoute(this.state.contacts[target.key] ?? contact);
       const result = await client.sendTextMessage(fromHex(contact.prefix), message.text, {
         attempt: message.attempt,
         timestamp: message.timestamp,
       });
-      this.armAck(message.id, result);
+      this.armAck(message.id, result, result.flood ? null : route);
     } catch (error) {
       this.patchMessage(message.id, { status: "failed", error: (error as Error).message });
       throw error;
@@ -1017,33 +1337,40 @@ export class MeshSession {
     try {
       const payload = await groupTextPayload(fromHex(channel.secret), message.timestamp, this.state.self.name, message.text);
       const now = this.now();
-      for (const [key, watch] of this.echoWatch) if (now - watch.at > ECHO_WINDOW_MS) this.echoWatch.delete(key);
-      this.echoWatch.set(toHex(payload), { id: message.id, at: now });
+      this.pruneWatch(now);
+      this.echoWatch.set(toHex(payload), { id: message.id, at: now, incoming: false });
     } catch (error) {
       this.log("echo", `cannot work out the payload: ${(error as Error).message}`);
     }
   }
 
-  /** A packet the radio heard that is one of our channel messages coming back: its path says who relayed it. */
-  private noteEcho(snr: number, raw: Uint8Array): void {
-    if (this.echoWatch.size === 0) return;
+  /**
+   * A text packet the radio heard: kept a while for a message that has not been
+   * handed up yet, and added to one already known, ours coming back from a
+   * repeater or another copy of one that came in.
+   */
+  private noteHeard(snr: number, raw: Uint8Array): void {
     const packet = parseRawPacket(raw);
-    if (!packet || !packet.flood || packet.payloadType !== PayloadType.GroupText || packet.path.length === 0) return;
-    const watch = this.echoWatch.get(toHex(packet.payload));
+    if (!packet || !packet.flood || (packet.payloadType !== PayloadType.GroupText && packet.payloadType !== PayloadType.TxtMsg)) return;
+    const now = this.now();
+    const hex = toHex(packet.payload);
+    const kept = this.heard.filter((h) => now - h.at <= HEARD_WINDOW_MS);
+    this.heard = [...kept.slice(-(HEARD_LIMIT - 1)), { at: now, snr, packet, hex }];
+    for (const c of this.claimed) if (!this.heard.some((h) => h.hex === c)) this.claimed.delete(c);
+    const watch = this.echoWatch.get(hex);
     if (!watch) return;
-    const message = this.state.messages.find((m) => m.id === watch.id);
-    if (!message) return;
-    const key = packet.path.join(",");
-    if (message.echoes.some((e) => e.path.join(",") === key)) return;
-    this.patchMessage(message.id, { echoes: [...message.echoes, { path: packet.path, snr }] });
+    // Ours is never heard from us: a copy with no relays in it is not an echo.
+    if (!watch.incoming && packet.path.length === 0) return;
+    this.addEcho(watch.id, packet.path, snr);
   }
 
-  private armAck(id: string, result: TextSendResult): void {
+  /** `route` is the path a direct message was sent along; a flood learns its own from the ack. */
+  private armAck(id: string, result: TextSendResult, route: string[] | null = null): void {
     if (result.ackTag === 0) {
-      this.patchMessage(id, { status: "sent", flood: result.flood, ackTag: null });
+      this.patchMessage(id, { status: "sent", flood: result.flood, ackTag: null, route });
       return;
     }
-    this.patchMessage(id, { status: "sent", flood: result.flood, ackTag: result.ackTag });
+    this.patchMessage(id, { status: "sent", flood: result.flood, ackTag: result.ackTag, route });
     const wait = Math.max(result.estTimeoutMs, 4000) * 1.5;
     const timer = setTimeout(() => {
       this.ackTimers.delete(id);
@@ -1525,6 +1852,14 @@ export class MeshSession {
           if (timer) clearTimeout(timer);
           this.ackTimers.delete(message.id);
           this.patchMessage(message.id, { status: "delivered", roundTripMs: frame.roundTripMs });
+          // A flood's ack comes back inside the path the message took, and the
+          // radio says it learned that path just before it says the ack came.
+          const update = this.lastPathUpdate;
+          if (message.flood && update && message.conversation === contactConversation(update.key) && this.now() - update.at < 5000) {
+            void update.record.then((record) => {
+              if (record) this.patchMessage(message.id, { route: contactRoute(record) });
+            });
+          }
         }
         return;
       }
@@ -1552,10 +1887,22 @@ export class MeshSession {
         const key = toHex(frame.publicKey);
         const client = this.client;
         if (!client) return;
-        client
+        const at = this.now();
+        const record = client
           .getContactByKey(frame.publicKey)
-          .then((c) => this.upsertContact(c, false))
-          .catch(() => this.queueContactsRefresh());
+          .then((c) => this.upsertContact(c, false, at))
+          .catch(() => {
+            this.queueContactsRefresh();
+            return null;
+          });
+        this.lastPathUpdate = { key, at, record };
+        // A contact pinned to flood keeps no route, not even for the acks the
+        // radio sends back to its messages.
+        void record.then((r) => {
+          if (r && r.outPathLen !== 0xff && isConversationType(r.type) && this.routePolicy(key).flood && this.client === client) {
+            this.dropRoute(client, key, "flood pinned").catch((e: Error) => this.log("error", e.message));
+          }
+        });
         this.log("path", `route to ${this.state.contacts[key]?.name ?? key.slice(0, 12)} updated`);
         return;
       }
@@ -1629,7 +1976,7 @@ export class MeshSession {
         return;
       case "logRxData":
         this.log("rx", `snr ${frame.snr} rssi ${frame.rssi}: ${toHex(frame.raw)}`);
-        this.noteEcho(frame.snr, frame.raw);
+        this.noteHeard(frame.snr, frame.raw);
         return;
       case "controlData":
         this.log("control", `snr ${frame.snr} rssi ${frame.rssi}: ${toHex(frame.payload)}`);

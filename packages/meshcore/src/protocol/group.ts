@@ -79,3 +79,15 @@ export async function groupTextPayload(secret: Uint8Array, timestamp: number, se
   const plain = new ByteWriter().u32(timestamp).u8(TxtType.Plain).bytes(prefix).bytes(body).toBytes();
   return groupPayload(secret, plain);
 }
+
+/**
+ * The payload of a channel message somebody else sent, from what the radio
+ * handed up: its whole text, `name: text` as it was encrypted, and the text
+ * type the firmware shifted out of the flags byte. Encryption here has no
+ * nonce, so the same message always makes the same payload: this is how the
+ * copies of it the radio overheard are recognised.
+ */
+export async function heardGroupTextPayload(secret: Uint8Array, timestamp: number, txtType: number, text: string): Promise<Uint8Array> {
+  const plain = new ByteWriter().u32(timestamp).u8(txtType << 2).bytes(utf8(text)).toBytes();
+  return groupPayload(secret, plain);
+}

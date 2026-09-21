@@ -1,12 +1,13 @@
 import { useState } from "react";
-import { AdvType, contactHops, contactTypeName, isFavourite, isNodeType, pathByteLength, type LppReading } from "@meshnet/meshcore";
+import { AdvType, contactHops, contactTypeName, isConversationType, isFavourite, isNodeType, pathByteLength, type LppReading } from "@meshnet/meshcore";
 import { contactConversation } from "../lib/conversations.js";
 import { ago } from "../lib/format.js";
 import { openConversation, openNode } from "../lib/nav.js";
+import { inMinutes, limitLabel, limitValue, parseLimit, ROUTE_LIMITS, useNow } from "../lib/routes.js";
 import { session, useSession } from "../lib/session.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Confirm, Prompt } from "../ui/Dialog.js";
-import { Row, Section } from "../ui/Field.js";
+import { Field, Row, Section, Select, Toggle } from "../ui/Field.js";
 import { Avatar } from "./Avatar.js";
 import { BackIcon, CopyIcon, StarFilledIcon, StarIcon } from "./Icons.js";
 
@@ -17,6 +18,7 @@ export function ContactCard({ contactKey, onClose }: { contactKey: string; onClo
   const [error, setError] = useState<string | null>(null);
   const [ask, setAsk] = useState<"remove" | "rename" | null>(null);
   const online = state.status === "ready";
+  const now = useNow();
 
   if (!contact) {
     return (
@@ -47,6 +49,9 @@ export function ContactCard({ contactKey, onClose }: { contactKey: string; onClo
   const hops = contactHops(contact);
   const node = isNodeType(contact.type);
   const telemetry = state.telemetry[contact.key];
+  const routed = isConversationType(contact.type);
+  const policy = session.routePolicy(contact.key);
+  const expires = session.routeExpiresAt(contact.key);
 
   return (
     <div className="card">
@@ -88,7 +93,16 @@ export function ContactCard({ contactKey, onClose }: { contactKey: string; onClo
             </IconButton>
           </Row>
           <Row label="Last heard">{ago(Math.max(contact.lastHeardAt ?? 0, contact.lastAdvert * 1000) || null)}</Row>
-          <Row label="Route">{hops === null ? "unknown, messages flood" : hops === 0 ? "direct" : `${hops} hop${hops === 1 ? "" : "s"} (${contact.outPath.slice(0, pathByteLength(contact.outPathLen) * 2)})`}</Row>
+          <Row label="Route">
+            {routed && policy.flood
+              ? "flood, pinned"
+              : hops === null
+                ? "unknown, messages flood"
+                : hops === 0
+                  ? "direct"
+                  : `${hops} hop${hops === 1 ? "" : "s"} (${contact.outPath.slice(0, pathByteLength(contact.outPathLen) * 2)})`}
+          </Row>
+          {expires !== null ? <Row label="Route dropped">{inMinutes(expires - now)}</Row> : null}
           {contact.lat || contact.lon ? (
             <Row label="Position">
               <a href={`https://www.openstreetmap.org/?mlat=${contact.lat}&mlon=${contact.lon}#map=14/${contact.lat}/${contact.lon}`} target="_blank" rel="noreferrer">
@@ -99,6 +113,30 @@ export function ContactCard({ contactKey, onClose }: { contactKey: string; onClo
         </Section>
 
         <Section title="Mesh">
+          {routed ? (
+            <>
+              <Toggle
+                label="Always flood"
+                hint="Messages to this contact ignore learned routes. Handy on the move; costs the mesh two floods a message."
+                checked={policy.flood}
+                onChange={(v) => void run("flood", () => session.setFloodPinned(contact.key, v))()}
+              />
+              <Field label="Drop the learned route after">
+                <Select
+                  value={limitValue(state.routing.contacts[contact.key]?.resetAfterMin)}
+                  disabled={policy.flood}
+                  onChange={(e) => session.setRouteReset(contact.key, parseLimit(e.target.value))}
+                >
+                  <option value="default">Default ({limitLabel(state.routing.resetAfterMin).toLowerCase()})</option>
+                  {ROUTE_LIMITS.map((m) => (
+                    <option key={limitValue(m)} value={limitValue(m)}>
+                      {limitLabel(m)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </>
+          ) : null}
           <div className="row-actions wrap">
             <Button busy={busy === "path"} disabled={!online} onClick={run("path", () => session.resetPath(contact.key))}>
               Forget route

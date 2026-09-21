@@ -3,10 +3,13 @@
  * no hardware on the desk. Offered when the page is opened with `?demo`, or
  * in development. It has a few contacts and channels, answers every command
  * the session sends, acknowledges messages a moment later, and has somebody
- * say something every so often.
+ * say something every so often. It also hands up the packets it "hears", so
+ * routes, copies and relays show as they would on a real mesh: a flood learns
+ * a route when it is acknowledged, and a route to Bob (on his bike) often
+ * turns out to be gone.
  */
 
-import { BaseTransport, ByteWriter, Cmd, fromHex, fromUtf8, Push, ReqType, Resp, TxtType, type Transport } from "@meshnet/meshcore";
+import { BaseTransport, ByteWriter, Cmd, fromHex, fromUtf8, groupTextPayload, heardGroupTextPayload, Push, ReqType, Resp, TxtType, type Transport } from "@meshnet/meshcore";
 import type { Connector } from "./types.js";
 
 const SELF = fromHex("a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf");
@@ -26,6 +29,9 @@ const PEOPLE: Person[] = [
   { key: seeded(3), name: "Hill Repeater", type: 2, hops: 1, lat: 55.05, lon: 73.4 },
   { key: seeded(4), name: "Town Room", type: 3, hops: 2, lat: 0, lon: 0 },
   { key: seeded(5), name: "Weather sensor", type: 4, hops: 0xff, lat: 55.01, lon: 73.3 },
+  { key: seeded(7), name: "Tower Repeater", type: 2, hops: 1, lat: 55.09, lon: 73.31 },
+  // Signs paths with the same first byte as Hill Repeater, as one-byte hashes on a busy mesh do.
+  { key: startingWith(0x6f, 6), name: "Ridge Repeater", type: 2, hops: 2, lat: 55.12, lon: 73.5 },
 ];
 
 function seeded(n: number): Uint8Array {
@@ -34,15 +40,26 @@ function seeded(n: number): Uint8Array {
   return key;
 }
 
-function contactFrame(code: number, p: Person, lastMod: number): Uint8Array {
+function startingWith(first: number, n: number): Uint8Array {
+  const key = seeded(n);
+  key[0] = first;
+  return key;
+}
+
+/** Path hashes the demo's packets travel through: Tower, Town Room, Hill or Ridge (0x6f), and a stranger. */
+const RELAYS = [0x03, 0x94, 0x6f, 0x2c];
+
+const CHANNELS = ["8b3387e9c5cdea6ac9e5edbaa115cd72", "0123456789abcdef0123456789abcdef"];
+
+function contactFrame(code: number, p: Person, lastMod: number, hops = p.hops): Uint8Array {
   const path = new Uint8Array(64);
-  for (let i = 0; i < 64; i++) path[i] = (i * 7 + 3) & 0xff;
+  if (hops !== 0xff) path.set(RELAYS.slice(0, hops));
   return new ByteWriter()
     .u8(code)
     .bytes(p.key)
     .u8(p.type)
     .u8(p.name === "Alice" ? 1 : 0)
-    .u8(p.hops)
+    .u8(hops)
     .bytes(path)
     .fixedString(p.name, 32)
     .u32(Math.floor(Date.now() / 1000) - 600)
@@ -110,16 +127,57 @@ class DemoRadio extends BaseTransport {
   private prefs = new Map<Person, Record<string, string>>(PEOPLE.filter((p) => p.type >= 2).map((p) => [p, nodePrefs(p)]));
   /** Nodes that took our admin password; only they answer the console. */
   private admins = new Set<Person>();
+  /** The route this radio holds to each contact, as a hop count; 0xff for none. */
+  private routes = new Map<Person, number>(PEOPLE.map((p) => [p, p.hops]));
 
   start(): void {
+    // Queued before the app connected: their packets were never heard, so their routes are unknown.
     this.queue.push(this.dm(PEOPLE[0]!, "Welcome to the demo mesh 👋"), this.channel(0, "Bob (bike)", "Public channel works too"));
-    this.chatter = setInterval(() => {
-      const who = PEOPLE[Math.floor(Math.random() * 2)]!;
-      const line = LINES[Math.floor(Math.random() * LINES.length)]!;
-      if (Math.random() < 0.5) this.queue.push(this.channel(0, who.name, line));
-      else this.queue.push(this.dm(who, line));
-      this.emitFrame(new Uint8Array([Push.MsgWaiting]));
-    }, 25_000);
+    this.chatter = setInterval(() => void this.chat(), 25_000);
+  }
+
+  private async chat(): Promise<void> {
+    const who = PEOPLE[Math.floor(Math.random() * 2)]!;
+    const line = LINES[Math.floor(Math.random() * LINES.length)]!;
+    if (Math.random() < 0.5) await this.heardChannel(0, who.name, line);
+    else this.heardDm(who, line);
+  }
+
+  /** A channel message from somebody: its first copy, the message, then the copies other repeaters send on. */
+  private async heardChannel(index: number, sender: string, text: string): Promise<void> {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const payload = await heardGroupTextPayload(fromHex(CHANNELS[index]!), timestamp, TxtType.Plain, `${sender}: ${text}`);
+    const paths = [[0x03], [0x6f, 0x03], [0x2c, 0x94, 0x03]].sort(() => Math.random() - 0.5).slice(0, 1 + Math.floor(Math.random() * 3));
+    this.emitFrame(this.heard(5, paths[0]!, payload));
+    this.queue.push(this.channel(index, sender, text, timestamp, paths[0]!.length));
+    this.emitFrame(new Uint8Array([Push.MsgWaiting]));
+    paths.slice(1).forEach((path, i) => this.later(700 * (i + 1), this.heard(5, path, payload)));
+  }
+
+  /** A direct message that flooded here: its packet names us and the sender, and a second copy trails it. */
+  private heardDm(from: Person, text: string): void {
+    const sealed = new Uint8Array(20);
+    crypto.getRandomValues(sealed);
+    sealed[0] = SELF[0]!;
+    sealed[1] = from.key[0]!;
+    const path = RELAYS.slice(0, from.hops);
+    this.emitFrame(this.heard(2, path, sealed));
+    this.queue.push(this.dm(from, text));
+    this.emitFrame(new Uint8Array([Push.MsgWaiting]));
+    this.later(900, this.heard(2, [0x6f, ...path], sealed));
+  }
+
+  /** A packet the radio heard, as it hands them up on LOG_RX_DATA: flooded, one-byte hashes. */
+  private heard(payloadType: number, path: number[], payload: Uint8Array): Uint8Array {
+    return new ByteWriter()
+      .u8(Push.LogRxData)
+      .i8(Math.round((Math.random() * 20 - 8) * 4))
+      .i8(-60 - Math.round(Math.random() * 50))
+      .u8((payloadType << 2) | 1)
+      .u8(path.length)
+      .bytes(new Uint8Array(path))
+      .bytes(payload)
+      .toBytes();
   }
 
   private dm(from: Person, text: string): Uint8Array {
@@ -136,16 +194,16 @@ class DemoRadio extends BaseTransport {
       .toBytes();
   }
 
-  private channel(index: number, sender: string, text: string): Uint8Array {
+  private channel(index: number, sender: string, text: string, timestamp = Math.floor(Date.now() / 1000), hops = 1): Uint8Array {
     return new ByteWriter()
       .u8(Resp.ChannelMsgRecvV3)
       .i8(Math.round((Math.random() * 20 - 5) * 4))
       .u8(0)
       .u8(0)
       .u8(index)
-      .u8(1)
+      .u8(hops)
       .u8(TxtType.Plain)
-      .u32(Math.floor(Date.now() / 1000))
+      .u32(timestamp)
       .string(`${sender}: ${text}`)
       .toBytes();
   }
@@ -259,8 +317,8 @@ class DemoRadio extends BaseTransport {
     this.timers.push(t);
   }
 
-  private later(ms: number, frame: Uint8Array): void {
-    this.timers.push(setTimeout(() => this.emitFrame(frame), ms));
+  private later(ms: number, frame: Uint8Array | (() => void)): void {
+    this.timers.push(setTimeout(() => (typeof frame === "function" ? frame() : this.emitFrame(frame)), ms));
   }
 
   private answer(frame: Uint8Array): Uint8Array[] {
@@ -307,13 +365,32 @@ class DemoRadio extends BaseTransport {
       case Cmd.GetContacts:
         return [
           new ByteWriter().u8(Resp.ContactsStart).u32(PEOPLE.length).toBytes(),
-          ...PEOPLE.map((p, i) => contactFrame(Resp.Contact, p, 100 + i)),
+          ...PEOPLE.map((p, i) => contactFrame(Resp.Contact, p, 100 + i, this.routes.get(p))),
           new ByteWriter().u8(Resp.EndOfContacts).u32(100 + PEOPLE.length).toBytes(),
         ];
+      case Cmd.GetContactByKey: {
+        const p = this.person(frame.subarray(1, 33));
+        return p ? [contactFrame(Resp.Contact, p, Math.floor(Date.now() / 1000), this.routes.get(p))] : [new Uint8Array([Resp.Err, 2])];
+      }
+      case Cmd.ResetPath: {
+        const p = this.person(frame.subarray(1, 33));
+        if (p) this.routes.set(p, 0xff);
+        return [new Uint8Array([Resp.Ok])];
+      }
+      case Cmd.SendChannelTxtMsg: {
+        // Repeaters send it on, and the radio overhears them.
+        const index = frame[2] ?? 0;
+        const timestamp = (frame[3]! | (frame[4]! << 8) | (frame[5]! << 16) | (frame[6]! << 24)) >>> 0;
+        const text = fromUtf8(frame.subarray(7));
+        void groupTextPayload(fromHex(CHANNELS[index] ?? CHANNELS[0]!), timestamp, "Demo radio", text).then((payload) => {
+          [[0x03], [0x03, 0x94], [0x2c]].forEach((path, i) => this.later(600 * (i + 1), this.heard(5, path, payload)));
+        });
+        return [new Uint8Array([Resp.Ok])];
+      }
       case Cmd.GetChannel: {
         const index = frame[1] ?? 0;
-        if (index === 0) return [new ByteWriter().u8(Resp.ChannelInfo).u8(0).fixedString("Public", 32).bytes(fromHex("8b3387e9c5cdea6ac9e5edbaa115cd72")).toBytes()];
-        if (index === 1) return [new ByteWriter().u8(Resp.ChannelInfo).u8(1).fixedString("Friends", 32).bytes(fromHex("0123456789abcdef0123456789abcdef")).toBytes()];
+        if (index === 0) return [new ByteWriter().u8(Resp.ChannelInfo).u8(0).fixedString("Public", 32).bytes(fromHex(CHANNELS[0]!)).toBytes()];
+        if (index === 1) return [new ByteWriter().u8(Resp.ChannelInfo).u8(1).fixedString("Friends", 32).bytes(fromHex(CHANNELS[1]!)).toBytes()];
         return [new ByteWriter().u8(Resp.ChannelInfo).u8(index).fixedString("", 32).zeros(16).toBytes()];
       }
       case Cmd.SyncNextMessage:
@@ -334,9 +411,24 @@ class DemoRadio extends BaseTransport {
           }
           return [this.sent(0)];
         }
+        const p = this.person(frame.subarray(7, 13));
         const tag = this.acks++;
-        this.later(900 + Math.random() * 2000, new ByteWriter().u8(Push.SendConfirmed).u32(tag).u32(1400).toBytes());
-        return [new ByteWriter().u8(Resp.Sent).u8(frame[2] === 0 ? 0 : 1).u32(tag).u32(3000).toBytes()];
+        const confirmed = new ByteWriter().u8(Push.SendConfirmed).u32(tag).u32(1400).toBytes();
+        const flood = !p || this.routes.get(p) === 0xff;
+        if (flood) {
+          // The acknowledgement rides back on the route the flood took: the radio learns it first.
+          this.later(1500 + Math.random() * 1500, () => {
+            if (p) {
+              this.routes.set(p, 1 + Math.floor(Math.random() * 3));
+              this.emitFrame(new ByteWriter().u8(Push.PathUpdated).bytes(p.key).toBytes());
+            }
+            this.emitFrame(confirmed);
+          });
+        } else if (!(p.name.startsWith("Bob") && Math.random() < 0.6)) {
+          // Bob is on his bike: more often than not, the route he was last reached by is gone.
+          this.later(900 + Math.random() * 1500, confirmed);
+        }
+        return [new ByteWriter().u8(Resp.Sent).u8(flood ? 1 : 0).u32(tag).u32(3000).toBytes()];
       }
       case Cmd.SendLogin: {
         const p = this.person(frame.subarray(1, 33));
