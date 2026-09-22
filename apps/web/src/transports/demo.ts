@@ -51,9 +51,9 @@ const RELAYS = [0x03, 0x94, 0x6f, 0x2c];
 
 const CHANNELS = ["8b3387e9c5cdea6ac9e5edbaa115cd72", "0123456789abcdef0123456789abcdef"];
 
-function contactFrame(code: number, p: Person, lastMod: number, hops = p.hops): Uint8Array {
+function contactFrame(code: number, p: Person, lastMod: number, hops = p.hops, relays: number[] = RELAYS): Uint8Array {
   const path = new Uint8Array(64);
-  if (hops !== 0xff) path.set(RELAYS.slice(0, hops));
+  if (hops !== 0xff) path.set(relays.slice(0, hops));
   return new ByteWriter()
     .u8(code)
     .bytes(p.key)
@@ -101,6 +101,22 @@ function nodePrefs(p: Person): Record<string, string> {
   };
 }
 
+/**
+ * How well each node hears the one before it on a trace, dB, by the hash it
+ * signs with: the tower well, the hill fairly, the town room barely, the
+ * stranger worse. Below about −8 dB a hop is more often lost than not.
+ */
+const HEARS: Record<number, number> = { 0x03: 6.5, 0x6f: -3, 0x94: -6.25, 0x2c: -9 };
+
+function heardAt(hash: number): number {
+  return Math.round(((HEARS[hash] ?? -4) + (Math.random() * 2 - 1)) * 4) / 4;
+}
+
+/** A trace gets through a hop heard at `snr` with this chance. */
+function through(snr: number): boolean {
+  return Math.random() < 1 / (1 + Math.exp(-(snr + 7.5) / 1.1));
+}
+
 /** Repeaters the demo repeater hears direct: prefix, seconds ago, SNR in dB. */
 const NEIGHBOURS: [string, number, number][] = [
   ["0a1b2c3d4e5f", 240, 7.25],
@@ -129,11 +145,45 @@ class DemoRadio extends BaseTransport {
   private admins = new Set<Person>();
   /** The route this radio holds to each contact, as a hop count; 0xff for none. */
   private routes = new Map<Person, number>(PEOPLE.map((p) => [p, p.hops]));
+  /** Routes written by hand, relay by relay; the rest go along `RELAYS`. */
+  private paths = new Map<Person, number[]>();
+  private murmur: ReturnType<typeof setInterval> | null = null;
 
   start(): void {
     // Queued before the app connected: their packets were never heard, so their routes are unknown.
     this.queue.push(this.dm(PEOPLE[0]!, "Welcome to the demo mesh 👋"), this.channel(0, "Bob (bike)", "Public channel works too"));
     this.chatter = setInterval(() => void this.chat(), 25_000);
+    this.murmur = setInterval(() => this.overhear(), 3_500);
+  }
+
+  /** The mesh going about its business: adverts, acks and requests between others, which the radio overhears. */
+  private overhear(): void {
+    const someone = PEOPLE[Math.floor(Math.random() * PEOPLE.length)]!;
+    const pick = Math.random();
+    const noise = (n: number) => {
+      const bytes = new Uint8Array(n);
+      crypto.getRandomValues(bytes);
+      return bytes;
+    };
+    const paths = [[0x03], [0x6f, 0x03], [0x2c, 0x94, 0x03], []];
+    const path = paths[Math.floor(Math.random() * paths.length)]!;
+    if (pick < 0.3) {
+      const advert = noise(110);
+      advert.set(someone.key, 0);
+      this.emitFrame(this.heard(4, path, advert));
+    } else if (pick < 0.55) {
+      this.emitFrame(this.heard(3, path, noise(4)));
+    } else if (pick < 0.8) {
+      const sealed = noise(40);
+      sealed[0] = PEOPLE[Math.floor(Math.random() * PEOPLE.length)]!.key[0]!;
+      sealed[1] = someone.key[0]!;
+      this.emitFrame(this.heard(2, path, sealed));
+    } else {
+      const request = noise(24);
+      request[0] = 0x6f;
+      request[1] = someone.key[0]!;
+      this.emitFrame(this.heard(0, path, request));
+    }
   }
 
   private async chat(): Promise<void> {
@@ -365,12 +415,12 @@ class DemoRadio extends BaseTransport {
       case Cmd.GetContacts:
         return [
           new ByteWriter().u8(Resp.ContactsStart).u32(PEOPLE.length).toBytes(),
-          ...PEOPLE.map((p, i) => contactFrame(Resp.Contact, p, 100 + i, this.routes.get(p))),
+          ...PEOPLE.map((p, i) => contactFrame(Resp.Contact, p, 100 + i, this.routes.get(p), this.paths.get(p))),
           new ByteWriter().u8(Resp.EndOfContacts).u32(100 + PEOPLE.length).toBytes(),
         ];
       case Cmd.GetContactByKey: {
         const p = this.person(frame.subarray(1, 33));
-        return p ? [contactFrame(Resp.Contact, p, Math.floor(Date.now() / 1000), this.routes.get(p))] : [new Uint8Array([Resp.Err, 2])];
+        return p ? [contactFrame(Resp.Contact, p, Math.floor(Date.now() / 1000), this.routes.get(p), this.paths.get(p))] : [new Uint8Array([Resp.Err, 2])];
       }
       case Cmd.ResetPath: {
         const p = this.person(frame.subarray(1, 33));
@@ -510,6 +560,90 @@ class DemoRadio extends BaseTransport {
       case Cmd.SendPathDiscoveryReq:
         this.later(1800, new ByteWriter().u8(Push.PathDiscoveryResponse).u8(0).bytes(frame.subarray(2, 8)).u8(2).bytes(fromHex("a1b2")).u8(2).bytes(fromHex("b2a1")).toBytes());
         return [new ByteWriter().u8(Resp.Sent).u8(1).u32(this.acks++).u32(3000).toBytes()];
+      case Cmd.SendTracePath: {
+        // Out along the path and back: each node adds how well it heard the one before, and any hop may lose it.
+        const tag = frame.subarray(1, 5);
+        const flags = frame[9] ?? 0;
+        const size = 1 << (flags & 3);
+        const path = frame.subarray(10);
+        const hashes = Array.from({ length: path.length / size }, (_, i) => path[i * size]!);
+        const snrs = hashes.map(heardAt);
+        const final = heardAt(hashes[0]!) - 1;
+        const back = snrs.every(through) && through(final);
+        const estimate = 500 + (160 * 6 + 250) * (hashes.length + 1);
+        if (back) {
+          const trip = 170 * (hashes.length + 1) + Math.random() * 90 * hashes.length;
+          this.later(
+            trip,
+            new ByteWriter()
+              .u8(Push.TraceData)
+              .u8(0)
+              .u8(path.length)
+              .u8(flags)
+              .bytes(tag)
+              .u32(0)
+              .bytes(path)
+              .bytes(new Uint8Array(snrs.map((s) => Math.round(s * 4) & 0xff)))
+              .i8(Math.round(final * 4))
+              .toBytes(),
+          );
+        }
+        return [new ByteWriter().u8(Resp.Sent).u8(0).bytes(tag).u32(estimate).toBytes()];
+      }
+      case Cmd.SendControlData: {
+        // Who hears me: the repeaters in range answer after a pause of their own, with how they heard us.
+        if (((frame[1] ?? 0) & 0xf0) === 0x80) {
+          const tag = frame.subarray(3, 7);
+          for (const p of PEOPLE.filter((x) => x.type === 2 && x.hops <= 1)) {
+            if (Math.random() < 0.15) continue;
+            const us = heardAt(p.key[0]!);
+            const them = heardAt(p.key[0]!) + 1;
+            this.later(
+              500 + Math.random() * 6000,
+              new ByteWriter()
+                .u8(Push.ControlData)
+                .i8(Math.round(them * 4))
+                .i8(-100 + Math.round(them * 2))
+                .u8(0)
+                .u8(0x92)
+                .i8(Math.round(us * 4))
+                .bytes(tag)
+                .bytes(p.key)
+                .toBytes(),
+            );
+          }
+        }
+        return [new Uint8Array([Resp.Ok])];
+      }
+      case Cmd.GetStats:
+        if (frame[1] !== 1) return [new Uint8Array([Resp.Err, 1])];
+        return [
+          new ByteWriter()
+            .u8(Resp.Stats)
+            .u8(1)
+            .u16((-114 + Math.round(Math.random() * 4)) & 0xffff)
+            .i8(-96)
+            .i8(26)
+            .u32(412)
+            .u32(9120)
+            .toBytes(),
+        ];
+      case Cmd.GetAdvertPath: {
+        const p = this.person(frame.subarray(2, 34));
+        if (!p || p.hops === 0xff) return [new Uint8Array([Resp.Err, 2])];
+        // An advert comes in the other way round: its first relay is the one nearest to it.
+        const relays = (this.paths.get(p) ?? RELAYS.slice(0, p.hops)).slice().reverse();
+        return [new ByteWriter().u8(Resp.AdvertPath).u32(Math.floor(Date.now() / 1000) - 900).u8(relays.length).bytes(new Uint8Array(relays)).toBytes()];
+      }
+      case Cmd.AddUpdateContact: {
+        const p = this.person(frame.subarray(1, 33));
+        const length = frame[35] ?? 0xff;
+        if (p) {
+          this.routes.set(p, length);
+          if (length !== 0xff) this.paths.set(p, Array.from(frame.subarray(36, 36 + (length & 63))));
+        }
+        return [new Uint8Array([Resp.Ok])];
+      }
       case Cmd.Reboot:
         this.timers.push(setTimeout(() => this.emitClose(new Error("the radio rebooted")), 200));
         return [];
@@ -522,6 +656,7 @@ class DemoRadio extends BaseTransport {
   protected async shutdown(): Promise<void> {
     for (const t of this.timers) clearTimeout(t);
     if (this.chatter) clearInterval(this.chatter);
+    if (this.murmur) clearInterval(this.murmur);
   }
 }
 

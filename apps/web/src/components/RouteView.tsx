@@ -4,6 +4,7 @@ import { agoPhrase, timeOfDay } from "../lib/format.js";
 import { inMinutes, limitLabel, limitValue, parseLimit, ROUTE_LIMITS, routeWords, useNow } from "../lib/routes.js";
 import { session, useSession } from "../lib/session.js";
 import { act } from "../lib/toast.js";
+import { changeRoute } from "../lib/toolActions.js";
 import { ActionRow, Block, Group, SelectRow, SwitchRow } from "../ui/List.js";
 import { Gone, ScreenHead, type Chrome } from "./ScreenHead.js";
 
@@ -88,6 +89,7 @@ export function RouteView({ contactKey, chrome }: { contactKey: string; chrome: 
         <Group note="Discovery asks the node to answer along the route it heard. The answer arrives when the radio hears back.">
           <ActionRow label="Forget the route now" disabled={!online || !route || (governed && policy.flood)} onClick={() => void act(() => session.resetPath(key), "Route forgotten: the next message floods")} />
           <ActionRow label="Discover the path" air disabled={!online} onClick={() => void act(() => session.discoverPath(key), "Asked for the path")} />
+          <ActionRow label="Change on the map" hint="Tap the repeaters it should go through, in order." disabled={!online} onClick={() => changeRoute(key)} />
         </Group>
       </div>
     </div>

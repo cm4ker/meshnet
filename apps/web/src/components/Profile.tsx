@@ -10,7 +10,7 @@ import { session, useSession } from "../lib/session.js";
 import { act, toast } from "../lib/toast.js";
 import { IconButton } from "../ui/Button.js";
 import { Confirm, Prompt } from "../ui/Dialog.js";
-import { ActionRow, Group, InfoRow, LinkRow } from "../ui/List.js";
+import { ActionRow, Block, Group, InfoRow, LinkRow } from "../ui/List.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
 import { AirIcon, ChartIcon, ChatIcon, CheckIcon, CopyIcon, EditIcon, LockIcon, MapIcon, MoreIcon, PowerIcon, ShieldIcon, SlidersIcon, StarFilledIcon, StarIcon, TerminalIcon, TrashIcon, UsersIcon, CloseIcon } from "./Icons.js";
@@ -19,6 +19,7 @@ import { QueuePill } from "./node/QueuePill.js";
 import { SignIn } from "./node/SignIn.js";
 import { Readings } from "./Readings.js";
 import { Gone, ScreenHead, type Chrome } from "./ScreenHead.js";
+import { NodeCheck } from "./tools/NodeCheck.js";
 
 const PAGES: Record<NodePage, { label: string; icon: React.ReactNode; admin: boolean }> = {
   neighbours: { label: "Neighbours", icon: <UsersIcon size={17} />, admin: false },
@@ -159,6 +160,9 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
 
         <Group>
           <LinkRow label="Route" value={<span className={`route-${route.tone}`}>{route.text}</span>} onClick={() => openRoute(key)} />
+          <Block>
+            <NodeCheck contactKey={key} route={false} />
+          </Block>
         </Group>
 
         {node && (managed || signedIn) ? <NodeStatus contact={contact} /> : null}

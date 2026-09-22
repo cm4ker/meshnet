@@ -5,22 +5,31 @@
  */
 
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AdvType, contactConversation, contactRoute, isConversationType, isFavourite, isNodeType, type ContactRecord, type SessionState } from "@meshnet/meshcore";
+import { AdvType, contactConversation, isConversationType, isFavourite, isNodeType, type ContactRecord, type SessionState } from "@meshnet/meshcore";
 import { useBackLayer } from "../lib/back.js";
-import { nameOfHash } from "../lib/echoes.js";
 import { ago, agoPhrase } from "../lib/format.js";
 import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "../lib/geo.js";
+import { useHears } from "../lib/hears.js";
+import { legId, useLegVerdicts } from "../lib/legVerdicts.js";
+import type { LinkRadio } from "../lib/los.js";
+import { contactEnd, defaultHeight, EMPTY_OVERLAY, editOverlay, hearsOverlay, losOverlay, relayOf, routeOverlay, selfEnd, type MapOverlay } from "../lib/mapOverlay.js";
+import { useMeshTool, type LosEnd } from "../lib/meshTool.js";
 import { focusOnMap, openConversation, openProfile, useNav } from "../lib/nav.js";
 import { kindLabel } from "../lib/nodes.js";
+import { usePing, measuredLegs } from "../lib/ping.js";
 import { routeWords } from "../lib/routes.js";
 import { useSavedPasswords } from "../lib/secrets.js";
 import { session, useSession } from "../lib/session.js";
 import { act } from "../lib/toast.js";
+import { closeTool, lineOfSightTo, openLineOfSight, tapInRoute, whoHearsMe } from "../lib/toolActions.js";
 import { getTextScale, subscribeTextSize } from "../theme/textSize.js";
 import { IconButton } from "../ui/Button.js";
+import { AirMark } from "../ui/List.js";
 import { Avatar } from "./Avatar.js";
-import { ChatIcon, CloseIcon, InfoIcon, RefreshIcon, SearchIcon, StarFilledIcon } from "./Icons.js";
+import { ChatIcon, CloseIcon, InfoIcon, RefreshIcon, SearchIcon, StarFilledIcon, WavesIcon } from "./Icons.js";
 import { LOW_BATTERY_MV } from "./node/Status.js";
+import { NodeCheck } from "./tools/NodeCheck.js";
+import { ToolPanel } from "./tools/ToolPanel.js";
 
 // Leaflet and its styles load with the map, not with the app.
 const MapView = lazy(() => import("./MapView.js"));
@@ -184,6 +193,13 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
           </button>
         ))}
       </div>
+      {only ? null : (
+        <button type="button" className="hears-row" disabled={state.status !== "ready"} onClick={whoHearsMe}>
+          <WavesIcon size={17} />
+          <span className="grow">Who hears me</span>
+          <AirMark />
+        </button>
+      )}
       <div className="list mesh-list">
         {all.length === 0 ? (
           <div className="empty muted">Nobody heard yet. Advertise from the Radio tab: neighbours answer with their own adverts.</div>
@@ -237,27 +253,88 @@ function NodeRow({ contact: c, selected, yours, onOpen }: { contact: ContactReco
 
 // ---- the map ----
 
-/** The map with the filter applied, the focus drawn, and taps handed up. */
+/**
+ * What goes over the nodes: the tool in use, or else the route to the node
+ * picked, coloured by its last ping.
+ */
+function useMeshOverlay(selected: string | null, state: SessionState): MapOverlay {
+  const tool = useMeshTool();
+  const ping = usePing(selected);
+  const hears = useHears();
+  const self = state.self;
+  const radio: LinkRadio | null = useMemo(
+    () => (self ? { frequencyKhz: self.frequencyKhz, bandwidthHz: self.bandwidthHz, spreadingFactor: self.spreadingFactor, codingRate: self.codingRate, txPowerDbm: self.txPower } : null),
+    [self],
+  );
+  // A route being changed marks the legs the terrain closes; they are read once and kept.
+  const editLegs = useMemo(() => {
+    if (tool?.kind !== "route") return [];
+    const target = state.contacts[tool.key];
+    const ends: (LosEnd | null)[] = [selfEnd(state), ...tool.relays.map((k) => (state.contacts[k] ? contactEnd(state.contacts[k]) : null)), target ? contactEnd(target) : null];
+    return ends.slice(1).flatMap((b, i) => {
+      const a = ends[i];
+      return a && b ? [{ a, b, ha: defaultHeight(a, state.contacts), hb: defaultHeight(b, state.contacts) }] : [];
+    });
+  }, [tool, state]);
+  const verdicts = useLegVerdicts(editLegs, radio);
+  const blockedKey = editLegs.filter((l) => verdicts.get(legId(l.a, l.b)) === "blocked").map((l) => legId(l.a, l.b)).join(";");
+  const overlay =
+    tool?.kind === "los"
+      ? losOverlay(tool)
+      : tool?.kind === "route"
+        ? editOverlay(tool, state, new Set(blockedKey ? blockedKey.split(";") : []))
+        : tool?.kind === "hears"
+          ? hearsOverlay(hears, state)
+          : selected
+            ? routeOverlay(selected, state, ping)
+            : EMPTY_OVERLAY;
+  // The state changes with every packet heard; the lines are drawn again only when they change.
+  const same = JSON.stringify(overlay);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => overlay, [same]);
+}
+
+/** The map with the filter applied, the focus and the tool drawn, and taps handed up or to the tool. */
 export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zoomButtons }: { selected: string | null; onSelect: (key: string | null) => void; onGroup: (keys: string[]) => void; coverTop?: number | undefined; coverBottom?: number | undefined; zoomButtons?: boolean | undefined }) {
   const state = useSession();
   const saved = useSavedPasswords();
   const { kind, query } = useFilter();
+  const tool = useMeshTool();
+  const ping = usePing(selected);
+  const overlay = useMeshOverlay(selected, state);
   // The map redraws markers when the filter function changes, so it changes only with what it filters by.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const test = useCallback(matcher(state, saved, kind, query), [state.logins, state.statusHistory, saved, kind, query]);
+  const pick = (key: string | null) => {
+    if (tapInRoute(key, state)) return;
+    // A tap on the empty map puts a line of sight away, as it puts away a picked node.
+    if (key === null && tool && tool.kind !== "route") closeTool();
+    onSelect(key);
+  };
+  const leg = (from: LosEnd, to: LosEnd) => {
+    // The legs of a pinged route carry what the ping measured on them.
+    const back = tool?.kind === "los" ? tool.back : selected;
+    let heard: [number, number] | null = null;
+    if (!tool && selected && ping) {
+      const relays = ping.targetInChain ? ping.chain.slice(0, -1) : ping.chain;
+      const keys = ["self", ...relays.map((h) => relayOf(h, state.contacts)?.key ?? h), selected];
+      const index = keys.findIndex((k, i) => k === from.key && keys[i + 1] === to.key);
+      heard = index >= 0 ? (measuredLegs(ping)[index] ?? null) : null;
+    }
+    openLineOfSight(from, to, tool?.kind === "hears" ? null : back, heard);
+  };
   return (
     <Suspense fallback={<div className="empty muted">Loading the map…</div>}>
-      <MapView selected={selected} onSelect={onSelect} onGroup={onGroup} filter={test} coverTop={coverTop} coverBottom={coverBottom} zoomButtons={zoomButtons} />
+      <MapView selected={selected} onSelect={pick} onGroup={onGroup} filter={test} coverTop={coverTop} coverBottom={coverBottom} zoomButtons={zoomButtons} overlay={overlay} onLeg={leg} onHold={lineOfSightTo} />
     </Suspense>
   );
 }
 
-/** A picked node, in a few lines: who, how far, which way the messages go. */
+/** A picked node, in a few lines: who, how far, which way the messages go, and a ping along that way. */
 export function NodeCard({ contactKey, onClose }: { contactKey: string; onClose: () => void }) {
   const state = useSession();
   const c = state.contacts[contactKey];
   if (!c) return null;
-  const route = contactRoute(c);
   const where = whereFrom(state, c);
   return (
     <div className="node-card">
@@ -271,20 +348,7 @@ export function NodeCard({ contactKey, onClose }: { contactKey: string; onClose:
           <CloseIcon size={18} />
         </IconButton>
       </div>
-      <div className="node-card-route">
-        <span className="muted">Route</span>
-        {route && route.length > 0 ? (
-          <span className="hops">
-            {route.map((hash, i) => (
-              <span key={i} className={["hop", nameOfHash(hash, state.contacts) ? "" : "amb"].join(" ")}>
-                {nameOfHash(hash, state.contacts) ?? `${hash}?`}
-              </span>
-            ))}
-          </span>
-        ) : (
-          <span>{routeWords(c).text}</span>
-        )}
-      </div>
+      <NodeCheck contactKey={c.key} />
       <div className="hero-actions">
         {isConversationType(c.type) ? (
           <button type="button" className="hero-act primary" onClick={() => openConversation(contactConversation(c.key))}>
@@ -363,8 +427,9 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
   const [space, setSpace] = useState({ height: 0, top: 0, peek: 0, card: 0 });
   const [detent, setDetentState] = useState<Detent>(() => (Object.values(state.contacts).some((c) => hasPosition(c.lat, c.lon)) ? lastDetent : "full"));
   const [group, setGroup] = useState<string[] | null>(null);
+  const tool = useMeshTool();
   const focus = nav.meshFocus && state.contacts[nav.meshFocus] ? nav.meshFocus : null;
-  const listed = !focus && !group;
+  const listed = !focus && !group && !tool;
   const setDetent = (d: Detent) => {
     lastDetent = d;
     setDetentState(d);
@@ -374,6 +439,7 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
   const mapped = Object.values(state.contacts).some((c) => hasPosition(c.lat, c.lon));
   useBackLayer(!hidden && group !== null, () => setGroup(null));
   useBackLayer(!hidden && listed && mapped && detent === "full", () => setDetent("half"));
+  useBackLayer(!hidden && tool !== null, closeTool);
 
   // A pick shows its card at half height, over the map, even when the list was up to read: "On map" in a
   // profile comes here. Decided while rendering, so the map learns in the same pass how much the sheet covers.
@@ -381,6 +447,12 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
   if (picked !== focus) {
     setPicked(focus);
     if (focus && detent !== "half") setDetent("half");
+  }
+  // A tool opens over the map at its own height, like a card.
+  const [shownTool, setShownTool] = useState(tool?.kind ?? null);
+  if (shownTool !== (tool?.kind ?? null)) {
+    setShownTool(tool?.kind ?? null);
+    if (tool && detent !== "half") setDetent("half");
   }
 
   useLayoutEffect(() => {
@@ -426,7 +498,7 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
     resize.observe(card);
     measure();
     return () => resize.disconnect();
-  }, [listed, focus, group]);
+  }, [listed, focus, group, tool?.kind]);
 
   const full = Math.max(0, space.height - space.top - 8);
   const middle = Math.max(0, Math.min(full - 48, Math.max(240, Math.round(space.height * 0.46))));
@@ -604,7 +676,9 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
           ) : null}
         </div>
         <div className="mesh-sheet-body" ref={body}>
-          {focus ? (
+          {tool ? (
+            <ToolPanel tool={tool} />
+          ) : focus ? (
             <NodeCard contactKey={focus} onClose={() => pick(null)} />
           ) : group ? (
             <GroupList keys={group} onPick={pick} onClose={() => setGroup(null)} />

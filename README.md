@@ -37,6 +37,10 @@ The mobile app is named **Ommesh**. It shares the same client and features, with
 
 - **An interactive map.** Find nodes that share a position, see their distance and bearing, and follow known routes through located relays. Markers distinguish node types and fade as adverts age; nearby markers cluster together.
 - **Cached maps.** OpenStreetMap tiles are saved as you view them, so previously viewed areas remain available without a network connection.
+- **Ping on the map.** Tap a repeater and ping it: five traces along its route and back give the round-trip time, how many came back, and the signal of every leg in both directions, drawn on the map. When nothing comes back, the app checks one hop further at a time to find where the route breaks.
+- **Routes by hand.** Change the route to a contact by tapping repeaters on the map in order; legs the terrain blocks are flagged before you save.
+- **Line of sight.** Tap a leg, or hold anywhere on the map, for the elevation profile between two points: terrain, Earth curvature and the Fresnel zone at your radio's frequency, with adjustable antenna heights. Elevation tiles are cached like map tiles.
+- **Who hears me.** One zero-hop packet asks the repeaters in direct range how well they hear you.
 - **One profile per node.** Open it from a chat, the list or the map to view its route, read telemetry, rename it, add it to favourites or share it over the air.
 - **Remote administration.** Sign in to repeaters, rooms and sensors through your radio. View status, a week's battery and noise-floor trends, repeater neighbours, access roles, settings and the console. Sensor history includes minimum, maximum and mean readings.
 - **Visible radio traffic.** Remote requests run through a visible queue, one at a time. Actions that transmit are marked with an antenna; status refreshes are requested by you.
@@ -48,7 +52,7 @@ The mobile app is named **Ommesh**. It shares the same client and features, with
 - **Phone navigation.** Bottom tabs, a sliding node list over the map, long-press menus and swipe-back navigation.
 - **Light and dark themes.** One Light, One Dark, system theme selection and adjustable text size.
 - **Radio controls.** Name, position, frequency, bandwidth, spreading factor, coding rate, transmit power, contact and telemetry policies, clock, adverts and advanced tuning. Frequency changes have a separate Apply step; remote radio changes support a timed trial.
-- **Notifications and diagnostics.** Message and newly discovered node notifications, an event log and optional raw frame inspection in hex.
+- **Notifications and diagnostics.** Message and newly discovered node notifications, an event log and optional raw frame inspection in hex. **On the air** lists every packet the radio hears, with the noise floor and channel load, without transmitting.
 - **Demo mode.** Explore the interface with simulated contacts, messages and nodes, without hardware.
 
 ## Screenshots

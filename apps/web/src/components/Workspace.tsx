@@ -5,8 +5,10 @@ import { batteryPercent } from "../lib/format.js";
 import { useLink } from "../lib/link.js";
 import { useWide } from "../lib/layout.js";
 import { back, focusOnMap, getNav, goSection, openConversation, setStack, shownConversation, topOf, useNav, type Nav, type Screen, type Section } from "../lib/nav.js";
+import { useMeshTool } from "../lib/meshTool.js";
 import { isTauri } from "../lib/platform.js";
 import { useSession } from "../lib/session.js";
+import { closeTool } from "../lib/toolActions.js";
 import { MenuHost, ToastHost } from "../ui/Menu.js";
 import { Sheet } from "../ui/Sheet.js";
 import { ChannelView } from "./ChannelView.js";
@@ -21,6 +23,7 @@ import { Profile } from "./Profile.js";
 import { RadioHome } from "./RadioHome.js";
 import { RadioPageView } from "./RadioPages.js";
 import { RouteView } from "./RouteView.js";
+import { ToolPanel } from "./tools/ToolPanel.js";
 import { UpdateButton } from "./Updates.js";
 import type { Chrome } from "./ScreenHead.js";
 
@@ -233,6 +236,7 @@ function Desktop() {
   const badges = useBadges();
   const [palette, setPalette] = useState(false);
   const [group, setGroup] = useState<string[] | null>(null);
+  const tool = useMeshTool();
   const { chat, full, panel, panelDepth } = layout(nav);
   const radioPage = nav.section === "radio" ? (topOf(nav)?.kind === "radio" ? (topOf(nav) as Extract<Screen, { kind: "radio" }>).page : "name") : null;
 
@@ -288,6 +292,9 @@ function Desktop() {
   const panelChrome: Chrome = { onClose: closePanel, onBack: panelDepth > 1 ? back : undefined };
   const groupPanel = nav.section === "mesh" && !panel && !full && group ? <GroupPanel keys={group} onClose={() => setGroup(null)} /> : null;
   useBackLayer(groupPanel !== null, () => setGroup(null));
+  // A tool on the map takes the panel while it is open, over a profile.
+  const toolPanel = nav.section === "mesh" && !full && tool ? tool : null;
+  useBackLayer(toolPanel !== null, closeTool);
 
   return (
     <div className="app wide">
@@ -315,11 +322,19 @@ function Desktop() {
         <Offline />
         {main}
       </main>
-      {panel && !full ? (
+      {toolPanel ? (
+        <aside className="panel">
+          <div className="screen tool-screen">
+            <ToolPanel tool={toolPanel} />
+          </div>
+        </aside>
+      ) : panel && !full ? (
         <aside className="panel">
           <ScreenView key={JSON.stringify(panel)} screen={panel} chrome={panelChrome} wide />
         </aside>
-      ) : groupPanel}
+      ) : (
+        groupPanel
+      )}
       <Palette open={palette} onClose={() => setPalette(false)} />
     </div>
   );

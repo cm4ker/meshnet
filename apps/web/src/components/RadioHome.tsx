@@ -99,6 +99,7 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
           {row("connection", state.link ? <LinkIcon kind={state.link.kind} size={17} /> : <RadioIcon size={17} />, state.link ? { ble: "Bluetooth", serial: "USB", tcp: "Wi-Fi" }[state.link.kind] : undefined)}
         </Group>
         <Group>
+          {row("air", <WavesIcon size={17} />, "Listen")}
           {row("log", <LogIcon size={17} />, plural(state.log.length, "event"))}
           {row("power", <PowerIcon size={17} />)}
           {row("about", <InfoIcon size={17} />, appInfo.version)}

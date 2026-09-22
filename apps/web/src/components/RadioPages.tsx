@@ -17,6 +17,7 @@ import { Confirm } from "../ui/Dialog.js";
 import { ActionRow, Block, Group, InfoRow, LinkRow, SelectRow, SwitchRow } from "../ui/List.js";
 import { CopyIcon } from "./Icons.js";
 import { LogView } from "./LogView.js";
+import { AirView } from "./AirView.js";
 import { Readings } from "./Readings.js";
 import { ScreenHead, type Chrome } from "./ScreenHead.js";
 import { UpdateButton } from "./Updates.js";
@@ -33,6 +34,7 @@ export const RADIO_TITLES: Record<RadioPage, string> = {
   messages: "Messages and routes",
   appearance: "Appearance",
   connection: "Connection",
+  air: "On the air",
   log: "Log",
   power: "Reboot, reset, erase",
   about: "About",
@@ -133,7 +135,7 @@ export function RadioPageView({ page, chrome }: { page: RadioPage; chrome: Chrom
       <ScreenHead chrome={chrome}>
         <span className="screen-name">{RADIO_TITLES[page]}</span>
       </ScreenHead>
-      {page === "log" ? <LogView /> : <div className="screen-scroll">{<PageBody page={page} />}</div>}
+      {page === "log" ? <LogView /> : page === "air" ? <AirView /> : <div className="screen-scroll">{<PageBody page={page} />}</div>}
     </div>
   );
 }

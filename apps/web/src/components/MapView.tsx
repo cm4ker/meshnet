@@ -3,20 +3,23 @@
  * this radio. Tiles are OpenStreetMap's, kept on the device as they are seen
  * (lib/tiles.ts). Nodes that would overlap at the current zoom are gathered
  * into one circle with their count (lib/cluster.ts); tapping it zooms in on
- * them, or hands them up as a group when they share a spot. The picked node
- * and its route are the caller's: the map draws them and reports taps.
- * Nothing here asks the air for anything.
+ * them, or hands them up as a group when they share a spot. The picked node,
+ * and the lines over the nodes (lib/mapOverlay.ts: a route coloured by a
+ * ping, a line of sight), are the caller's: the map draws them and reports
+ * taps, on a node, on a line, and a long press anywhere. Nothing here asks
+ * the air for anything.
  */
 
 import * as L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AdvType, contactRoute, type ContactRecord } from "@meshnet/meshcore";
+import { AdvType, type ContactRecord } from "@meshnet/meshcore";
 import { clusterPoints, type Placed } from "../lib/cluster.js";
 import { darkenPixels } from "../lib/darkTile.js";
-import { candidatesOfHash } from "../lib/echoes.js";
 import { ago, hue } from "../lib/format.js";
 import { freshness, hasPosition } from "../lib/geo.js";
+import { EMPTY_OVERLAY, type MapOverlay } from "../lib/mapOverlay.js";
+import type { LosEnd } from "../lib/meshTool.js";
 import { useSession } from "../lib/session.js";
 import { TILE_ATTRIBUTION, TILE_URL, tileBlob } from "../lib/tiles.js";
 import { IconButton } from "../ui/Button.js";
@@ -75,11 +78,6 @@ class CachedTileLayer extends L.TileLayer {
   }
 }
 
-interface Point {
-  lat: number;
-  lon: number;
-}
-
 
 /** How close, in screen pixels, two markers may come before they are gathered: a marker and its name. */
 const CLUSTER_RADIUS = 44;
@@ -98,14 +96,15 @@ function glyph(contact: ContactRecord): string {
   return escapeHtml((contact.name || contact.prefix).slice(0, 1).toUpperCase());
 }
 
-/** What a node's marker shows, as a string: a marker is redrawn only when this changes. */
-function nodeLook(contact: ContactRecord, nowSec: number, selected: boolean): { look: string; make: () => L.DivIcon } {
+/** What a node's marker shows, as a string: a marker is redrawn only when this changes. `number` is its place in a route being changed. */
+function nodeLook(contact: ContactRecord, nowSec: number, selected: boolean, number?: number): { look: string; make: () => L.DivIcon } {
   const age = contact.lastAdvert > 0 ? nowSec - contact.lastAdvert : Number.POSITIVE_INFINITY;
   const state = freshness(contact.type, age);
   const name = escapeHtml(contact.name || contact.prefix);
   const stale = state === "stale" && Number.isFinite(age) ? ` · ${ago(contact.lastAdvert * 1000)}` : "";
-  const className = ["map-node", `t-${contact.type}`, state, selected ? "sel" : ""].join(" ");
-  const html = `<span class="map-pin" style="--hue:${hue(contact.name || contact.prefix)}">${glyph(contact)}</span><span class="map-name">${name}${stale}</span>`;
+  const className = ["map-node", `t-${contact.type}`, state, selected ? "sel" : "", number ? "numbered" : ""].join(" ");
+  const badge = number ? `<span class="map-num">${number}</span>` : "";
+  const html = `<span class="map-pin" style="--hue:${hue(contact.name || contact.prefix)}">${glyph(contact)}</span>${badge}<span class="map-name">${name}${stale}</span>`;
   return {
     look: className + html,
     make: () => L.divIcon({ className, html, iconSize: [22, 22], iconAnchor: [11, 11] }),
@@ -131,20 +130,6 @@ function selfIcon(name: string): L.DivIcon {
   });
 }
 
-/** The points the route to a contact passes: us, each relay whose position is known and unambiguous, the contact. */
-function routePoints(contact: ContactRecord, contacts: Record<string, ContactRecord>, self: Point | null): Point[] | null {
-  const hashes = contactRoute(contact);
-  if (hashes === null) return null;
-  const points: Point[] = self ? [self] : [];
-  for (const hash of hashes) {
-    const candidates = candidatesOfHash(hash, contacts);
-    const relay = candidates.length === 1 ? candidates[0]! : null;
-    if (relay && hasPosition(relay.lat, relay.lon)) points.push({ lat: relay.lat, lon: relay.lon });
-  }
-  points.push({ lat: contact.lat, lon: contact.lon });
-  return points.length >= 2 ? points : null;
-}
-
 interface Shown {
   marker: L.Marker;
   look: string;
@@ -167,12 +152,18 @@ export interface MapProps {
   coverTop?: number | undefined;
   /** A phone zooms with two fingers; a desktop has buttons too. */
   zoomButtons?: boolean | undefined;
+  /** Lines over the nodes, and numbers on the relays of a route being changed. */
+  overlay?: MapOverlay | undefined;
+  /** A line of the overlay tapped. */
+  onLeg?: ((from: LosEnd, to: LosEnd) => void) | undefined;
+  /** A long press, or a right click, on the map itself. */
+  onHold?: ((lat: number, lon: number) => void) | undefined;
 }
 
 /** Where the map was left, so coming back to it, from a profile or another section, finds it there. */
 let lastView: { center: L.LatLng; zoom: number } | null = null;
 
-export default function MapView({ selected, onSelect, onGroup, filter, coverBottom = 0, coverTop = 0, zoomButtons = false }: MapProps) {
+export default function MapView({ selected, onSelect, onGroup, filter, coverBottom = 0, coverTop = 0, zoomButtons = false, overlay = EMPTY_OVERLAY, onLeg, onHold }: MapProps) {
   const state = useSession();
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
@@ -183,8 +174,8 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
   const fitted = useRef(false);
   const [zoom, setZoom] = useState(2);
   // The handlers Leaflet holds are set once; they read the latest callbacks from here.
-  const calls = useRef({ onSelect, onGroup });
-  calls.current = { onSelect, onGroup };
+  const calls = useRef({ onSelect, onGroup, onLeg, onHold });
+  calls.current = { onSelect, onGroup, onLeg, onHold };
 
   const contacts = state.contacts;
   const selfLat = state.self && hasPosition(state.self.lat, state.self.lon) ? state.self.lat : null;
@@ -207,11 +198,13 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
   const placed = useMemo(() => Object.values(contacts).filter((c) => hasPosition(c.lat, c.lon)).sort((a, b) => (a.key < b.key ? -1 : 1)), [contacts]);
   const shown = useMemo(() => placed.filter(filter), [placed, filter]);
   const picked = selected ? contacts[selected] ?? null : null;
+  const numbers = overlay.numbers;
 
   // The map itself, once.
   useEffect(() => {
     if (!box.current) return;
-    const m = L.map(box.current, { zoomControl: false, attributionControl: false, worldCopyJump: true, minZoom: 2, maxZoom: 19 });
+    // A long press picks a spot; iOS needs Leaflet's own timer for it, Android and a mouse fire it themselves.
+    const m = L.map(box.current, { zoomControl: false, attributionControl: false, worldCopyJump: true, minZoom: 2, maxZoom: 19, tapHold: true });
     L.control.attribution({ prefix: false, position: "topleft" }).addTo(m);
     const tiles = new CachedTileLayer(TILE_URL, { maxZoom: 19, attribution: TILE_ATTRIBUTION }).addTo(m);
     routeLayer.current = L.layerGroup().addTo(m);
@@ -223,7 +216,17 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
     } else {
       m.setView([20, 0], 2);
     }
-    m.on("click", () => calls.current.onSelect(null));
+    // The finger lifting after a long press is not a tap on the map as well.
+    let heldAt = 0;
+    m.on("contextmenu", (e: L.LeafletMouseEvent) => {
+      if (!calls.current.onHold) return;
+      heldAt = Date.now();
+      calls.current.onHold(e.latlng.lat, e.latlng.lng);
+    });
+    m.on("click", () => {
+      if (Date.now() - heldAt < 500) return;
+      calls.current.onSelect(null);
+    });
     m.on("zoomend", () => setZoom(m.getZoom()));
     // Not while hidden under a profile: a map with no size has no middle to remember.
     m.on("moveend", () => {
@@ -265,7 +268,7 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
     for (const g of clusterPoints(points, CLUSTER_RADIUS)) {
       if (g.members.length === 1) {
         const c = g.members[0]!;
-        wanted.set(c.key, { at: L.latLng(c.lat, c.lon), ...nodeLook(c, nowSec, c.key === selected), members: g.members });
+        wanted.set(c.key, { at: L.latLng(c.lat, c.lon), ...nodeLook(c, nowSec, c.key === selected, numbers[c.key]), members: g.members });
       } else {
         const id = `g:${g.members.map((c) => c.key.slice(0, 16)).join(",")}`;
         const holdsPick = g.members.some((c) => c.key === selected);
@@ -306,7 +309,7 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
       current.set(id, entry);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown, selected, zoom]);
+  }, [shown, selected, zoom, numbers]);
 
   // This radio, kept as one marker so its pulse is not restarted by every change.
   useEffect(() => {
@@ -325,20 +328,33 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
     }
   }, [self, selfName]);
 
-  // The route to the picked node.
+  // The lines over the nodes: a route and how it sounded, a line of sight, the answers to "who hears me".
   useEffect(() => {
     const layer = routeLayer.current;
     if (!layer) return;
     layer.clearLayers();
-    if (!picked || !hasPosition(picked.lat, picked.lon)) return;
-    const points = routePoints(picked, contacts, self);
-    if (points) {
-      L.polyline(
-        points.map((p) => [p.lat, p.lon] as L.LatLngTuple),
-        { className: "map-route", weight: 3, dashArray: "6 8", interactive: false },
-      ).addTo(layer);
+    for (const line of overlay.lines) {
+      const points: L.LatLngTuple[] = [
+        [line.from.lat, line.from.lon],
+        [line.to.lat, line.to.lon],
+      ];
+      L.polyline(points, { className: "map-leg-under", interactive: false }).addTo(layer);
+      L.polyline(points, { className: `map-leg ${line.tone}`, interactive: false }).addTo(layer);
+      if (line.tappable) {
+        // A wide line nobody sees, so a finger finds a thin one.
+        L.polyline(points, { weight: 24, opacity: 0, bubblingMouseEvents: false })
+          .on("click", () => calls.current.onLeg?.(line.from, line.to))
+          .addTo(layer);
+      }
+      if (line.label) {
+        const middle = L.latLng((line.from.lat + line.to.lat) / 2, (line.from.lon + line.to.lon) / 2);
+        L.marker(middle, { interactive: false, keyboard: false, icon: L.divIcon({ className: "map-leg-label", html: escapeHtml(line.label), iconSize: [64, 18], iconAnchor: [32, 9] }) }).addTo(layer);
+      }
     }
-  }, [picked, contacts, self]);
+    for (const pin of overlay.pins) {
+      L.marker([pin.lat, pin.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: "map-spot", html: "<span></span>", iconSize: [20, 20], iconAnchor: [10, 20] }) }).addTo(layer);
+    }
+  }, [overlay]);
 
   // A node picked from outside the map, from its profile or the list, is brought into view.
   const pickedKey = picked && hasPosition(picked.lat, picked.lon) ? picked.key : null;
