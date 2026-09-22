@@ -122,15 +122,20 @@ code,
   }
 }
 
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--scrollbar);
-  border-radius: 5px;
-  border: 2px solid transparent;
-  background-clip: content-box;
+/* A mouse gets a slim scrollbar in the theme's colour. Touch keeps the system's overlay
+   bars, which take no room and fade: styled here, Android's WebView would draw a fixed
+   10 px bar beside every list and under every row of chips. */
+@media (pointer: fine) {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
 }
 
 /* ---- controls ---- */
@@ -345,6 +350,9 @@ textarea.input {
   padding: 0 var(--space-3) var(--space-2);
   overflow-x: auto;
   scrollbar-width: none;
+}
+.chips::-webkit-scrollbar {
+  display: none;
 }
 .chip {
   height: var(--control-h-sm);
@@ -1099,7 +1107,6 @@ button.line:disabled,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
 .line-value.mono,
 .line-value .mono {
