@@ -299,6 +299,8 @@ function Status({ message }: { message: MessageRecord }) {
 
 /** How far a message is pulled right before letting go answers it. */
 const REPLY_PULL = 56;
+/** The strip at the left edge where a pull goes back instead (the phone's edge swipe, Workspace.tsx). */
+const EDGE = 24;
 
 /**
  * Pulling the conversation left, on a touch screen, shows every message's
@@ -318,7 +320,8 @@ function useReveal(scroller: React.RefObject<HTMLDivElement | null>, inner: Reac
     let pulled = 0;
     const down = (e: TouchEvent) => {
       const t = e.touches[0];
-      start = t && e.touches.length === 1 ? { x: t.clientX, y: t.clientY } : null;
+      // From the edge, the pull is Back's; the bubble under it stays put.
+      start = t && e.touches.length === 1 && t.clientX >= EDGE ? { x: t.clientX, y: t.clientY } : null;
       row = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-reply]") : null;
       mode = null;
       pulled = 0;

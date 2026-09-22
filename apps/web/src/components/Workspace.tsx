@@ -175,6 +175,8 @@ function useEdgeSwipe(ref: React.RefObject<HTMLElement | null>, enabled: boolean
       const s = screen();
       if (s) {
         s.style.transition = "none";
+        // Its own layer while it moves: a whole screen repainted on every touch move drops frames.
+        s.style.willChange = "transform";
         s.style.transform = `translateX(${Math.max(0, dx)}px)`;
       }
     };
@@ -195,6 +197,7 @@ function useEdgeSwipe(ref: React.RefObject<HTMLElement | null>, enabled: boolean
         setTimeout(back, 170);
       } else {
         s.style.transform = "";
+        setTimeout(() => (s.style.willChange = ""), 200);
       }
     };
     el.addEventListener("touchstart", down, { passive: true });
