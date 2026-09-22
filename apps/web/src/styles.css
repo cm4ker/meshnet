@@ -2086,8 +2086,9 @@ button.hop {
 .compose.focus .compose-box {
   border-color: var(--text-faint);
 }
-/* Written now, sent when the radio is back. */
-.compose.offline .compose-box {
+/* Written now, sent when the radio is back. Not `.offline`: that is the line that
+   says the radio is gone, and its rules (drawn first, tinted) would take the composer too. */
+.compose.waiting .compose-box {
   border-style: dashed;
 }
 .compose.shake .compose-box {

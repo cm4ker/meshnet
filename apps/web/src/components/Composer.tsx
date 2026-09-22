@@ -219,7 +219,7 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
   const parts = over ? splitParts(pack(body), cost.budget).length : 0;
 
   return (
-    <footer className={["compose", focused ? "focus" : "", text || reply ? "has" : "", online ? "" : "offline", shake ? "shake" : ""].join(" ")} onAnimationEnd={() => setShake(false)}>
+    <footer className={["compose", focused ? "focus" : "", text || reply ? "has" : "", online ? "" : "waiting", shake ? "shake" : ""].join(" ")} onAnimationEnd={() => setShake(false)}>
       {matches.length > 0 && pick ? (
         <div className="compose-pop" role="listbox" aria-label="Mention">
           {matches.map((who, i) => (
