@@ -2,7 +2,7 @@ import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { Capacitor } from "@capacitor/core";
 import type { ScheduleOptions } from "@capacitor/local-notifications";
-import { askPermissionOnce, conversationIsVisible, notify, tellWatch } from "./notify.js";
+import { askPermissionOnce, noticeId, notify, pageOnScreen, tellWatch, withdraw } from "./notify.js";
 
 const calls: { plugin: string; method: string; options: unknown }[] = [];
 let platform = "ios";
@@ -16,7 +16,7 @@ Object.assign(Capacitor, {
   isNativePlatform: () => true,
   getPlatform: () => platform,
   PluginHeaders: [
-    { name: "LocalNotifications", methods: ["schedule", "checkPermissions", "requestPermissions"].map((name) => ({ name, rtype: "promise" })) },
+    { name: "LocalNotifications", methods: ["schedule", "checkPermissions", "requestPermissions", "removeDeliveredNotificationsById"].map((name) => ({ name, rtype: "promise" })) },
     { name: "MeshWatch", methods: ["configure", "announced"].map((name) => ({ name, rtype: "promise" })) },
   ],
   nativePromise: async (plugin: string, method: string, options: unknown) => {
@@ -43,9 +43,7 @@ after(() => {
   else Reflect.deleteProperty(globalThis, "document");
 });
 
-test("an iOS message outside the open chat reaches the native notifier with sound", async () => {
-  const nav = { section: "chats", conversation: "ch:0" } as const;
-  assert.equal(conversationIsVisible("ch:1", nav), false);
+test("an iOS message reaches the native notifier with sound", async () => {
   await notify("Field team", "New message", "c:ch:1");
   assert.equal(calls[0]?.plugin, "LocalNotifications");
   assert.equal(calls[0]?.method, "schedule");
@@ -63,16 +61,25 @@ test("an iOS notice the page shows withdraws the native watch's stand-in for it,
   ]);
 });
 
-test("only a visible, focused chat suppresses its incoming messages", () => {
-  const nav = { section: "chats", conversation: "ch:0" } as const;
-  assert.equal(conversationIsVisible("ch:0", nav), true);
-  assert.equal(conversationIsVisible("ch:0", { ...nav, section: "radio" }), false);
-  page.visibilityState = "hidden";
-  // WKWebView may still report focus after the phone locks.
-  assert.equal(conversationIsVisible("ch:0", nav), false);
-  page.visibilityState = "visible";
+test("a phone's page is on screen while it is visible, whatever it says about focus", () => {
+  assert.equal(pageOnScreen(), true);
   page.hasFocus = () => false;
-  assert.equal(conversationIsVisible("ch:0", nav), false);
+  assert.equal(pageOnScreen(), true);
+  // WKWebView may still report focus after the phone locks.
+  page.hasFocus = () => true;
+  page.visibilityState = "hidden";
+  assert.equal(pageOnScreen(), false);
+});
+
+test("a notice keeps one id per tag, so the next replaces it and a withdrawal finds it", async () => {
+  await notify("Field team", "New message", "c:ch:1");
+  await notify("Field team · 2 new", "one\ntwo", "c:ch:1");
+  await withdraw("c:ch:1");
+  const ids = calls.filter((c) => c.method === "schedule").map((c) => (c.options as ScheduleOptions).notifications[0]?.id);
+  assert.deepEqual(ids, [noticeId("c:ch:1"), noticeId("c:ch:1")]);
+  assert.notEqual(noticeId("c:ch:1"), noticeId("c:ch:2"));
+  assert.ok(noticeId("c:ch:1") > 0);
+  assert.deepEqual(calls.at(-1), { plugin: "LocalNotifications", method: "removeDeliveredNotificationsById", options: { ids: [noticeId("c:ch:1")] } });
 });
 
 test("an iOS notice is also scheduled when the page is hidden", async () => {

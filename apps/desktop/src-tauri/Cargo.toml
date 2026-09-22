@@ -51,9 +51,12 @@ windows = { version = "0.61", features = [
     "Devices_Bluetooth_Advertisement",
     "Devices_Bluetooth_GenericAttributeProfile",
     "Devices_Enumeration",
+    "Data_Xml_Dom",
     "Foundation",
     "Foundation_Collections",
     "Storage_Streams",
+    # Toasts with a tag, to replace and withdraw; see `announce.rs`.
+    "UI_Notifications",
     # The BLE worker is a single-threaded apartment with a message pump; see `winble.rs`.
     "Win32_Foundation",
     "Win32_System_WinRT",
@@ -61,10 +64,6 @@ windows = { version = "0.61", features = [
 ] }
 # `IAsyncOperation` and `AsyncStatus` live here since windows 0.60.
 windows-future = "0.2"
-# The toast backend the notification plugin reaches through `notify-rust`,
-# called directly so the toast can name the application, and the registry
-# key that says what that name is. See `announce.rs`.
-tauri-winrt-notification = "0.7"
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Registry"] }
 
 # A shipped binary is built once and run for months, so the slow settings are

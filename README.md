@@ -52,7 +52,7 @@ The mobile app is named **Ommesh**. It shares the same client and features, with
 - **Phone navigation.** Bottom tabs, a sliding node list over the map, long-press menus and swipe-back navigation.
 - **Light and dark themes.** One Light, One Dark, system theme selection and adjustable text size.
 - **Radio controls.** Name, position, frequency, bandwidth, spreading factor, coding rate, transmit power, contact and telemetry policies, clock, adverts and advanced tuning. Frequency changes have a separate Apply step; remote radio changes support a timed trial.
-- **Notifications and diagnostics.** Message and newly discovered node notifications, an event log and optional raw frame inspection in hex. **On the air** lists every packet the radio hears, with the noise floor and channel load, without transmitting.
+- **Notifications and diagnostics.** Message notifications, one per chat and withdrawn once it is read, newly discovered node notifications, an event log and optional raw frame inspection in hex. **On the air** lists every packet the radio hears, with the noise floor and channel load, without transmitting.
 - **Demo mode.** Explore the interface with simulated contacts, messages and nodes, without hardware.
 
 ## Screenshots

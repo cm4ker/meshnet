@@ -33,11 +33,6 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
     if (message.sender) setReply({ name: message.sender, text: message.text });
   };
 
-  useEffect(() => {
-    session.focus(conversation);
-    return () => session.focus(null);
-  }, [conversation]);
-
   // Pinned to the bottom, as a chat is, unless the reader has scrolled up to read.
   const stuck = useRef(true);
   useLayoutEffect(() => {

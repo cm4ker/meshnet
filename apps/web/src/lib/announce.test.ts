@@ -1,0 +1,219 @@
+import { beforeEach, test } from "node:test";
+import assert from "node:assert/strict";
+import type { MessageRecord, SessionState } from "@meshnet/meshcore";
+import { ALL_CHATS, createAnnouncer, type Notice } from "./announce.js";
+
+const BOB = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+const EVE = "2102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+
+let clock = 1_700_000_000_000;
+
+function message(conversation: string, text: string, sender: string | null = null): MessageRecord {
+  clock += 1000;
+  return {
+    id: `${conversation}-${clock}`,
+    conversation,
+    direction: "in",
+    text,
+    sender,
+    senderPrefix: null,
+    timestamp: Math.floor(clock / 1000),
+    receivedAt: clock,
+    snr: null,
+    hops: null,
+    txtType: 0,
+    status: null,
+    ackTag: null,
+    roundTripMs: null,
+    flood: null,
+    attempt: 0,
+    error: null,
+    echoes: [],
+    route: null,
+  };
+}
+
+function contact(key: string, name: string) {
+  return { key, prefix: key.slice(0, 12), type: 1, flags: 0, outPathLen: 0xff, outPath: "", name, lastAdvert: 0, lat: 0, lon: 0, lastMod: 0, lastHeardAt: null, pathSince: null };
+}
+
+function initial(messages: MessageRecord[] = [], unread: Record<string, number> = {}): SessionState {
+  return {
+    status: "ready",
+    link: null,
+    device: null,
+    self: { name: "Me" } as SessionState["self"],
+    contacts: { [BOB]: contact(BOB, "Bob"), [EVE]: contact(EVE, "Eve") },
+    contactsCursor: 0,
+    channels: [
+      { index: 0, name: "Public", secret: "00" },
+      { index: 1, name: "test", secret: "01" },
+      { index: 2, name: "Friends", secret: "02" },
+    ],
+    messages,
+    unread,
+    battery: null,
+    tuning: null,
+    logins: {},
+    telemetry: {},
+    statuses: {},
+    statusHistory: {},
+    neighbours: {},
+    accessLists: {},
+    ownerInfo: {},
+    series: {},
+    nodeSettings: {},
+    consoles: {},
+    remote: { active: null, queued: [] },
+    routing: { resetAfterMin: null, contacts: {} },
+    log: [],
+    error: null,
+    syncing: false,
+  };
+}
+
+/** The session's side, as MeshSession plays it: state, then the change, then the news. */
+let state: SessionState;
+let focused: string | null;
+let wanted: boolean;
+let shown: Notice[];
+let withdrawn: string[];
+let announcer: ReturnType<typeof createAnnouncer>;
+
+function set(patch: Partial<SessionState>): void {
+  state = { ...state, ...patch };
+  announcer.changed();
+}
+
+function receive(m: MessageRecord): void {
+  const unread = focused === m.conversation ? state.unread : { ...state.unread, [m.conversation]: (state.unread[m.conversation] ?? 0) + 1 };
+  set({ messages: [...state.messages, m], unread });
+  announcer.received(m);
+}
+
+/** The radio's queue drained in one pass, as at connect. */
+function drain(messages: MessageRecord[]): void {
+  set({ syncing: true });
+  for (const m of messages) receive(m);
+  set({ syncing: false });
+}
+
+function markRead(conversation: string): void {
+  const unread = { ...state.unread };
+  delete unread[conversation];
+  set({ unread });
+}
+
+function start(from: SessionState = initial()): void {
+  state = from;
+  announcer = createAnnouncer({ state: () => state, wanted: () => wanted, show: (n) => shown.push(n), withdraw: (t) => withdrawn.push(t) });
+}
+
+beforeEach(() => {
+  focused = null;
+  wanted = true;
+  shown = [];
+  withdrawn = [];
+  start();
+});
+
+test("the history read back at connect is not announced, unread or not", () => {
+  start(initial([]));
+  const history = [message("ch:0", "old", "Alice"), message(`c:${BOB}`, "older")];
+  set({ status: "connecting" });
+  set({ messages: history, unread: { "ch:0": 1, [`c:${BOB}`]: 1 } });
+  set({ status: "ready" });
+  assert.deepEqual(shown, []);
+});
+
+test("one message is one notice: who said it and where", () => {
+  drain([message("ch:0", "hi all", "Alice")]);
+  assert.deepEqual(shown, [{ title: "Alice in Public", body: "hi all", tag: "c:ch:0" }]);
+});
+
+test("a queue drained at connect is announced once it is drained, one notice per conversation", () => {
+  set({ syncing: true });
+  receive(message("ch:0", "one", "Alice"));
+  receive(message("ch:0", "two", "Bob"));
+  assert.deepEqual(shown, []);
+  receive(message("ch:0", "three", "Alice"));
+  receive(message("ch:0", "four", "Carol"));
+  receive(message(`c:${BOB}`, "ping"));
+  set({ syncing: false });
+  assert.deepEqual(shown, [
+    { title: "Public · 4 new", body: "Bob: two\nAlice: three\nCarol: four", tag: "c:ch:0" },
+    { title: "Bob", body: "ping", tag: `c:c:${BOB}` },
+  ]);
+});
+
+test("more news in a conversation replaces its notice with the count of all that is unread", () => {
+  drain([message(`c:${BOB}`, "first")]);
+  drain([message(`c:${BOB}`, "second")]);
+  assert.deepEqual(shown.map((n) => [n.title, n.tag]), [
+    ["Bob", `c:c:${BOB}`],
+    ["Bob · 2 new", `c:c:${BOB}`],
+  ]);
+  assert.equal(shown[1]?.body, "first\nsecond");
+});
+
+test("news in more than three conversations is one notice for all of them", () => {
+  drain([
+    message("ch:0", "a", "Alice"),
+    message("ch:0", "b", "Alice"),
+    message("ch:1", "c", "Alice"),
+    message("ch:2", "d", "Alice"),
+    message(`c:${BOB}`, "e"),
+    message(`c:${EVE}`, "f"),
+  ]);
+  assert.deepEqual(shown, [{ title: "6 new messages in 5 chats", body: "Public 2, test 1, Friends 1, Bob 1, …", tag: ALL_CHATS }]);
+});
+
+test("conversation notices already out give way to one for all when a fourth conversation has news", () => {
+  drain([message("ch:0", "a", "Alice"), message("ch:1", "b", "Alice")]);
+  drain([message("ch:2", "c", "Alice")]);
+  drain([message(`c:${BOB}`, "d")]);
+  assert.deepEqual(shown.map((n) => n.tag), ["c:ch:0", "c:ch:1", "c:ch:2", ALL_CHATS]);
+  assert.deepEqual(withdrawn.sort(), ["c:ch:0", "c:ch:1", "c:ch:2"]);
+  assert.equal(shown.at(-1)?.title, "4 new messages in 4 chats");
+});
+
+test("the notice for all is withdrawn when the app is opened, and news after it is announced on its own", () => {
+  drain(["ch:0", "ch:1", "ch:2", `c:${BOB}`].map((c) => message(c, "x", "Alice")));
+  announcer.opened();
+  assert.deepEqual(withdrawn, [ALL_CHATS]);
+  drain([message(`c:${EVE}`, "hello")]);
+  assert.deepEqual(shown.at(-1), { title: "Eve", body: "hello", tag: `c:c:${EVE}` });
+});
+
+test("a conversation read anywhere loses its notice, one from an earlier run included", () => {
+  drain([message(`c:${BOB}`, "ping")]);
+  markRead(`c:${BOB}`);
+  assert.deepEqual(withdrawn, [`c:c:${BOB}`, ALL_CHATS]);
+
+  // Unread from before this run: its notice may still be out.
+  start(initial([message("ch:0", "old", "Alice")], { "ch:0": 1, "ch:1": 2 }));
+  withdrawn = [];
+  markRead("ch:0");
+  assert.deepEqual(withdrawn, ["c:ch:0"]);
+});
+
+test("a message in the conversation on screen arrives read and is not announced", () => {
+  focused = "ch:0";
+  drain([message("ch:0", "seen", "Alice"), message("ch:1", "not seen", "Alice")]);
+  assert.deepEqual(shown.map((n) => n.tag), ["c:ch:1"]);
+});
+
+test("a mention is said in the notice, alone or among others", () => {
+  drain([message("ch:0", "@[Me] look", "Alice")]);
+  assert.equal(shown.at(-1)?.title, "Alice mentioned you in Public");
+  drain([message("ch:0", "and this", "Bob")]);
+  assert.equal(shown.at(-1)?.title, "Public · 2 new, you are mentioned");
+});
+
+test("with the switch off nothing is announced, and nothing is kept for later", () => {
+  wanted = false;
+  drain([message("ch:0", "quiet", "Alice")]);
+  wanted = true;
+  set({ syncing: false });
+  assert.deepEqual(shown, []);
+});

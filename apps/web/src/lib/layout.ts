@@ -7,13 +7,12 @@ export function isWide(): boolean {
   return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(WIDE).matches;
 }
 
+export function subscribeWide(listener: () => void): () => void {
+  const media = window.matchMedia(WIDE);
+  media.addEventListener("change", listener);
+  return () => media.removeEventListener("change", listener);
+}
+
 export function useWide(): boolean {
-  return useSyncExternalStore(
-    (listener) => {
-      const media = window.matchMedia(WIDE);
-      media.addEventListener("change", listener);
-      return () => media.removeEventListener("change", listener);
-    },
-    isWide,
-  );
+  return useSyncExternalStore(subscribeWide, isWide);
 }

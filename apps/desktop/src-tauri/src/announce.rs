@@ -1,12 +1,13 @@
 //! A system notification for a message or a new node, while the window is
 //! elsewhere. WebView2 has no notification of its own to draw, so the page
-//! asks the shell for one.
+//! asks the shell for one, and takes it back once what it said is read.
 //!
 //! Every desktop can draw the notice; what the notification plugin cannot do
-//! is say *who* is speaking on Windows. A toast is drawn on behalf of an
-//! AppUserModelID, and the plugin sets none outside an installed build, so the
-//! notice would arrive as "Windows PowerShell". So the ID is set here, always,
-//! and named in the registry here, always. (The same code as Sovabox's shell.)
+//! on Windows is say *who* is speaking, or give a notice a tag to replace or
+//! withdraw it by. A toast is drawn on behalf of an AppUserModelID, and the
+//! plugin sets none outside an installed build, so the notice would arrive as
+//! "Windows PowerShell". So on Windows the toast is drawn here, for an ID that
+//! is named in the registry here, always. (Sovabox's shell names it the same way.)
 
 use tauri::AppHandle;
 
@@ -15,32 +16,84 @@ use tauri::AppHandle;
 #[cfg(windows)]
 const OPENED: &str = "notification-opened";
 
-/// Draws one. A click on it, on Windows, brings the window forward and hands
-/// the page the tag; elsewhere the plugin has no click to report, and the
-/// notice is only a notice.
+/// The group every notice of this app is filed under in the notification centre.
+#[cfg(windows)]
+const GROUP: &str = "meshnet";
+
+/// Draws one, in place of the one out with the same tag. A click on it, on
+/// Windows, brings the window forward and hands the page the tag; elsewhere
+/// the plugin has no click to report, and the notice is only a notice.
 #[tauri::command]
 pub fn announce(app: AppHandle, title: String, body: String, tag: Option<String>) -> Result<(), String> {
     show(&app, &title, &body, tag)
 }
 
+/// Takes back the notice out with this tag, on Windows; the plugin elsewhere
+/// has no way to, and the notice stays until it is dismissed.
+#[tauri::command]
+pub fn withdraw(app: AppHandle, tag: String) -> Result<(), String> {
+    remove(&app, &tag)
+}
+
 #[cfg(windows)]
 fn show(app: &AppHandle, title: &str, body: &str, tag: Option<String>) -> Result<(), String> {
+    use windows::core::{IInspectable, HSTRING};
+    use windows::Data::Xml::Dom::XmlDocument;
+    use windows::Foundation::TypedEventHandler;
+    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
+
     let app_id = app.config().identifier.clone();
     register(app, &app_id, &app.package_info().name);
 
     let clicked = app.clone();
-    tauri_winrt_notification::Toast::new(&app_id)
-        .title(title)
-        .text1(body)
+    let draw = || -> windows::core::Result<()> {
+        let xml = XmlDocument::new()?;
+        xml.LoadXml(&HSTRING::from(format!(
+            r#"<toast><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text></binding></visual></toast>"#,
+            escape(title),
+            escape(body)
+        )))?;
+        let toast = ToastNotification::CreateToastNotification(&xml)?;
+        if let Some(tag) = &tag {
+            toast.SetTag(&HSTRING::from(slot(tag)))?;
+            toast.SetGroup(&HSTRING::from(GROUP))?;
+        }
         // Fired on a thread of the notification platform's, while this
         // process runs. A toast clicked after the window has closed launches
         // nothing: that takes a COM activator an installer registers.
-        .on_activated(move |_| {
+        let tag = tag.clone();
+        toast.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(move |_, _| {
             opened(&clicked, tag.clone());
             Ok(())
-        })
-        .show()
+        }))?;
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(&app_id))?.Show(&toast)
+    };
+    draw().map_err(|error| error.to_string())
+}
+
+#[cfg(windows)]
+fn remove(app: &AppHandle, tag: &str) -> Result<(), String> {
+    use windows::core::HSTRING;
+    use windows::UI::Notifications::ToastNotificationManager;
+
+    let app_id = app.config().identifier.clone();
+    ToastNotificationManager::History()
+        .and_then(|history| history.RemoveGroupedTagWithId(&HSTRING::from(slot(tag)), &HSTRING::from(GROUP), &HSTRING::from(app_id)))
         .map_err(|error| error.to_string())
+}
+
+/// A toast's tag holds 64 characters at most, and a conversation's tag
+/// carries a 64-digit key: so the toast is tagged with a hash of it, FNV-1a.
+#[cfg(windows)]
+fn slot(tag: &str) -> String {
+    let hash = tag.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3));
+    format!("{hash:016x}")
+}
+
+/// Text for the toast's XML.
+#[cfg(windows)]
+fn escape(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
 }
 
 /// macOS notifies on behalf of a bundle and the plugin names it; Linux names
@@ -55,6 +108,11 @@ fn show(app: &AppHandle, title: &str, body: &str, _tag: Option<String>) -> Resul
         .body(body)
         .show()
         .map_err(|error| error.to_string())
+}
+
+#[cfg(not(windows))]
+fn remove(_app: &AppHandle, _tag: &str) -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(windows)]

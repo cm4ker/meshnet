@@ -5,11 +5,11 @@ import { Workspace } from "./components/Workspace.js";
 import { UpdatesDialog } from "./components/Updates.js";
 import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "./lib/geo.js";
 import { useLink } from "./lib/link.js";
-import { askPermissionOnce, conversationIsVisible, nodeNotificationsWanted, notificationsWanted, notify, onNotificationClick, tellWatch } from "./lib/notify.js";
+import { ALL_CHATS, createAnnouncer } from "./lib/announce.js";
+import { askPermissionOnce, nodeNotificationsWanted, notificationsWanted, notify, onNotificationClick, pageOnScreen, tellWatch, withdraw } from "./lib/notify.js";
 import { session, useSession } from "./lib/session.js";
-import { titleOf } from "./lib/conversations.js";
-import { isWide } from "./lib/layout.js";
-import { getNav, openConversation, openProfile, shownConversation } from "./lib/nav.js";
+import { isWide, subscribeWide } from "./lib/layout.js";
+import { getNav, openConversation, openProfile, shownConversation, subscribeNav } from "./lib/nav.js";
 
 const KIND: Record<number, string> = {
   [AdvType.Chat]: "contact",
@@ -33,32 +33,47 @@ export function App() {
   const state = useSession();
   const link = useLink();
 
-  // Announce messages unless their conversation is visible and focused.
-  // Watched here, once, rather than in a view that may not be mounted.
+  // The conversation on screen is read as its messages arrive. Behind another
+  // window or app, or on a locked phone, it is not, and they are announced.
   useEffect(() => {
-    let known = new Set(session.getState().messages.map((m) => m.id));
-    return session.subscribe(() => {
-      const current = session.getState();
-      if (current.status !== "ready") return;
-      const nav = getNav();
-      const shown = { section: nav.section, conversation: shownConversation(nav, isWide()) };
-      for (const m of current.messages) {
-        if (known.has(m.id) || m.direction !== "in") continue;
-        const focused = conversationIsVisible(m.conversation, shown);
-        if (!focused && notificationsWanted()) {
-          const title = titleOf(current, m.conversation);
-          const me = current.self?.name;
-          const mentioned = !!me && m.text.includes(`@[${me}]`);
-          const heading = mentioned
-            ? `${m.sender ?? title} mentioned you${m.sender && m.sender !== title ? ` in ${title}` : ""}`
-            : m.sender && m.conversation.startsWith("ch:")
-              ? `${m.sender} in ${title}`
-              : title;
-          void notify(heading, m.text, `c:${m.conversation}`);
-        }
-      }
-      known = new Set(current.messages.map((m) => m.id));
+    const update = () => session.focus(pageOnScreen() ? shownConversation(getNav(), isWide()) : null);
+    update();
+    const stopNav = subscribeNav(update);
+    const stopWide = subscribeWide(update);
+    document.addEventListener("visibilitychange", update);
+    window.addEventListener("focus", update);
+    window.addEventListener("blur", update);
+    return () => {
+      stopNav();
+      stopWide();
+      document.removeEventListener("visibilitychange", update);
+      window.removeEventListener("focus", update);
+      window.removeEventListener("blur", update);
+    };
+  }, []);
+
+  // Messages the radio hands over, as notices grouped by conversation (see
+  // announce.ts). Watched here, once, rather than in a view that may not be mounted.
+  useEffect(() => {
+    const announcer = createAnnouncer({
+      state: () => session.getState(),
+      wanted: notificationsWanted,
+      show: (notice) => void notify(notice.title, notice.body, notice.tag),
+      withdraw: (tag) => void withdraw(tag),
     });
+    const stopReceived = session.onReceived((message) => announcer.received(message));
+    const stopChanged = session.subscribe(() => announcer.changed());
+    const front = () => {
+      if (pageOnScreen()) announcer.opened();
+    };
+    document.addEventListener("visibilitychange", front);
+    window.addEventListener("focus", front);
+    return () => {
+      stopReceived();
+      stopChanged();
+      document.removeEventListener("visibilitychange", front);
+      window.removeEventListener("focus", front);
+    };
   }, []);
 
   // A node the radio hears for the first time.
@@ -75,7 +90,8 @@ export function App() {
   // A click on a notice opens what it was about.
   useEffect(() => {
     onNotificationClick((tag) => {
-      if (tag.startsWith("c:")) openConversation(tag.slice(2));
+      if (tag === ALL_CHATS) openConversation(null);
+      else if (tag.startsWith("c:")) openConversation(tag.slice(2));
       else if (tag.startsWith("n:")) openProfile(tag.slice(2), true);
     });
   }, []);

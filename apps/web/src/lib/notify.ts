@@ -11,14 +11,15 @@
  *   the phone is locked; the page tells it which notices are wanted.
  *
  * Each notice carries a tag saying what it is about, `c:<conversation>` or
- * `n:<contact key>`, and a click on it hands the tag back to open that.
+ * `n:<contact key>`, and a click on it hands the tag back to open that. A
+ * notice replaces the one out with its tag, and `withdraw` takes it back
+ * once what it was about has been read.
  */
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { nativePlatform, shell } from "./platform.js";
 import { readSetting, writeSetting } from "./storage.js";
-import type { Section } from "./nav.js";
 
 const MESSAGES_KEY = "meshnet.notify";
 const NODES_KEY = "meshnet.notify.nodes";
@@ -118,14 +119,35 @@ export async function askPermissionOnce(): Promise<void> {
   await askPermission().catch(() => false);
 }
 
-let nextId = Math.floor(Date.now() / 1000) % 1_000_000_000;
-
-/** `nav.conversation` is the one on screen, as `shownConversation` in nav.ts finds it. */
-export function conversationIsVisible(conversation: string, nav: { section: Section; conversation: string | null }): boolean {
-  return document.visibilityState === "visible" && document.hasFocus() && nav.section === "chats" && nav.conversation === conversation;
+/**
+ * Whether the reader can see the page: shown, and on a computer, in the
+ * window in front. A phone's page is either on screen or hidden; WKWebView
+ * may even report focus after the phone locks, so a phone goes by
+ * visibility alone.
+ */
+export function pageOnScreen(): boolean {
+  if (document.visibilityState !== "visible") return false;
+  return shell() === "capacitor" || document.hasFocus();
 }
 
-/** The caller checks preferences and whether the message's conversation is already on screen. */
+/**
+ * The phone's number for the notice with this tag, the same every time, so
+ * a notice replaces the one out with its tag and can be withdrawn by it.
+ * FNV-1a, kept positive for Android's `int` ids.
+ */
+export function noticeId(tag: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < tag.length; i++) {
+    hash ^= tag.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash & 0x7fffffff) || 1;
+}
+
+/** The browser's notices that are out, by tag, to be closed when withdrawn. */
+const shown = new Map<string, Notification>();
+
+/** The caller checks preferences and whether what it announces is already on screen. */
 export async function notify(title: string, body: string, tag: string): Promise<void> {
   switch (shell()) {
     case "tauri":
@@ -135,7 +157,7 @@ export async function notify(title: string, body: string, tag: string): Promise<
       try {
         const { LocalNotifications: api } = await localNotifications();
         await api.schedule({ notifications: [{
-          id: ++nextId, title, body, extra: { tag },
+          id: noticeId(tag), title, body, extra: { tag },
           // Without a sound iOS delivers silently. A missing named sound
           // uses the system default; Android already supplies its own.
           ...(nativePlatform() === "ios" ? { sound: "default", foreground: true } : {}),
@@ -157,9 +179,33 @@ export async function notify(title: string, body: string, tag: string): Promise<
           clicked?.(tag);
           notice.close();
         };
+        notice.onclose = () => {
+          if (shown.get(tag) === notice) shown.delete(tag);
+        };
+        shown.set(tag, notice);
       } catch {
         // Some webviews throw on construction; there is nothing to do about it.
       }
+  }
+}
+
+/** Takes back the notice out with this tag, if there is one: what it said has been read. */
+export async function withdraw(tag: string): Promise<void> {
+  switch (shell()) {
+    case "tauri":
+      await invoke("withdraw", { tag }).catch(() => undefined);
+      return;
+    case "capacitor":
+      try {
+        const { LocalNotifications: api } = await localNotifications();
+        await api.removeDeliveredNotificationsById({ ids: [noticeId(tag)] });
+      } catch (error) {
+        console.warn("Could not withdraw notification", error);
+      }
+      return;
+    default:
+      shown.get(tag)?.close();
+      shown.delete(tag);
   }
 }
 

@@ -2451,7 +2451,6 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-serialplugin",
  "tauri-plugin-updater",
- "tauri-winrt-notification",
  "windows 0.61.3",
  "windows-future 0.2.1",
  "windows-sys 0.59.0",
