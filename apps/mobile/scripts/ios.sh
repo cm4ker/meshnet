@@ -94,13 +94,22 @@ case "$mode" in
       -derivedDataPath "$derived" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" archive -quiet
 
     if [ "$mode" = testflight ]; then
+      # A build goes up for internal testing only, which App Review never
+      # sees; REVIEW=1 uploads one that can be picked for an App Store version.
+      options="$here/ios/export-testflight.plist"
+      if [ "${REVIEW:-0}" = 1 ]; then
+        options="$cache/export-review.plist"
+        cp "$here/ios/export-testflight.plist" "$options"
+        /usr/libexec/PlistBuddy -c "Set :testFlightInternalTestingOnly false" "$options"
+        say "this build can go to App Review"
+      fi
       say "export and upload to App Store Connect"
       xcodebuild -exportArchive -archivePath "$archive" \
-        -exportOptionsPlist "$here/ios/export-testflight.plist" \
+        -exportOptionsPlist "$options" \
         -exportPath "$cache/export" \
         -authenticationKeyPath "${ASC_KEY_PATH:-$HOME/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8}" \
         -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
-      rm -rf "$archive" "$cache/export" "$derived"
+      rm -rf "$archive" "$cache/export" "$cache/export-review.plist" "$derived"
     fi
     ;;
 

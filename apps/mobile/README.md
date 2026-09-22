@@ -69,6 +69,10 @@ through the App Store Connect API (`scripts/apple.mjs`). Then it archives, signe
 with the team's Apple Distribution identity, and `xcodebuild -exportArchive`
 uploads the build for internal testing. `ios.sh archive` stops before the upload.
 
+A build for internal testing cannot be chosen for an App Store version. One meant
+for App Review goes up with `REVIEW=1` as well; it is then offered under the
+version's Build section in App Store Connect, and to external testers.
+
 What it reads is the Mac's, not the tree's: `~/.appstoreconnect/owlmail.env`
 names the API key (`ASC_KEY_ID`, `ASC_ISSUER_ID`; the key itself is in
 `~/.appstoreconnect/private_keys`) and the keychain holding the identity, with the
