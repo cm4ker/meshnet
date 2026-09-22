@@ -239,6 +239,8 @@ export interface RemoteJobInfo {
   label: string;
   /** Local ms when it went out; null while queued. */
   startedAt: number | null;
+  /** Whether it got no reply along the route and went again as a flood. */
+  flooded: boolean;
 }
 
 export interface SessionState {
@@ -313,6 +315,16 @@ export interface TraceResult {
   rttMs: number;
   /** The SNR at each node along the path, out and back, then ours of the last hop, dB. */
   snrs: number[];
+}
+
+/** What a path discovery found: the way to the node, and the way its answer came back. */
+export interface PathFound {
+  /** The relays from this radio to the node, first relay first, as hex hashes; none when heard direct. */
+  out: string[];
+  /** The relays its answer came back through, nearest to it first. */
+  back: string[];
+  /** Whether the route the radio held before was another one. */
+  changed: boolean;
 }
 
 /** A node in direct range that answered "who hears me". */
@@ -609,7 +621,7 @@ type RemoteEvent =
   | { kind: "status"; prefix: string }
   | { kind: "telemetry"; prefix: string; readings: LppReading[] }
   | { kind: "binary"; tag: number; data: Uint8Array }
-  | { kind: "path"; prefix: string }
+  | { kind: "path"; prefix: string; outPathLen: number; outPath: string; inPathLen: number; inPath: string }
   | { kind: "cli"; prefix: string; tag: string | null; text: string };
 
 interface RemoteJob {
@@ -618,6 +630,8 @@ interface RemoteJob {
   start: (client: MeshCoreClient) => Promise<TextSendResult>;
   /** Whether this event is the reply, given what the radio said when it sent the request. */
   answers: (event: RemoteEvent, sent: TextSendResult | null) => boolean;
+  /** Whether silence along a route sends it again as a flood; a console command is not sent twice. */
+  floodOnSilence: boolean;
   /** Added to the radio's estimate: a node holds a console reply back before it sends it. */
   extraWaitMs: number;
   sent: TextSendResult | null;
@@ -1831,6 +1845,8 @@ export class MeshSession {
   // So they go through one queue here, each waiting for its reply or for the
   // time the radio estimated before the next is sent. Console commands do not
   // take the radio's slot, but they share the air and queue here all the same.
+  // The route to a node is never dropped for its age, so a request that hears
+  // nothing along it goes once more as a flood; a console command does not.
 
   private needContact(key: string): ContactRecord {
     const contact = this.state.contacts[key];
@@ -1888,15 +1904,35 @@ export class MeshSession {
     return event.kind === "telemetry" ? event.readings : null;
   }
 
-  async discoverPath(key: string): Promise<void> {
+  /**
+   * Floods a request to the node and resolves with the way it went there and
+   * the way its answer came back. The radio keeps no route from a discovery,
+   * so the way there, which has just worked, is written as the contact's
+   * route here; not for a contact pinned to flood. A repeater or a room
+   * answers only a radio signed in to it.
+   */
+  async discoverPath(key: string): Promise<PathFound> {
     const contact = this.needContact(key);
     const bytes = fromHex(key);
-    await this.remoteRequest(
+    const event = await this.remoteRequest(
       key,
       "path discovery",
       (client) => client.sendPathDiscoveryReq(bytes),
       (event) => event.kind === "path" && event.prefix === contact.prefix,
     );
+    if (event.kind !== "path") throw new Error("unreachable");
+    const held = this.state.contacts[key] ?? contact;
+    const outPath = event.outPath.padEnd(128, "0");
+    const changed = routeKey(held.outPathLen, held.outPath) !== routeKey(event.outPathLen, outPath);
+    if (!(isConversationType(held.type) && this.routePolicy(key).flood) && this.isReady) {
+      if (changed) {
+        await this.writeContact({ ...held, outPathLen: event.outPathLen, outPath, pathSince: this.now() });
+        this.log("path", `${held.name || key.slice(0, 12)}: route set from discovery, ${pathHashes(event.outPathLen, event.outPath).join(" ") || "direct"}`);
+      } else {
+        this.set({ contacts: { ...this.state.contacts, [key]: { ...held, pathSince: this.now() } } });
+      }
+    }
+    return { out: pathHashes(event.outPathLen, event.outPath), back: pathHashes(event.inPathLen, event.inPath), changed };
   }
 
   /** A page of the repeaters a repeater hears direct. A page past the first is added to what was fetched. */
@@ -1977,9 +2013,13 @@ export class MeshSession {
         options.mask ?? command,
         (client) => client.sendCliCommand(prefix, `${tag}|${command}`),
         (event) => event.kind === "cli" && event.prefix === contact.prefix && event.tag === tag,
-        // The node holds a console reply back for about half a second.
-        1_500,
-        () => this.patchConsole(key, entry.id, { status: "waiting", at: this.now() }),
+        {
+          // The node holds a console reply back for about half a second.
+          extraWaitMs: 1_500,
+          onStart: () => this.patchConsole(key, entry.id, { status: "waiting", at: this.now() }),
+          // A command the node carried out but whose reply was lost must not run twice.
+          floodOnSilence: false,
+        },
       );
       const reply = event.kind === "cli" ? event.text : "";
       this.patchConsole(key, entry.id, { status: "done", reply: options.mask ? maskReply(reply) : reply, repliedAt: this.now() });
@@ -2088,19 +2128,20 @@ export class MeshSession {
     label: string,
     start: RemoteJob["start"],
     answers: (event: RemoteEvent, sent: TextSendResult | null) => boolean,
-    extraWaitMs = 0,
-    onStart?: () => void,
+    options: { extraWaitMs?: number; onStart?: () => void; floodOnSilence?: boolean } = {},
   ): Promise<RemoteEvent> {
     if (!this.client || this.client.isClosed) return Promise.reject(new Error("not connected"));
+    const { extraWaitMs = 0, onStart, floodOnSilence = true } = options;
     return new Promise((resolve, reject) => {
       this.jobCounter += 1;
       this.remoteQueue.push({
-        info: { id: `r${this.jobCounter}`, key, label, startedAt: null },
+        info: { id: `r${this.jobCounter}`, key, label, startedAt: null, flooded: false },
         start: async (client) => {
           onStart?.();
           return start(client);
         },
         answers,
+        floodOnSilence,
         extraWaitMs,
         sent: null,
         early: [],
@@ -2120,17 +2161,41 @@ export class MeshSession {
     this.remoteActive = job;
     job.info = { ...job.info, startedAt: this.now() };
     this.publishRemote();
+    await this.launchRemote(job, false);
+  }
+
+  /**
+   * Sends the request in the radio's slot and waits for its reply. One that
+   * went along a learned route and heard nothing goes once more as a flood:
+   * the route is the likeliest thing to have broken, and a flood that gets
+   * through brings a fresh one back.
+   */
+  private async launchRemote(job: RemoteJob, flood: boolean): Promise<void> {
     const client = this.client;
     if (!client || client.isClosed) {
       this.finishRemote(job, new Error("not connected"));
       return;
     }
     try {
+      if (flood) {
+        await this.dropRoute(client, job.info.key, `${job.info.label} got no reply along it`);
+        if (this.remoteActive !== job) return;
+        job.info = { ...job.info, flooded: true };
+        this.publishRemote();
+      }
       const sent = await job.start(client);
       if (this.remoteActive !== job) return;
       job.sent = sent;
       const wait = this.replyWait(sent.estTimeoutMs, job.extraWaitMs);
-      job.timer = setTimeout(() => this.finishRemote(job, new NoReplyError(job.info.label, wait)), wait);
+      job.timer = setTimeout(() => {
+        job.timer = null;
+        if (job.floodOnSilence && !flood && !sent.flood) {
+          job.sent = null;
+          void this.launchRemote(job, true);
+        } else {
+          this.finishRemote(job, new NoReplyError(job.info.label, wait));
+        }
+      }, wait);
       for (const event of job.early.splice(0)) this.remoteEvent(event);
     } catch (error) {
       this.finishRemote(job, error instanceof Error ? error : new Error(String(error)));
@@ -2320,7 +2385,7 @@ export class MeshSession {
           "path",
           `${contact?.name ?? prefix}: out ${frame.outPathLen & 63} hop(s) ${toHex(frame.outPath)}, in ${frame.inPathLen & 63} hop(s) ${toHex(frame.inPath)}`,
         );
-        this.remoteEvent({ kind: "path", prefix });
+        this.remoteEvent({ kind: "path", prefix, outPathLen: frame.outPathLen, outPath: toHex(frame.outPath), inPathLen: frame.inPathLen, inPath: toHex(frame.inPath) });
         return;
       }
       case "traceData": {

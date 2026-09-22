@@ -96,8 +96,11 @@ class ScriptedRadio extends BaseTransport {
         return [new ByteWriter().u8(Resp.BattAndStorage).u16(4100).u32(1).u32(2).toBytes()];
       case Cmd.SendTxtMsg:
         return [new ByteWriter().u8(Resp.Sent).u8(this.sendsFlood ? 1 : 0).u32(this.nextAck).u32(2000).toBytes()];
-      case Cmd.ResetPath:
+      case Cmd.ResetPath: {
+        const found = this.contactOf(frame);
+        if (found) found[35] = 0xff;
         return [new Uint8Array([Resp.Ok])];
+      }
       case Cmd.GetContactByKey: {
         const found = this.contacts.find((c) => c.subarray(1, 33).every((b, i) => b === frame[1 + i]));
         return [found ?? new Uint8Array([Resp.Err, 2])];
@@ -106,9 +109,12 @@ class ScriptedRadio extends BaseTransport {
         return [new Uint8Array([Resp.Ok])];
       case Cmd.SendLogin:
         // The radio names a login by the first four bytes of the node's key.
-        return [new ByteWriter().u8(Resp.Sent).u8(0).bytes(frame.subarray(1, 5)).u32(2000).toBytes()];
+        return [new ByteWriter().u8(Resp.Sent).u8(this.floods(frame)).bytes(frame.subarray(1, 5)).u32(2000).toBytes()];
       case Cmd.SendStatusReq:
-        return [new ByteWriter().u8(Resp.Sent).u8(0).u32(0x0a0b0c0d).u32(2000).toBytes()];
+        return [new ByteWriter().u8(Resp.Sent).u8(this.floods(frame)).u32(0x0a0b0c0d).u32(2000).toBytes()];
+      case Cmd.SendPathDiscoveryReq:
+        // A discovery always floods.
+        return [new ByteWriter().u8(Resp.Sent).u8(1).u32(0x0e0f1011).u32(2000).toBytes()];
       case Cmd.SendBinaryReq:
         return [new ByteWriter().u8(Resp.Sent).u8(1).u32(this.binaryTag).u32(2000).toBytes()];
       case Cmd.Logout:
@@ -129,6 +135,17 @@ class ScriptedRadio extends BaseTransport {
 
   push(frame: Uint8Array): void {
     this.emitFrame(frame);
+  }
+
+  /** The contact whose key the command carries after its code. */
+  private contactOf(frame: Uint8Array): Uint8Array | undefined {
+    return this.contacts.find((c) => c.subarray(1, 33).every((b, i) => b === frame[1 + i]));
+  }
+
+  /** 1 when a request to the contact floods, as it does with no route held; 0 when it goes along the route. */
+  private floods(frame: Uint8Array): number {
+    const found = this.contactOf(frame);
+    return !found || found[35] === 0xff ? 1 : 0;
   }
 
   protected async shutdown(): Promise<void> {}
@@ -575,6 +592,67 @@ test("a node that never answers times the request out and lets the next one go",
   await assert.rejects(second, /no reply/);
 });
 
+test("a request that hears nothing along a route drops it and goes once more as a flood", async () => {
+  const { radio, session } = await nodeSession({ replyWaitMs: () => 20 });
+  radio.contacts = [contactFrame(HILL, "Hill", 10, 2, [0x3f, 0xa1])];
+  await session.refreshContacts(true);
+  const status = session.requestStatus(HILL_KEY);
+  await tick(40);
+  assert.equal(radio.sent.filter((f) => f[0] === Cmd.SendStatusReq).length, 2);
+  assert.equal(radio.sent.filter((f) => f[0] === Cmd.ResetPath).length, 1);
+  assert.equal(session.getState().contacts[HILL_KEY]?.outPathLen, 0xff);
+  assert.equal(session.getState().remote.active?.flooded, true);
+  await assert.rejects(status, /no reply/);
+  // The flood heard nothing either: it is not sent a third time.
+  assert.equal(radio.sent.filter((f) => f[0] === Cmd.SendStatusReq).length, 2);
+});
+
+test("a flood that gets an answer after the route went silent resolves the request", async () => {
+  const { radio, session } = await nodeSession({ replyWaitMs: () => 20 });
+  radio.contacts = [contactFrame(HILL, "Hill", 10, 2, [0x3f])];
+  await session.refreshContacts(true);
+  const login = session.login(HILL_KEY, "secret");
+  await tick(30);
+  assert.equal(radio.sent.filter((f) => f[0] === Cmd.SendLogin).length, 2);
+  radio.push(new ByteWriter().u8(Push.LoginSuccess).u8(0).bytes(HILL.subarray(0, 6)).u32(1_700_000_000).u8(0).u8(2).toBytes());
+  assert.equal((await login).ok, true);
+});
+
+test("a console command that hears nothing along a route is not sent again", async () => {
+  const { radio, session } = await nodeSession({ replyWaitMs: () => 20 });
+  radio.contacts = [contactFrame(HILL, "Hill", 10, 2, [0x3f])];
+  await session.refreshContacts(true);
+  await assert.rejects(session.runCli(HILL_KEY, "reboot"), /no reply/);
+  assert.equal(radio.sent.filter((f) => f[0] === Cmd.SendTxtMsg).length, 1);
+  assert.ok(!radio.sent.some((f) => f[0] === Cmd.ResetPath));
+});
+
+test("a path discovery writes the way it found as the route, and says how the answer came back", async () => {
+  const { radio, session } = await nodeSession();
+  radio.contacts = [contactFrame(HILL, "Hill", 10, 2, [0x77])];
+  await session.refreshContacts(true);
+  const found = session.discoverPath(HILL_KEY);
+  await tick();
+  radio.push(new ByteWriter().u8(Push.PathDiscoveryResponse).u8(0).bytes(HILL.subarray(0, 6)).u8(2).bytes(fromHex("3fa1")).u8(3).bytes(fromHex("a1c03f")).toBytes());
+  assert.deepEqual(await found, { out: ["3f", "a1"], back: ["a1", "c0", "3f"], changed: true });
+  const write = radio.sent.find((f) => f[0] === Cmd.AddUpdateContact)!;
+  assert.equal(write[35], 2);
+  assert.deepEqual([...write.subarray(36, 38)], [0x3f, 0xa1]);
+  assert.equal(session.getState().contacts[HILL_KEY]?.outPathLen, 2);
+  assert.equal(session.getState().contacts[HILL_KEY]?.pathSince, 1_700_000_000_000);
+});
+
+test("a path discovery that finds the route already held writes nothing", async () => {
+  const { radio, session } = await nodeSession();
+  radio.contacts = [contactFrame(HILL, "Hill", 10, 2, [0x3f])];
+  await session.refreshContacts(true);
+  const found = session.discoverPath(HILL_KEY);
+  await tick();
+  radio.push(new ByteWriter().u8(Push.PathDiscoveryResponse).u8(0).bytes(HILL.subarray(0, 6)).u8(1).bytes(fromHex("3f")).u8(1).bytes(fromHex("3f")).toBytes());
+  assert.equal((await found).changed, false);
+  assert.ok(!radio.sent.some((f) => f[0] === Cmd.AddUpdateContact));
+});
+
 test("neighbours come back under the radio's tag, with prefixes, age and SNR", async () => {
   const { radio, session } = await nodeSession();
   const request = session.requestNeighbours(HILL_KEY, { order: 2 });
@@ -722,6 +800,8 @@ test("pinning a contact to flood drops its route now, and again whenever the rad
   assert.equal(session.getState().contacts[bobKey()]?.outPathLen, 0xff);
   assert.deepEqual(session.getState().routing.contacts[bobKey()], { flood: true });
 
+  // The radio learns a route from an acknowledgement.
+  radio.contacts = [contactFrame(BOB, "Bob", 1_699_999_100, 1, [0x55])];
   radio.push(new ByteWriter().u8(Push.PathUpdated).bytes(BOB).toBytes());
   await tick(5);
   assert.equal(radio.sent.filter((f) => f[0] === Cmd.ResetPath).length, 2);
