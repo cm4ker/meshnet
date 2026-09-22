@@ -241,6 +241,8 @@ export interface RemoteJobInfo {
   startedAt: number | null;
   /** Whether it got no reply along the route and went again as a flood. */
   flooded: boolean;
+  /** Local ms by which its reply is due, once it went out. */
+  until: number | null;
 }
 
 export interface SessionState {
@@ -1119,8 +1121,9 @@ export class MeshSession {
    * Writes the route to a contact by hand: the relays in order, as hex hashes
    * of one size, none for a neighbour heard direct. It unpins a flood, and is
    * kept past the time limit until the radio learns a route of its own.
+   * `learnedAt` puts back a route the radio had learned then, as learned.
    */
-  async setRoute(key: string, hashes: string[]): Promise<void> {
+  async setRoute(key: string, hashes: string[], options: { learnedAt?: number | null } = {}): Promise<void> {
     const contact = this.needContact(key);
     const size = hashes[0] ? hashes[0].length / 2 : (this.state.device?.pathHashMode ?? 0) + 1;
     if (!Number.isInteger(size) || size < 1 || size > 4 || hashes.some((h) => h.length !== size * 2 || !/^[0-9a-f]+$/.test(h)) || hashes.length > 63 || hashes.length * size > 64) {
@@ -1129,6 +1132,11 @@ export class MeshSession {
     const outPathLen = hashes.length | ((size - 1) << 6);
     // Kept at the radio's full width, as it hands contacts back.
     const outPath = hashes.join("").padEnd(128, "0");
+    if (options.learnedAt !== undefined) {
+      await this.writeContact({ ...contact, outPathLen, outPath, pathSince: options.learnedAt });
+      this.log("path", `${contact.name || key.slice(0, 12)}: route put back, ${hashes.length ? hashes.join(" ") : "direct"}`);
+      return;
+    }
     await this.writeContact({ ...contact, outPathLen, outPath, pathSince: this.now() });
     this.setPolicy(key, { flood: false, manual: routeKey(outPathLen, outPath) });
     this.log("path", `${contact.name || key.slice(0, 12)}: route set by hand, ${hashes.length ? hashes.join(" ") : "direct"}`);
@@ -2135,7 +2143,7 @@ export class MeshSession {
     return new Promise((resolve, reject) => {
       this.jobCounter += 1;
       this.remoteQueue.push({
-        info: { id: `r${this.jobCounter}`, key, label, startedAt: null, flooded: false },
+        info: { id: `r${this.jobCounter}`, key, label, startedAt: null, flooded: false, until: null },
         start: async (client) => {
           onStart?.();
           return start(client);
@@ -2187,6 +2195,8 @@ export class MeshSession {
       if (this.remoteActive !== job) return;
       job.sent = sent;
       const wait = this.replyWait(sent.estTimeoutMs, job.extraWaitMs);
+      job.info = { ...job.info, until: this.now() + wait };
+      this.publishRemote();
       job.timer = setTimeout(() => {
         job.timer = null;
         if (job.floodOnSilence && !flood && !sent.flood) {

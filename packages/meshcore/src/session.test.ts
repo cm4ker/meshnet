@@ -642,6 +642,17 @@ test("a path discovery writes the way it found as the route, and says how the an
   assert.equal(session.getState().contacts[HILL_KEY]?.pathSince, 1_700_000_000_000);
 });
 
+test("a route put back as learned is not taken for one set by hand", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  await session.setRoute(bobKey(), ["3f"], { learnedAt: 1_699_990_000_000 });
+  assert.equal(session.getState().contacts[bobKey()]?.pathSince, 1_699_990_000_000);
+  assert.ok(!session.routeSetByHand(bobKey()));
+  assert.deepEqual(session.getState().routing.contacts, {});
+  await session.disconnect();
+});
+
 test("a path discovery that finds the route already held writes nothing", async () => {
   const { radio, session } = await nodeSession();
   radio.contacts = [contactFrame(HILL, "Hill", 10, 2, [0x3f])];
