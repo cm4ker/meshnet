@@ -557,9 +557,16 @@ class DemoRadio extends BaseTransport {
         if (reply) this.later(1600, reply);
         return [this.sent(tag, p?.hops === 0xff)];
       }
-      case Cmd.SendPathDiscoveryReq:
-        this.later(1800, new ByteWriter().u8(Push.PathDiscoveryResponse).u8(0).bytes(frame.subarray(2, 8)).u8(2).bytes(fromHex("a1b2")).u8(2).bytes(fromHex("b2a1")).toBytes());
+      case Cmd.SendPathDiscoveryReq: {
+        // The flood finds a shorter way than the one held, when there is one to shorten; the answer comes back the other way round.
+        const p = this.person(frame.subarray(2, 34));
+        if (!p) return [new Uint8Array([Resp.Err, 2])];
+        const held = this.paths.get(p) ?? (p.hops === 0xff ? [RELAYS[0]!] : RELAYS.slice(0, p.hops));
+        const out = held.length > 1 ? [held[0]!, ...held.slice(2)] : held;
+        const back = out.slice().reverse();
+        this.later(2200, new ByteWriter().u8(Push.PathDiscoveryResponse).u8(0).bytes(p.key.subarray(0, 6)).u8(out.length).bytes(new Uint8Array(out)).u8(back.length).bytes(new Uint8Array(back)).toBytes());
         return [new ByteWriter().u8(Resp.Sent).u8(1).u32(this.acks++).u32(3000).toBytes()];
+      }
       case Cmd.SendTracePath: {
         // Out along the path and back: each node adds how well it heard the one before, and any hop may lose it.
         const tag = frame.subarray(1, 5);

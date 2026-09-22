@@ -6,8 +6,8 @@
  * them, or hands them up as a group when they share a spot. The picked node,
  * and the lines over the nodes (lib/mapOverlay.ts: a route coloured by a
  * ping, a line of sight), are the caller's: the map draws them and reports
- * taps, on a node, on a line, and a long press anywhere. Nothing here asks
- * the air for anything.
+ * taps, on a node, on a line, and a long press anywhere, and a point of a
+ * route dragged onto a node. Nothing here asks the air for anything.
  */
 
 import * as L from "leaflet";
@@ -18,7 +18,7 @@ import { clusterPoints, type Placed } from "../lib/cluster.js";
 import { darkenPixels } from "../lib/darkTile.js";
 import { ago, hue } from "../lib/format.js";
 import { freshness, hasPosition } from "../lib/geo.js";
-import { EMPTY_OVERLAY, type MapOverlay } from "../lib/mapOverlay.js";
+import { EMPTY_OVERLAY, type MapHandle, type MapOverlay } from "../lib/mapOverlay.js";
 import type { LosEnd } from "../lib/meshTool.js";
 import { useSession } from "../lib/session.js";
 import { TILE_ATTRIBUTION, TILE_URL, tileBlob } from "../lib/tiles.js";
@@ -158,12 +158,17 @@ export interface MapProps {
   onLeg?: ((from: LosEnd, to: LosEnd) => void) | undefined;
   /** A long press, or a right click, on the map itself. */
   onHold?: ((lat: number, lon: number) => void) | undefined;
+  /** A point of a route dragged onto a node: its key, or "self" for this radio. */
+  onHandleDrop?: ((handle: MapHandle, onto: string) => void) | undefined;
 }
+
+/** How near a node, in pixels, a dragged point lets go onto it. */
+const SNAP_PX = 36;
 
 /** Where the map was left, so coming back to it, from a profile or another section, finds it there. */
 let lastView: { center: L.LatLng; zoom: number } | null = null;
 
-export default function MapView({ selected, onSelect, onGroup, filter, coverBottom = 0, coverTop = 0, zoomButtons = false, overlay = EMPTY_OVERLAY, onLeg, onHold }: MapProps) {
+export default function MapView({ selected, onSelect, onGroup, filter, coverBottom = 0, coverTop = 0, zoomButtons = false, overlay = EMPTY_OVERLAY, onLeg, onHold, onHandleDrop }: MapProps) {
   const state = useSession();
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
@@ -174,8 +179,8 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
   const fitted = useRef(false);
   const [zoom, setZoom] = useState(2);
   // The handlers Leaflet holds are set once; they read the latest callbacks from here.
-  const calls = useRef({ onSelect, onGroup, onLeg, onHold });
-  calls.current = { onSelect, onGroup, onLeg, onHold };
+  const calls = useRef({ onSelect, onGroup, onLeg, onHold, onHandleDrop });
+  calls.current = { onSelect, onGroup, onLeg, onHold, onHandleDrop };
 
   const contacts = state.contacts;
   const selfLat = state.self && hasPosition(state.self.lat, state.self.lon) ? state.self.lat : null;
@@ -199,6 +204,9 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
   const shown = useMemo(() => placed.filter(filter), [placed, filter]);
   const picked = selected ? contacts[selected] ?? null : null;
   const numbers = overlay.numbers;
+  // What a dragged point can let go onto, read while it is dragged: every node on the map, and this radio.
+  const targets = useRef<{ key: string; at: L.LatLng }[]>([]);
+  targets.current = [...placed.map((c) => ({ key: c.key, at: L.latLng(c.lat, c.lon) })), ...(self ? [{ key: "self", at: L.latLng(self.lat, self.lon) }] : [])];
 
   // The map itself, once.
   useEffect(() => {
@@ -348,13 +356,98 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
       }
       if (line.label) {
         const middle = L.latLng((line.from.lat + line.to.lat) / 2, (line.from.lon + line.to.lon) / 2);
-        L.marker(middle, { interactive: false, keyboard: false, icon: L.divIcon({ className: "map-leg-label", html: escapeHtml(line.label), iconSize: [64, 18], iconAnchor: [32, 9] }) }).addTo(layer);
+        // Above the leg's middle, clear of the point that drags it.
+        L.marker(middle, { interactive: false, keyboard: false, icon: L.divIcon({ className: "map-leg-label", html: escapeHtml(line.label), iconSize: [64, 18], iconAnchor: [32, 30] }) }).addTo(layer);
       }
     }
     for (const pin of overlay.pins) {
       L.marker([pin.lat, pin.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: "map-spot", html: "<span></span>", iconSize: [20, 20], iconAnchor: [10, 20] }) }).addTo(layer);
     }
+    for (const handle of overlay.handles) dragHandle(layer, handle, handle.key ? overlay.numbers[handle.key] : undefined);
   }, [overlay]);
+
+  /** The node nearest to a point, within reach of a finger letting go. */
+  const snapAt = (at: L.LatLng): { key: string; at: L.LatLng } | null => {
+    const m = map.current;
+    if (!m) return null;
+    const p = m.latLngToContainerPoint(at);
+    let best: { key: string; at: L.LatLng } | null = null;
+    let reach = SNAP_PX;
+    for (const t of targets.current) {
+      const d = p.distanceTo(m.latLngToContainerPoint(t.at));
+      if (d < reach) {
+        best = t;
+        reach = d;
+      }
+    }
+    // Nodes gathered into a circle are let go onto through it: a repeater among them, the nearest first.
+    for (const entry of markers.current.values()) {
+      if (entry.members.length < 2) continue;
+      const at = entry.marker.getLatLng();
+      const d = p.distanceTo(m.latLngToContainerPoint(at));
+      if (d >= reach) continue;
+      const near = (c: ContactRecord) => p.distanceTo(m.latLngToContainerPoint([c.lat, c.lon]));
+      const member = [...entry.members].sort((a, b) => Number(b.type === AdvType.Repeater) - Number(a.type === AdvType.Repeater) || near(a) - near(b))[0]!;
+      best = { key: member.key, at };
+      reach = d;
+    }
+    return best;
+  };
+
+  /**
+   * A point of a route that follows the finger: the legs either side stretch
+   * to it, and a ring marks the node it would let go onto. Let go, it goes
+   * back to its place and says where it was dropped; the caller redraws the
+   * route. A tap on a relay picks it, a tap on a leg's middle opens the leg.
+   */
+  function dragHandle(layer: L.LayerGroup, handle: MapHandle, number: number | undefined): void {
+    const size = handle.kind === "hop" ? 34 : 26;
+    // A relay's place in a route being changed rides on its ring, which covers the marker's own.
+    const badge = number ? `<b class="map-num">${number}</b>` : "";
+    const home = L.latLng(handle.lat, handle.lon);
+    const marker = L.marker(home, {
+      draggable: true,
+      autoPan: true,
+      keyboard: false,
+      zIndexOffset: handle.kind === "hop" ? 1500 : 1400,
+      icon: L.divIcon({ className: `map-handle map-handle-${handle.kind}`, html: `<span></span>${badge}`, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
+    });
+    let rubber: L.Polyline | null = null;
+    let ring: L.Marker | null = null;
+    const stretch = (tip: L.LatLng) => {
+      const points: L.LatLng[] = [];
+      if (handle.from) points.push(L.latLng(handle.from.lat, handle.from.lon));
+      points.push(tip);
+      if (handle.to) points.push(L.latLng(handle.to.lat, handle.to.lon));
+      rubber?.setLatLngs(points);
+    };
+    marker.on("dragstart", () => {
+      marker.getElement()?.classList.add("dragging");
+      rubber = L.polyline([], { className: "map-leg rubber", interactive: false }).addTo(layer);
+      ring = L.marker(home, { interactive: false, keyboard: false, opacity: 0, icon: L.divIcon({ className: "map-snap", html: "<span></span>", iconSize: [40, 40], iconAnchor: [20, 20] }) }).addTo(layer);
+      stretch(home);
+    });
+    marker.on("drag", () => {
+      const snap = snapAt(marker.getLatLng());
+      stretch(snap?.at ?? marker.getLatLng());
+      if (snap) ring?.setLatLng(snap.at);
+      ring?.setOpacity(snap ? 1 : 0);
+    });
+    marker.on("dragend", () => {
+      const snap = snapAt(marker.getLatLng());
+      rubber?.remove();
+      ring?.remove();
+      marker.getElement()?.classList.remove("dragging");
+      marker.setLatLng(home);
+      if (snap) calls.current.onHandleDrop?.(handle, snap.key);
+    });
+    marker.on("click", (e) => {
+      L.DomEvent.stopPropagation(e);
+      if (handle.kind === "hop" && handle.key) calls.current.onSelect(handle.key);
+      else if (handle.kind === "gap" && handle.from && handle.to) calls.current.onLeg?.(handle.from, handle.to);
+    });
+    marker.addTo(layer);
+  }
 
   // A node picked from outside the map, from its profile or the list, is brought into view.
   const pickedKey = picked && hasPosition(picked.lat, picked.lon) ? picked.key : null;

@@ -2,11 +2,12 @@
  * Pings to repeaters and checks of routes to people, kept per contact while
  * the app runs: five traces out along the route and back, one in flight at a
  * time, and on request one hop further at a time to find where a route
- * breaks. Only a tap starts either; nothing here repeats on its own.
+ * breaks. The route is the one the radio holds, or one being changed on the
+ * map. Only a tap starts either; nothing here repeats on its own.
  */
 
 import { useSyncExternalStore } from "react";
-import { traceLegs } from "@meshnet/meshcore";
+import { AdvType, traceLegs } from "@meshnet/meshcore";
 import { session } from "./session.js";
 
 export const ROUNDS = 5;
@@ -38,6 +39,8 @@ export interface Ping {
   chain: string[];
   /** Whether the node is the last hop of the chain, or only reached through it. */
   targetInChain: boolean;
+  /** The relays of a route being changed that it went along, as hashes; null for the route the radio holds. */
+  via: string[] | null;
   mode: "rounds" | "hops";
   runs: PingRun[];
   hops: HopCheck[] | null;
@@ -71,12 +74,21 @@ export function getPing(key: string): Ping | null {
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function begin(key: string, mode: Ping["mode"]): Promise<Ping | null> {
+/** The way a trace to this contact goes along relays given by hand: through them, and on to it when it relays too. */
+function pathVia(key: string, via: string[]): { relays: string[]; target: string | null } | null {
+  const state = session.getState();
+  const contact = state.contacts[key];
+  if (!contact) return null;
+  const size = via[0] ? via[0].length / 2 : (state.device?.pathHashMode ?? 0) + 1;
+  return { relays: via, target: contact.type === AdvType.Repeater ? key.slice(0, size * 2) : null };
+}
+
+async function begin(key: string, mode: Ping["mode"], via: string[] | null): Promise<Ping | null> {
   stopped.delete(key);
-  const base: Ping = { key, chain: [], targetInChain: false, mode, runs: [], hops: null, running: true, error: null, at: Date.now() };
+  const base: Ping = { key, chain: [], targetInChain: false, via, mode, runs: [], hops: null, running: true, error: null, at: Date.now() };
   publish(base);
   try {
-    const path = await session.pingPath(key);
+    const path = via ? pathVia(key, via) : await session.pingPath(key);
     if (!path) {
       publish({ ...base, running: false, error: "No route to it is known yet. It shows up with its next advert, or after a message." });
       return null;
@@ -95,9 +107,9 @@ async function begin(key: string, mode: Ping["mode"]): Promise<Ping | null> {
   }
 }
 
-/** Five round trips along the route, one after the other. */
-export async function ping(key: string): Promise<void> {
-  const p = await begin(key, "rounds");
+/** Five round trips along the route, or along `via`, one after the other. */
+export async function ping(key: string, via: string[] | null = null): Promise<void> {
+  const p = await begin(key, "rounds", via);
   if (!p) return;
   try {
     for (let i = 0; i < ROUNDS && !stopped.has(key); i++) {
@@ -115,8 +127,8 @@ export async function ping(key: string): Promise<void> {
 }
 
 /** One hop further each time, until a hop stays silent twice: that is where the route breaks. */
-export async function findBreak(key: string): Promise<void> {
-  const p = await begin(key, "hops");
+export async function findBreak(key: string, via: string[] | null = null): Promise<void> {
+  const p = await begin(key, "hops", via);
   if (!p) return;
   p.hops = p.chain.map(() => ({ state: "waiting", tries: 0, leg: null }));
   publish(p);
@@ -158,6 +170,13 @@ export function clearPing(key: string): void {
   stopPing(key);
   pings.delete(key);
   for (const listener of listeners) listener();
+}
+
+/** A route being changed was saved as `relays`: what was measured along it is now the route's, and anything else is forgotten. */
+export function settlePing(key: string, relays: string[]): void {
+  const p = pings.get(key);
+  if (p?.via && !p.running && p.via.length === relays.length && p.via.every((h, i) => h === relays[i])) publish({ ...p, via: null });
+  else clearPing(key);
 }
 
 /** The legs measured last: from the last round that came back, or from the hops checked so far. */

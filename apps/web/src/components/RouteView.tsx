@@ -1,9 +1,10 @@
-import { contactRoute, isConversationType } from "@meshnet/meshcore";
+import { AdvType, contactRoute, isConversationType, NoReplyError } from "@meshnet/meshcore";
+import { useState } from "react";
 import { nameOfHash } from "../lib/echoes.js";
 import { agoPhrase, timeOfDay } from "../lib/format.js";
 import { inMinutes, limitLabel, limitValue, parseLimit, ROUTE_LIMITS, routeWords, useNow } from "../lib/routes.js";
 import { session, useSession } from "../lib/session.js";
-import { act } from "../lib/toast.js";
+import { act, toast } from "../lib/toast.js";
 import { changeRoute } from "../lib/toolActions.js";
 import { ActionRow, Block, Group, SelectRow, SwitchRow } from "../ui/List.js";
 import { Gone, ScreenHead, type Chrome } from "./ScreenHead.js";
@@ -15,6 +16,7 @@ import { Gone, ScreenHead, type Chrome } from "./ScreenHead.js";
 export function RouteView({ contactKey, chrome }: { contactKey: string; chrome: Chrome }) {
   const state = useSession();
   const now = useNow();
+  const [discovering, setDiscovering] = useState(false);
   const contact = state.contacts[contactKey];
   if (!contact) return <Gone chrome={chrome} title="Route" text="This contact is no longer on the radio." />;
   const key = contact.key;
@@ -26,6 +28,21 @@ export function RouteView({ contactKey, chrome }: { contactKey: string; chrome: 
   const expires = session.routeExpiresAt(key);
   const words = routeWords(contact);
   const own = state.routing.contacts[key]?.resetAfterMin;
+  // A repeater or a room answers a discovery only from a radio signed in to it.
+  const needsSignIn = (contact.type === AdvType.Repeater || contact.type === AdvType.Room) && !state.logins[key]?.ok;
+
+  const discover = async () => {
+    setDiscovering(true);
+    try {
+      const found = await session.discoverPath(key);
+      const via = found.out.length === 0 ? "heard direct" : `via ${found.out.map((h) => nameOfHash(h, state.contacts) ?? h).join(" › ")}`;
+      toast(governed && policy.flood ? `Found ${via}; it still floods` : found.changed ? `Found ${via}: now the route` : `Found ${via}, the route it had`);
+    } catch (error) {
+      toast(error instanceof NoReplyError ? (needsSignIn ? `No answer. ${name} answers only a radio signed in to it.` : `No answer from ${name}: out of range for now.`) : (error as Error).message, "error");
+    } finally {
+      setDiscovering(false);
+    }
+  };
 
   const line = governed && policy.flood
     ? "Every message floods; each route the radio learns is dropped."
@@ -86,9 +103,9 @@ export function RouteView({ contactKey, chrome }: { contactKey: string; chrome: 
           </Group>
         ) : null}
 
-        <Group note="Discovery asks the node to answer along the route it heard. The answer arrives when the radio hears back.">
+        <Group note={`Discovery floods a request, and the way it reached ${name} becomes the route.${needsSignIn ? ` ${name} answers it only once you are signed in.` : ""}`}>
           <ActionRow label="Forget the route now" disabled={!online || !route || (governed && policy.flood)} onClick={() => void act(() => session.resetPath(key), "Route forgotten: the next message floods")} />
-          <ActionRow label="Discover the path" air disabled={!online} onClick={() => void act(() => session.discoverPath(key), "Asked for the path")} />
+          <ActionRow label="Discover the path" hint={discovering ? "Waiting for the answer…" : undefined} air busy={discovering} disabled={!online} onClick={() => void discover()} />
           <ActionRow label="Change on the map" hint="Tap the repeaters it should go through, in order." disabled={!online} onClick={() => changeRoute(key)} />
         </Group>
       </div>

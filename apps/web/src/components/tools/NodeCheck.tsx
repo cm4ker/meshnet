@@ -34,7 +34,7 @@ function namesAlong(p: Ping, contact: ContactRecord, state: SessionState): strin
 }
 
 /** The two ends of leg `index` of the route, when both are on the map. */
-function legEnds(p: Ping, contact: ContactRecord, state: SessionState, index: number) {
+export function legEnds(p: Ping, contact: ContactRecord, state: SessionState, index: number) {
   const relays = p.targetInChain ? p.chain.slice(0, -1) : p.chain;
   const ends = [selfEnd(state), ...relays.map((h) => { const r = relayOf(h, state.contacts); return r ? contactEnd(r) : null; }), contactEnd(contact)];
   const a = ends[index];
@@ -90,7 +90,7 @@ export function NodeCheck({ contactKey, route: showRoute = true }: { contactKey:
         </button>
       </div>
       ) : null}
-      {p ? <Result p={p} contact={contact} state={state} onLeg={openLeg} /> : null}
+      {p && !p.via ? <PingResult p={p} contact={contact} state={state} onLeg={openLeg} /> : null}
       <Button variant={running ? "default" : "primary"} size="lg" disabled={!online || (!canCheck && !running)} onClick={() => (running ? stopPing(contactKey) : void ping(contactKey))}>
         <SignalIcon size={18} />
         {running ? "Stop" : relaysItself ? (p?.runs.length ? "Ping again" : "Ping") : "Check the route"}
@@ -103,7 +103,8 @@ export function NodeCheck({ contactKey, route: showRoute = true }: { contactKey:
   );
 }
 
-function Result({ p, contact, state, onLeg }: { p: Ping; contact: ContactRecord; state: SessionState; onLeg: (index: number) => void }) {
+/** What a ping or a search for the break came to, in a line or two; a leg named in it opens its line of sight. */
+export function PingResult({ p, contact, state, onLeg }: { p: Ping; contact: ContactRecord; state: SessionState; onLeg: (index: number) => void }) {
   const names = namesAlong(p, contact, state);
   if (p.error && !p.running) return <p className="check-note">{p.error}</p>;
 
@@ -153,7 +154,7 @@ function Result({ p, contact, state, onLeg }: { p: Ping; contact: ContactRecord;
           <span className="muted">0 of {done} came back</span>
         </div>
         {p.chain.length > 1 ? (
-          <button type="button" className="check-row" onClick={() => void findBreak(p.key)}>
+          <button type="button" className="check-row" onClick={() => void findBreak(p.key, p.via)}>
             <span className="grow">
               Find where it breaks
               <small>One hop further each time, until one stays silent</small>

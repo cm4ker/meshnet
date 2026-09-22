@@ -4047,6 +4047,53 @@ button.hop {
   left: 30px;
 }
 
+/* Points of a route that drag onto another repeater: a ring round a relay, a dot in a leg's middle. */
+.leaflet-marker-icon.map-handle {
+  display: grid;
+  place-items: center;
+  cursor: grab;
+}
+.leaflet-marker-icon.map-handle.dragging {
+  cursor: grabbing;
+}
+.map-handle-hop span {
+  width: 30px;
+  height: 30px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.map-handle-gap span {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+}
+.map-handle .map-num {
+  left: 20px;
+  top: -3px;
+}
+.map-handle.dragging span {
+  border-style: dashed;
+  background: transparent;
+  box-shadow: none;
+}
+.map-leg.rubber {
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-dasharray: 4 6;
+}
+.leaflet-marker-icon.map-snap span {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--accent) 20%, transparent);
+}
+
 /* ---- Radio › On the air ---- */
 
 .air {

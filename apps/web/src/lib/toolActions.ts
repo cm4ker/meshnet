@@ -6,9 +6,10 @@
 
 import { AdvType, contactRoute, type SessionState } from "@meshnet/meshcore";
 import { askWhoHears } from "./hears.js";
-import { contactEnd, relayOf, selfEnd } from "./mapOverlay.js";
+import { contactEnd, relayOf, selfEnd, shownRelays, type MapHandle } from "./mapOverlay.js";
 import { getMeshTool, setMeshTool, type LosEnd } from "./meshTool.js";
 import { focusOnMap, getNav, showOnMap } from "./nav.js";
+import { clearPing, getPing } from "./ping.js";
 import { session } from "./session.js";
 import { toast } from "./toast.js";
 
@@ -32,8 +33,12 @@ export function lineOfSightTo(lat: number, lon: number): void {
   openLineOfSight(from, { lat, lon, name: "This spot", key: null }, back);
 }
 
-/** Changes the route to a contact by tapping repeaters on the map, starting from the one the radio holds. */
-export function changeRoute(key: string): void {
+/**
+ * Changes the route to a contact on the map, starting from `relays`, or from
+ * the one the radio holds. A relay whose hash names nobody for sure stays in
+ * it as that hash.
+ */
+export function changeRoute(key: string, relays?: string[]): void {
   const state = session.getState();
   const contact = state.contacts[key];
   if (!contact) return;
@@ -41,9 +46,39 @@ export function changeRoute(key: string): void {
     toast("It has shared no position, so it is not on the map.");
     return;
   }
-  const relays = (contactRoute(contact) ?? []).map((h) => relayOf(h, state.contacts)?.key).filter((k): k is string => !!k);
+  const start = relays ?? (contactRoute(contact) ?? []).map((h) => relayOf(h, state.contacts)?.key ?? h);
   showOnMap(key);
-  setMeshTool({ kind: "route", key, relays });
+  setMeshTool({ kind: "route", key, relays: start });
+}
+
+/**
+ * A point of the route to `key` dropped on a node: a relay dropped on a
+ * repeater gives way to it, and the middle of a leg takes it in. A relay
+ * dropped on another node of the route, or on either end, leaves the route.
+ * What comes of it is a route being changed, to ping and to save.
+ */
+export function dropOnRoute(key: string, handle: MapHandle, onto: string): void {
+  const state = session.getState();
+  const contact = state.contacts[key];
+  if (!contact) return;
+  const tool = getMeshTool();
+  const relays =
+    tool?.kind === "route" && tool.key === key ? tool.relays : (shownRelays(contact, getPing(key)) ?? []).map((h) => relayOf(h, state.contacts)?.key ?? h);
+  const own = handle.kind === "hop" ? relays[handle.index] : undefined;
+  if (onto === own) return;
+  const inRoute = onto === "self" || onto === key || relays.includes(onto);
+  let next: string[];
+  if (handle.kind === "hop") {
+    next = inRoute ? relays.filter((_, i) => i !== handle.index) : relays.map((k, i) => (i === handle.index ? onto : k));
+  } else {
+    if (inRoute) return;
+    next = [...relays.slice(0, handle.index), onto, ...relays.slice(handle.index)];
+  }
+  if (!inRoute && state.contacts[onto]?.type !== AdvType.Repeater) {
+    toast("Only repeaters pass messages on.");
+    return;
+  }
+  changeRoute(key, next);
 }
 
 /** A tap on a node while a route is being changed adds it, or takes it off; says whether the tap was taken. */
@@ -67,10 +102,13 @@ export function whoHearsMe(): void {
   void askWhoHears();
 }
 
-/** Puts the tool away, back to the node it was opened from. */
+/** Puts the tool away, back to the node it was opened from; a ping along a route that was not saved goes with it. */
 export function closeTool(): void {
   const tool = getMeshTool();
   setMeshTool(null);
   if (tool?.kind === "los" && tool.back) showOnMap(tool.back);
-  else if (tool?.kind === "route") showOnMap(tool.key);
+  else if (tool?.kind === "route") {
+    if (getPing(tool.key)?.via) clearPing(tool.key);
+    showOnMap(tool.key);
+  }
 }

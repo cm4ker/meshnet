@@ -12,7 +12,7 @@ import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "..
 import { useHears } from "../lib/hears.js";
 import { legId, useLegVerdicts } from "../lib/legVerdicts.js";
 import type { LinkRadio } from "../lib/los.js";
-import { contactEnd, defaultHeight, EMPTY_OVERLAY, editOverlay, hearsOverlay, losOverlay, relayOf, routeOverlay, selfEnd, type MapOverlay } from "../lib/mapOverlay.js";
+import { contactEnd, defaultHeight, EMPTY_OVERLAY, editOverlay, hearsOverlay, losOverlay, relayOf, routeOverlay, selfEnd, type MapHandle, type MapOverlay } from "../lib/mapOverlay.js";
 import { useMeshTool, type LosEnd } from "../lib/meshTool.js";
 import { focusOnMap, openConversation, openProfile, useNav } from "../lib/nav.js";
 import { kindLabel } from "../lib/nodes.js";
@@ -21,7 +21,7 @@ import { routeWords } from "../lib/routes.js";
 import { useSavedPasswords } from "../lib/secrets.js";
 import { session, useSession } from "../lib/session.js";
 import { act } from "../lib/toast.js";
-import { closeTool, lineOfSightTo, openLineOfSight, tapInRoute, whoHearsMe } from "../lib/toolActions.js";
+import { closeTool, dropOnRoute, lineOfSightTo, openLineOfSight, tapInRoute, whoHearsMe } from "../lib/toolActions.js";
 import { getTextScale, subscribeTextSize } from "../theme/textSize.js";
 import { IconButton } from "../ui/Button.js";
 import { AirMark } from "../ui/List.js";
@@ -259,7 +259,7 @@ function NodeRow({ contact: c, selected, yours, onOpen }: { contact: ContactReco
  */
 function useMeshOverlay(selected: string | null, state: SessionState): MapOverlay {
   const tool = useMeshTool();
-  const ping = usePing(selected);
+  const ping = usePing(tool?.kind === "route" ? tool.key : selected);
   const hears = useHears();
   const self = state.self;
   const radio: LinkRadio | null = useMemo(
@@ -270,7 +270,7 @@ function useMeshOverlay(selected: string | null, state: SessionState): MapOverla
   const editLegs = useMemo(() => {
     if (tool?.kind !== "route") return [];
     const target = state.contacts[tool.key];
-    const ends: (LosEnd | null)[] = [selfEnd(state), ...tool.relays.map((k) => (state.contacts[k] ? contactEnd(state.contacts[k]) : null)), target ? contactEnd(target) : null];
+    const ends: (LosEnd | null)[] = [selfEnd(state), ...tool.relays.map((k) => { const r = state.contacts[k] ?? relayOf(k, state.contacts); return r ? contactEnd(r) : null; }), target ? contactEnd(target) : null];
     return ends.slice(1).flatMap((b, i) => {
       const a = ends[i];
       return a && b ? [{ a, b, ha: defaultHeight(a, state.contacts), hb: defaultHeight(b, state.contacts) }] : [];
@@ -282,7 +282,7 @@ function useMeshOverlay(selected: string | null, state: SessionState): MapOverla
     tool?.kind === "los"
       ? losOverlay(tool)
       : tool?.kind === "route"
-        ? editOverlay(tool, state, new Set(blockedKey ? blockedKey.split(";") : []))
+        ? editOverlay(tool, state, new Set(blockedKey ? blockedKey.split(";") : []), ping)
         : tool?.kind === "hears"
           ? hearsOverlay(hears, state)
           : selected
@@ -323,9 +323,13 @@ export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zo
     }
     openLineOfSight(from, to, tool?.kind === "hears" ? null : back, heard);
   };
+  const drop = (handle: MapHandle, onto: string) => {
+    const key = tool?.kind === "route" ? tool.key : selected;
+    if (key) dropOnRoute(key, handle, onto);
+  };
   return (
     <Suspense fallback={<div className="empty muted">Loading the map…</div>}>
-      <MapView selected={selected} onSelect={pick} onGroup={onGroup} filter={test} coverTop={coverTop} coverBottom={coverBottom} zoomButtons={zoomButtons} overlay={overlay} onLeg={leg} onHold={lineOfSightTo} />
+      <MapView selected={selected} onSelect={pick} onGroup={onGroup} filter={test} coverTop={coverTop} coverBottom={coverBottom} zoomButtons={zoomButtons} overlay={overlay} onLeg={leg} onHold={lineOfSightTo} onHandleDrop={drop} />
     </Suspense>
   );
 }
