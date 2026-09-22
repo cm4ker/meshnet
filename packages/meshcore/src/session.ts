@@ -840,8 +840,12 @@ export class MeshSession {
     if (this.state.self) this.held = this.unreadHistory === this.state.self.key ? null : { key: this.state.self.key, history: historyOf(this.state) };
     const client = new MeshCoreClient(transport, this.trace ? { trace: this.trace } : {});
     this.client = client;
+    // While it connects again, the radio and its history stay in sight, so the
+    // chats stay on screen rather than giving way to the connect screen.
+    const staying = this.held ? { self: this.state.self, device: this.state.device, ...this.held.history } : {};
     this.set({
       ...EMPTY,
+      ...staying,
       status: "connecting",
       link: { kind: transport.kind, label: transport.label },
       log: this.state.log,

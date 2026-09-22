@@ -10,17 +10,41 @@
  * over the keyboard's own quarter second (styles.css), and the app, the safe
  * area under it and the fixed layers are laid out from it, so they rise with
  * the keyboard.
+ *
+ * The plugin hears every keyboard in the app, the one a system prompt brings up
+ * too (the Bluetooth PIN on a reconnect), and drops its "will hide" when a
+ * "will show" follows at once. So the page makes room only while one of its own
+ * fields has the focus, and gives it back on anything that says the keyboard is
+ * gone: its "did hide", the field losing the focus, the app going away.
  */
 export function followKeyboard(): void {
   const root = document.documentElement;
   root.classList.add("keyboard-follows");
   const set = (height: number) => root.style.setProperty("--keyboard", `${Math.max(0, Math.round(height))}px`);
+  const shown = (event: Event) => set(typing() ? ((event as Event & { keyboardHeight?: number }).keyboardHeight ?? 0) : 0);
   // The plugin's window events carry the height on the event itself.
-  window.addEventListener("keyboardWillShow", (event) => set((event as Event & { keyboardHeight?: number }).keyboardHeight ?? 0));
+  window.addEventListener("keyboardWillShow", shown);
+  window.addEventListener("keyboardDidShow", shown);
   window.addEventListener("keyboardWillHide", () => set(0));
+  window.addEventListener("keyboardDidHide", () => set(0));
+  // A field that loses the focus to nothing else takes the keyboard with it.
+  document.addEventListener("focusout", () => {
+    setTimeout(() => {
+      if (!typing()) set(0);
+    }, 50);
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") set(0);
+  });
   // A field lower than the room the keyboard leaves comes into view once the keyboard is up.
   window.addEventListener("keyboardDidShow", () => {
     const field = document.activeElement;
-    if (field instanceof HTMLElement && field !== document.body) field.scrollIntoView({ block: "nearest" });
+    if (typing() && field instanceof HTMLElement) field.scrollIntoView({ block: "nearest" });
   });
+}
+
+/** Whether one of the page's own fields has the focus, so that the keyboard up is the page's. */
+function typing(): boolean {
+  const field = document.activeElement;
+  return field instanceof HTMLElement && (field.isContentEditable || field.matches("input, textarea, select"));
 }

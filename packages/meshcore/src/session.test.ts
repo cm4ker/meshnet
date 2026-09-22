@@ -427,6 +427,24 @@ test("back on the same radio, the session goes on from the history it holds, not
   assert.deepEqual(session.getState().messages.map((m) => m.text), ["before", "while nothing saves"]);
 });
 
+test("while it connects again, the radio and its history stay in the state", async () => {
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  const radio = new ScriptedRadio();
+  radio.queue.push(dmFrame(BOB, "still here"));
+  await session.connect(radio);
+  await session.disconnect();
+
+  const seen: { self: boolean; texts: string[] }[] = [];
+  const stop = session.subscribe(() => {
+    const state = session.getState();
+    if (state.status === "connecting") seen.push({ self: state.self !== null, texts: state.messages.map((m) => m.text) });
+  });
+  await session.connect(new ScriptedRadio());
+  stop();
+  assert.ok(seen.length > 0);
+  assert.ok(seen.every((s) => s.self && s.texts.includes("still here")));
+});
+
 test("a stored history that cannot be read is not written over", async () => {
   class UnreadableStorage extends MemoryStorage {
     unreadable = false;

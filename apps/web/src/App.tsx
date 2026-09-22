@@ -129,6 +129,9 @@ export function App() {
     if (ready) void askPermissionOnce();
   }, [ready]);
 
-  const showWorkspace = status === "ready" || (status === "closed" && known && link.phase !== "idle");
+  // A dropped link keeps the chats on screen, the attempts to get it back included:
+  // the session keeps the radio and its history while it connects again.
+  const reconnecting = status === "closed" || (status === "connecting" && link.retrying);
+  const showWorkspace = status === "ready" || (reconnecting && known && link.phase !== "idle");
   return <>{showWorkspace ? <Workspace /> : <ConnectView />}<UpdatesDialog /></>;
 }
