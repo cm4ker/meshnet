@@ -8,7 +8,8 @@
     "sync": "pnpm --filter @meshnet/meshcore build && pnpm --filter @meshnet/web build && cap sync",
     "android": "pnpm sync && cap open android",
     "ios": "pnpm sync && cap open ios",
-    "android:apk": "pnpm sync && cd android && ./gradlew assembleDebug"
+    "android:apk": "node scripts/android.mjs apk",
+    "android:aab": "node scripts/android.mjs aab"
   },
   "dependencies": {
     "@capacitor-community/bluetooth-le": "^8.3.0",

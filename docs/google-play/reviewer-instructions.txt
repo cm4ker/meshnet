@@ -1,0 +1,15 @@
+Ommesh is a companion for MeshCore radios. There is no Ommesh account or service login.
+
+To inspect the app without hardware:
+1. Launch Ommesh. If a Bluetooth permission prompt appears, you may decline it for this walkthrough.
+2. On the connection screen, select the Demo tab.
+3. Tap MeshCore-demo in the device list. Allow a few seconds for simulated contacts to load.
+4. Open Chats, Mesh and Radio using the bottom navigation. You can send simulated messages and inspect simulated nodes.
+5. Read the privacy policy from the connection screen or Radio > About.
+6. Return to the connection screen through Radio > Connection > Disconnect.
+
+For simulated remote administration, open Hill Repeater in Demo and sign in with password "admin". This password applies only to the demo simulation.
+
+Demo is an explicitly labelled simulation available to every user. Real Bluetooth/TCP connectivity and over-the-air delivery require a compatible radio running MeshCore companion firmware. For Bluetooth, use the pairing PIN displayed/configured on that radio. For Wi-Fi, use a companion build supporting TCP and enter its LAN address (default port 5000). Remote node administration uses credentials set by the owner of that node; these are not Ommesh account credentials.
+
+No payment, subscription or account registration is required by the app. New map and elevation tiles require internet; cached areas and radio messaging can work without it.

@@ -22,6 +22,7 @@ const config: CapacitorConfig = {
   },
   android: {
     allowMixedContent: false,
+    webContentsDebuggingEnabled: Boolean(process.env["CAP_SERVER_URL"]),
   },
   plugins: {
     BluetoothLe: {

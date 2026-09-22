@@ -1,0 +1,5 @@
+Initial Google Play release of Ommesh.
+• Connect to MeshCore radios over Bluetooth LE or Wi-Fi.
+• Chat, explore mesh nodes and manage radio settings.
+• Keep message history and cached maps on your device.
+• Try Demo without a radio and read the privacy policy offline.
