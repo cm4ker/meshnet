@@ -7,7 +7,7 @@ import { useWide } from "../lib/layout.js";
 import { back, focusOnMap, getNav, goSection, openConversation, setStack, shownConversation, topOf, useNav, type Nav, type Screen, type Section } from "../lib/nav.js";
 import { useMeshTool } from "../lib/meshTool.js";
 import { isTauri } from "../lib/platform.js";
-import { useSession } from "../lib/session.js";
+import { useSelector, useSession } from "../lib/session.js";
 import { closeTool } from "../lib/toolActions.js";
 import { MenuHost, ToastHost } from "../ui/Menu.js";
 import { Sheet } from "../ui/Sheet.js";
@@ -84,8 +84,10 @@ function Offline() {
 }
 
 function useBadges() {
-  const state = useSession();
-  return { unread: totalUnread(state), attention: useMeshAttention(), offline: state.status !== "ready" };
+  // Values rather than the state, so the phone's frame, and the screen in it, re-render only when a badge changes.
+  const unread = useSelector(totalUnread);
+  const offline = useSelector((state) => state.status !== "ready");
+  return { unread, attention: useMeshAttention(), offline };
 }
 
 // ---- the phone: one screen at a time, the tabs below ----

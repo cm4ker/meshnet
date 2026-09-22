@@ -7,7 +7,7 @@ import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "./
 import { useLink } from "./lib/link.js";
 import { ALL_CHATS, createAnnouncer } from "./lib/announce.js";
 import { askPermissionOnce, nodeNotificationsWanted, notificationsWanted, notify, onNotificationClick, pageOnScreen, tellWatch, withdraw } from "./lib/notify.js";
-import { session, useSession } from "./lib/session.js";
+import { session, useSelector } from "./lib/session.js";
 import { isWide, subscribeWide } from "./lib/layout.js";
 import { getNav, openConversation, openProfile, shownConversation, subscribeNav } from "./lib/nav.js";
 
@@ -30,7 +30,9 @@ function discoveredBody(contact: ContactRecord): string {
 }
 
 export function App() {
-  const state = useSession();
+  // Two facts, not the whole state: the root re-rendering would re-render every screen.
+  const status = useSelector((state) => state.status);
+  const known = useSelector((state) => state.self !== null);
   const link = useLink();
 
   // The conversation on screen is read as its messages arrive. Behind another
@@ -112,11 +114,11 @@ export function App() {
   }, []);
 
   // The phone asks for permission the first time a radio is connected.
-  const ready = state.status === "ready";
+  const ready = status === "ready";
   useEffect(() => {
     if (ready) void askPermissionOnce();
   }, [ready]);
 
-  const showWorkspace = state.status === "ready" || (state.status === "closed" && state.self !== null && link.phase !== "idle");
+  const showWorkspace = status === "ready" || (status === "closed" && known && link.phase !== "idle");
   return <>{showWorkspace ? <Workspace /> : <ConnectView />}<UpdatesDialog /></>;
 }

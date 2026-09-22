@@ -4,7 +4,7 @@ import { disconnect } from "../lib/link.js";
 import { useLookalikePrefs } from "../lib/lookalikes.js";
 import { openRadioPage, type RadioPage } from "../lib/nav.js";
 import { nodeNotificationsWanted, notificationsWanted } from "../lib/notify.js";
-import { session, useSession } from "../lib/session.js";
+import { session, useSelector, useSession } from "../lib/session.js";
 import { act } from "../lib/toast.js";
 import { useDesktopUpdateInfo } from "../lib/updates.js";
 import { getPreference, listThemes, subscribeTheme } from "../theme/store.js";
@@ -34,6 +34,7 @@ export function advertise(at: { x: number; y: number } | null = null): void {
 export function RadioHome({ selected }: { selected: RadioPage | null }) {
   const appInfo = useDesktopUpdateInfo();
   const state = useSession();
+  const events = useSelector((state) => state.log.length);
   const lookalikes = useLookalikePrefs();
   const theme = useSyncExternalStore(subscribeTheme, getPreference);
   const self = state.self;
@@ -100,7 +101,7 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
         </Group>
         <Group>
           {row("air", <WavesIcon size={17} />, "Listen")}
-          {row("log", <LogIcon size={17} />, plural(state.log.length, "event"))}
+          {row("log", <LogIcon size={17} />, plural(events, "event"))}
           {row("power", <PowerIcon size={17} />)}
           {row("about", <InfoIcon size={17} />, appInfo.version)}
         </Group>

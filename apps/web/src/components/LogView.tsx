@@ -1,13 +1,13 @@
 import { useState } from "react";
-import { useSession } from "../lib/session.js";
+import { useSelector } from "../lib/session.js";
 import { isTraceEnabled, setTraceEnabled, useTrace } from "../lib/trace.js";
 import { Toggle } from "../ui/Field.js";
 
 export function LogView() {
-  const state = useSession();
+  const log = useSelector((state) => state.log);
   const trace = useTrace();
   const [tracing, setTracing] = useState(isTraceEnabled);
-  const entries = [...state.log].reverse();
+  const entries = [...log].reverse();
   return (
     <div className="card-scroll">
       <div className="section">

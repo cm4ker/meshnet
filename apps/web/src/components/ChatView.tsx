@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AdvType, isConversationType, parseConversation, type MessageRecord } from "@meshnet/meshcore";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AdvType, isConversationType, parseConversation, type MessageRecord, type SessionState } from "@meshnet/meshcore";
 import { GEO, MENTION } from "../lib/composer.js";
 import { messagesIn, titleOf } from "../lib/conversations.js";
 import { nameOfHash, relaysOf } from "../lib/echoes.js";
@@ -29,9 +29,9 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
   const scroller = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
   const [reply, setReply] = useState<Reply | null>(null);
-  const answer = (message: MessageRecord) => {
+  const answer = useCallback((message: MessageRecord) => {
     if (message.sender) setReply({ name: message.sender, text: message.text });
-  };
+  }, []);
 
   // Pinned to the bottom, as a chat is, unless the reader has scrolled up to read.
   const stuck = useRef(true);
@@ -108,7 +108,13 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
             return (
               <div key={m.id}>
                 {newDay ? <div className="day">{dayLabel(m.timestamp)}</div> : null}
-                <Message message={m} showSender={many && m.direction === "in" && !sameSender} me={me} onReply={many && m.direction === "in" && m.sender ? () => answer(m) : undefined} />
+                <Message
+                  message={m}
+                  showSender={many && m.direction === "in" && !sameSender}
+                  me={me}
+                  onReply={many && m.direction === "in" && m.sender ? answer : undefined}
+                  contacts={m.direction === "out" ? state.contacts : undefined}
+                />
               </div>
             );
           })}
@@ -179,11 +185,24 @@ function techOf(message: MessageRecord, relays: number): string {
   return bits.join(" · ");
 }
 
-function Message({ message, showSender, me, onReply }: { message: MessageRecord; showSender: boolean; me: string | null; onReply: (() => void) | undefined }) {
-  const { contacts } = useSession();
+interface MessageProps {
+  message: MessageRecord;
+  showSender: boolean;
+  me: string | null;
+  onReply: ((message: MessageRecord) => void) | undefined;
+  /** For a message of ours only: the relays that echoed it are named from them. */
+  contacts: SessionState["contacts"] | undefined;
+}
+
+/**
+ * One bubble. Memoised: a message arriving, or an echo of one, changes one record, and the
+ * other bubbles of a long conversation have nothing new to draw.
+ */
+const Message = memo(function Message({ message, showSender, me, onReply: replyTo, contacts }: MessageProps) {
   const out = message.direction === "out";
   const [busy, setBusy] = useState(false);
-  const relays = out ? relaysOf(message.echoes, contacts) : [];
+  const onReply = replyTo ? () => replyTo(message) : undefined;
+  const relays = out && contacts ? relaysOf(message.echoes, contacts) : [];
   const tech = techOf(message, relays.length);
   const retryable = out && (message.status === "unconfirmed" || message.status === "failed");
   const flood = retryable && session.retryFloods(message);
@@ -213,7 +232,7 @@ function Message({ message, showSender, me, onReply }: { message: MessageRecord;
     );
   });
 
-  const relayTitle = relays.length ? `Relayed by ${relays.length}: ${relays.map((r) => nameOfHash(r.hash, contacts) ?? r.hash).join(", ")}` : undefined;
+  const relayTitle = relays.length && contacts ? `Relayed by ${relays.length}: ${relays.map((r) => nameOfHash(r.hash, contacts) ?? r.hash).join(", ")}` : undefined;
 
   return (
     <div className={["msg", out ? "out" : "in"].join(" ")} data-reply={onReply ? message.id : undefined}>
@@ -263,7 +282,7 @@ function Message({ message, showSender, me, onReply }: { message: MessageRecord;
       ) : null}
     </div>
   );
-}
+});
 
 function Status({ message }: { message: MessageRecord }) {
   switch (message.status) {

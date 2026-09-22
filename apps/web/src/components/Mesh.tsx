@@ -4,7 +4,7 @@
  * down to see the map; on a desktop it is the column beside the map.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AdvType, contactConversation, isConversationType, isFavourite, isNodeType, type ContactRecord, type SessionState } from "@meshnet/meshcore";
 import { useBackLayer } from "../lib/back.js";
 import { ago, agoPhrase } from "../lib/format.js";
@@ -20,7 +20,7 @@ import { heardAt as heard, kindLabel } from "../lib/nodes.js";
 import { usePing, measuredLegs } from "../lib/ping.js";
 import { routeWords } from "../lib/routes.js";
 import { useSavedPasswords } from "../lib/secrets.js";
-import { session, useSession } from "../lib/session.js";
+import { session, useSelector, useSession } from "../lib/session.js";
 import { act } from "../lib/toast.js";
 import { closeTool, dropOnRoute, lineOfSightTo, openLineOfSight, tapInRoute, whoHearsMe } from "../lib/toolActions.js";
 import { getTextScale, subscribeTextSize } from "../theme/textSize.js";
@@ -98,12 +98,10 @@ export function lowBattery(state: SessionState, key: string): boolean {
 
 /** Whether any node of yours needs a look, for the dot on the Mesh tab. */
 export function useMeshAttention(): boolean {
-  const state = useSession();
-  return Object.keys(state.statusHistory).some((key) => state.contacts[key] && lowBattery(state, key));
+  return useSelector((state) => Object.keys(state.statusHistory).some((key) => state.contacts[key] && lowBattery(state, key)));
 }
 
-function whereFrom(state: SessionState, c: ContactRecord): string | null {
-  const self = state.self;
+function whereFrom(self: SessionState["self"], c: ContactRecord): string | null {
   if (!hasPosition(c.lat, c.lon)) return null;
   if (!self || !hasPosition(self.lat, self.lon)) return null;
   return `${formatDistance(distanceKm(self.lat, self.lon, c.lat, c.lon))} ${compass(bearingDeg(self.lat, self.lon, c.lat, c.lon))}`;
@@ -167,6 +165,11 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
   const favourites = rows.filter((c) => !isYours(state, saved, c) && isFavourite(c));
   const rest = rows.filter((c) => !isYours(state, saved, c) && !isFavourite(c));
   const unplaced = all.filter((c) => !hasPosition(c.lat, c.lon)).length;
+  // Rows are memoised, so they get a stable opener and the minute their "5 min" is counted from.
+  const openRef = useRef(onOpen);
+  openRef.current = onOpen;
+  const open = useCallback((key: string) => openRef.current(key), []);
+  const minute = Math.floor(Date.now() / 60_000);
 
   const group = (title: string, list: ContactRecord[]) =>
     list.length ? (
@@ -174,7 +177,17 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
         <div className="list-group">{title}</div>
         <ul className="list-rows" role="list">
           {list.map((c) => (
-            <NodeRow key={c.key} contact={c} selected={selected === c.key} yours={title === "Yours"} onOpen={onOpen} />
+            <NodeRow
+              key={c.key}
+              contact={c}
+              selected={selected === c.key}
+              yours={title === "Yours"}
+              onOpen={open}
+              login={state.logins[c.key]}
+              last={state.statusHistory[c.key]?.at(-1)}
+              self={state.self}
+              minute={minute}
+            />
           ))}
         </ul>
       </>
@@ -218,14 +231,27 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
   );
 }
 
-function NodeRow({ contact: c, selected, yours, onOpen }: { contact: ContactRecord; selected: boolean; yours: boolean; onOpen: (key: string) => void }) {
-  const state = useSession();
-  const login = state.logins[c.key];
-  const last = state.statusHistory[c.key]?.at(-1);
-  const low = lowBattery(state, c.key);
+interface NodeRowProps {
+  contact: ContactRecord;
+  selected: boolean;
+  yours: boolean;
+  onOpen: (key: string) => void;
+  login: SessionState["logins"][string] | undefined;
+  last: SessionState["statusHistory"][string][number] | undefined;
+  self: SessionState["self"];
+  /** Only so the row's "5 min" moves on when the list next renders. */
+  minute: number;
+}
+
+/**
+ * One node in the list. Memoised: an advert changes one contact, and the other rows,
+ * eighty of them in a busy mesh, have nothing new to draw.
+ */
+const NodeRow = memo(function NodeRow({ contact: c, selected, yours, onOpen, login, last, self }: NodeRowProps) {
+  const low = !!last && last.batteryMv > 0 && last.batteryMv < LOW_BATTERY_MV;
   const bits = yours
     ? [kindLabel(c.type), login?.ok ? "signed in" : "not signed in", last ? `${(last.batteryMv / 1000).toFixed(2)} V` : null]
-    : [kindLabel(c.type), routeWords(c).text, whereFrom(state, c) ?? (hasPosition(c.lat, c.lon) ? null : "no position")];
+    : [kindLabel(c.type), routeWords(c).text, whereFrom(self, c) ?? (hasPosition(c.lat, c.lon) ? null : "no position")];
   return (
     <li>
       <button type="button" className={["row", selected ? "selected" : ""].join(" ")} onClick={() => onOpen(c.key)}>
@@ -246,7 +272,7 @@ function NodeRow({ contact: c, selected, yours, onOpen }: { contact: ContactReco
       </button>
     </li>
   );
-}
+});
 
 // ---- the map ----
 
@@ -340,7 +366,7 @@ export function NodeCard({ contactKey, onClose }: { contactKey: string; onClose:
   const state = useSession();
   const c = state.contacts[contactKey];
   if (!c) return null;
-  const where = whereFrom(state, c);
+  const where = whereFrom(state.self, c);
   return (
     <div className="node-card">
       <div className="node-card-head">
@@ -379,7 +405,7 @@ function GroupList({ keys, onPick, onClose }: { keys: string[]; onPick: (key: st
       <div className="node-card-head">
         <span className="row-main">
           <span className="row-title">{members.length} nodes at one spot</span>
-          <span className="row-sub muted">{members[0] ? whereFrom(state, members[0]) ?? "" : ""}</span>
+          <span className="row-sub muted">{members[0] ? whereFrom(state.self, members[0]) ?? "" : ""}</span>
         </span>
         <IconButton label="Close" onClick={onClose}>
           <CloseIcon size={18} />

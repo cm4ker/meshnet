@@ -1,7 +1,16 @@
 /** Small formatters shared by the views. */
 
+/*
+ * `toLocale*String` with options builds a new `Intl.DateTimeFormat` on every call, a tenth of
+ * a millisecond or more on a phone. A list of nodes or a long chat asks for hundreds of dates
+ * on each render, so the formats are made once.
+ */
+const CLOCK = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+const DAY = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" });
+const DAY_OF_YEAR = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" });
+
 export function timeOfDay(unixSeconds: number): string {
-  return new Date(unixSeconds * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return CLOCK.format(unixSeconds * 1000);
 }
 
 export function dayLabel(unixSeconds: number, now = Date.now()): string {
@@ -12,7 +21,7 @@ export function dayLabel(unixSeconds: number, now = Date.now()): string {
   if (sameDay(date, today)) return "Today";
   const yesterday = new Date(now - 86_400_000);
   if (sameDay(date, yesterday)) return "Yesterday";
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: date.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+  return (date.getFullYear() === today.getFullYear() ? DAY : DAY_OF_YEAR).format(date);
 }
 
 /** "just now", "5 min", "3 h", "2 d", or a date for anything older. */
@@ -23,7 +32,7 @@ export function ago(ms: number | null, now = Date.now()): string {
   if (delta < 3_600_000) return `${Math.floor(delta / 60_000)} min`;
   if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)} h`;
   if (delta < 7 * 86_400_000) return `${Math.floor(delta / 86_400_000)} d`;
-  return new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return DAY.format(ms);
 }
 
 export function frequency(khz: number): string {
