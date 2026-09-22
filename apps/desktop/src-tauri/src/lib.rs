@@ -6,6 +6,7 @@
 mod announce;
 mod secrets;
 mod tcp;
+mod updates;
 #[cfg(windows)]
 mod winble;
 
@@ -18,10 +19,13 @@ pub fn run() {
         .plugin(tauri_plugin_serialplugin::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(tcp::Tcp::default());
 
     #[cfg(windows)]
     let builder = builder.manage(winble::WinBle::default()).invoke_handler(tauri::generate_handler![
+        updates::desktop_update_info,
+        updates::desktop_check_update,
         winble::winble_scan,
         winble::winble_stop_scan,
         winble::winble_pair,
@@ -38,6 +42,8 @@ pub fn run() {
     ]);
     #[cfg(not(windows))]
     let builder = builder.invoke_handler(tauri::generate_handler![
+        updates::desktop_update_info,
+        updates::desktop_check_update,
         tcp::tcp_open,
         tcp::tcp_write,
         tcp::tcp_close,

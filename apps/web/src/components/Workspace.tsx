@@ -21,6 +21,7 @@ import { Profile } from "./Profile.js";
 import { RadioHome } from "./RadioHome.js";
 import { RadioPageView } from "./RadioPages.js";
 import { RouteView } from "./RouteView.js";
+import { UpdateButton } from "./Updates.js";
 import type { Chrome } from "./ScreenHead.js";
 
 const SECTIONS: { id: Section; label: string; icon: ReactNode }[] = [
@@ -302,6 +303,7 @@ function Desktop() {
           </button>
         ))}
         <span className="grow" />
+        <UpdateButton compact />
         <button type="button" className="rail-radio" title={state.link ? `${state.self?.name ?? "Radio"} · ${state.link.label}` : "The radio"} onClick={() => setStack("radio", [{ kind: "radio", page: "connection" }])}>
           {state.link ? <LinkIcon kind={state.link.kind} size={16} /> : <RadioIcon size={16} />}
           <span className={["dot", badges.offline ? "off" : "on"].join(" ")} aria-hidden="true" />

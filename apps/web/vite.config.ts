@@ -1,5 +1,8 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { readFileSync } from "node:fs";
+
+const { version } = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string };
 
 /**
  * `base: "./"` because the same build is opened three ways — from a web
@@ -15,7 +18,7 @@ export default defineConfig({
   base: "./",
   clearScreen: false,
   define: {
-    __APP_VERSION__: JSON.stringify(process.env["npm_package_version"] ?? "0.0.0"),
+    __APP_VERSION__: JSON.stringify(process.env["MESHNET_VERSION"] ?? version),
   },
   build: {
     target: "es2022",

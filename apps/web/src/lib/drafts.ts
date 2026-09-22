@@ -21,6 +21,14 @@ function save(): void {
   writeSetting(KEY, drafts);
 }
 
+/** Unlike a background save, failure here must prevent the updater from exiting. */
+export function flushDrafts(): void {
+  if (!saveTimer && Object.keys(drafts).length === 0) return;
+  localStorage.setItem(KEY, JSON.stringify(drafts));
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = null;
+}
+
 // A keystroke need not reach the disk at once; leaving the page must.
 if (typeof window !== "undefined") window.addEventListener("pagehide", () => saveTimer && save());
 

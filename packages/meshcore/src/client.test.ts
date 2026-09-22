@@ -61,6 +61,22 @@ test("a command is answered by the frame the radio writes back", async () => {
   assert.equal(await client.getDeviceTime(), 1234);
 });
 
+test("pending commands stay busy until both the active reply and the queue finish", async () => {
+  const radio = new FakeRadio();
+  const client = new MeshCoreClient(radio);
+  assert.equal(client.isBusy, false);
+  const first = client.getDeviceTime();
+  const second = client.getDeviceTime();
+  assert.equal(client.isBusy, true);
+  radio.push(new ByteWriter().u8(Resp.CurrTime).u32(1).toBytes());
+  assert.equal(await first, 1);
+  assert.equal(client.isBusy, true);
+  radio.push(new ByteWriter().u8(Resp.CurrTime).u32(2).toBytes());
+  assert.equal(await second, 2);
+  assert.equal(client.isBusy, false);
+  await client.close();
+});
+
 test("an error frame rejects with its code and the command's name", async () => {
   const radio = new FakeRadio();
   radio.script.set(Cmd.RemoveContact, () => [new Uint8Array([Resp.Err, 2])]);

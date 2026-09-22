@@ -549,6 +549,7 @@ export class MeshSession {
   private readonly replyWait: (estimateMs: number, extraMs: number) => number;
   private readonly trace: SessionOptions["trace"];
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private saveChain: Promise<void> = Promise.resolve();
   private syncQueued = false;
   private contactsRefreshQueued = false;
   private focused: string | null = null;
@@ -637,20 +638,36 @@ export class MeshSession {
     }, 400);
   }
 
-  private async saveNow(): Promise<void> {
+  private async saveNow(strict = false): Promise<void> {
     if (!this.storage || !this.state.self) return;
+    const storage = this.storage;
+    const key = this.state.self.key;
     const { contacts, contactsCursor, channels, messages, unread, logins, statusHistory, routing } = this.state;
+    const saving = this.saveChain.catch(() => undefined).then(() => storage.save(key, { contacts, contactsCursor, channels, messages, unread, logins, statusHistory, routing }));
+    this.saveChain = saving;
     try {
-      await this.storage.save(this.state.self.key, { contacts, contactsCursor, channels, messages, unread, logins, statusHistory, routing });
+      await saving;
     } catch (error) {
       this.log("error", `could not save: ${(error as Error).message}`);
+      if (strict) throw error;
     }
+  }
+
+  /** Wait for the latest history to reach storage before an update exits the app. */
+  async flush(): Promise<void> {
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    await this.saveNow(true);
   }
 
   // ---- connecting ----
 
   get isReady(): boolean {
     return this.state.status === "ready" && this.client !== null;
+  }
+
+  get hasPendingCommands(): boolean {
+    return this.client?.isBusy ?? false;
   }
 
   private need(): MeshCoreClient {

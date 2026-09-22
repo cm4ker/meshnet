@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { AdvType, type ContactRecord } from "@meshnet/meshcore";
 import { ConnectView } from "./components/ConnectView.js";
 import { Workspace } from "./components/Workspace.js";
+import { UpdatesDialog } from "./components/Updates.js";
 import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "./lib/geo.js";
 import { useLink } from "./lib/link.js";
 import { askPermissionOnce, conversationIsVisible, nodeNotificationsWanted, notificationsWanted, notify, onNotificationClick, tellWatch } from "./lib/notify.js";
@@ -101,5 +102,5 @@ export function App() {
   }, [ready]);
 
   const showWorkspace = state.status === "ready" || (state.status === "closed" && state.self !== null && link.phase !== "idle");
-  return showWorkspace ? <Workspace /> : <ConnectView />;
+  return <>{showWorkspace ? <Workspace /> : <ConnectView />}<UpdatesDialog /></>;
 }

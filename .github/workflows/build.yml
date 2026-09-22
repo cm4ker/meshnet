@@ -1,7 +1,7 @@
 # Every push to master is checked and built for every home the client has:
 # Windows installers for x64 and ARM64, a debug Android APK and the web
-# bundle. They land on the rolling `dev` pre-release; a `v*` tag makes a
-# proper release from the same files. Pull requests get the same builds as
+# bundle. Each push gets an immutable pre-release; `dev/latest.json` points
+# to the newest one. A matching `vX.Y.Z` tag makes a stable release. PRs get
 # workflow artifacts. iOS is left out: it is built on a Mac and uploaded to
 # TestFlight by hand (apps/mobile/README.md).
 name: Build
@@ -15,7 +15,8 @@ on:
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  # Do not interrupt a release between uploading its packages and promoting its feed.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -24,6 +25,8 @@ jobs:
   check:
     name: Typecheck, test, web bundle
     runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.version.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -32,6 +35,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - id: version
+        run: node scripts/release.mjs prepare
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm --filter @meshnet/web build
@@ -51,8 +56,10 @@ jobs:
         include:
           - arch: x64
             target: x86_64-pc-windows-msvc
+            vc-arch: amd64
           - arch: arm64
             target: aarch64-pc-windows-msvc
+            vc-arch: amd64_arm64
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -63,17 +70,27 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.vc-arch }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
           key: ${{ matrix.target }}
       - run: pnpm install --frozen-lockfile
-      # NSIS only: WiX has no ARM64 installer, and one installer kind is enough for a test build.
-      - run: pnpm --filter @meshnet/desktop exec tauri build --target ${{ matrix.target }} --bundles nsis
+      - run: node scripts/release.mjs prepare
+      # PR/local packages do not need the private key. Publishing fails closed if it is missing.
+      - name: Build NSIS and updater signatures
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ needs.check.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.check.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: pnpm --filter @meshnet/desktop exec tauri build --config src-tauri/tauri.release.json --target ${{ matrix.target }} --bundles nsis
       - uses: actions/upload-artifact@v4
         with:
           name: meshnet-windows-${{ matrix.arch }}
-          path: apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+          path: |
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe.sig
           if-no-files-found: error
 
   android:
@@ -93,6 +110,7 @@ jobs:
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
       - run: pnpm install --frozen-lockfile
+      - run: node scripts/release.mjs prepare
       - run: pnpm --filter @meshnet/mobile android:apk
       - uses: actions/upload-artifact@v4
         with:
@@ -103,34 +121,32 @@ jobs:
   release:
     name: Publish
     needs: [check, desktop-windows, android]
-    if: github.event_name == 'push'
+    if: needs.check.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    concurrency:
+      group: meshnet-release
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
       - name: Lay out the files
         run: |
           mkdir out
-          cp artifacts/meshnet-windows-x64/*.exe out/
-          cp artifacts/meshnet-windows-arm64/*.exe out/
+          cp artifacts/meshnet-windows-x64/*.exe* out/
+          cp artifacts/meshnet-windows-arm64/*.exe* out/
           cp artifacts/meshnet-android/app-debug.apk out/Meshnet_android-debug.apk
           (cd artifacts/meshnet-web && zip -qr ../../out/Meshnet_web.zip .)
           ls -l out
-      - name: Rolling dev pre-release
-        if: github.ref == 'refs/heads/master'
+      - name: Create the complete update feed
+        run: node scripts/release.mjs manifest out
+      - name: Publish signed release, then promote the channel
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete dev --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
-          gh release create dev --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
-            --title "Dev build ${GITHUB_SHA::7}" \
-            --notes "Built from ${GITHUB_SHA} on $(date -u +%Y-%m-%d\ %H:%M) UTC. Replaced on every push to master." \
-            out/*
-      - name: Tagged release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes out/*
+        run: node scripts/release.mjs publish out

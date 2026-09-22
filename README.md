@@ -44,6 +44,7 @@ The mobile app is named **Ommesh**. It shares the same client and features, with
 ### At home on every screen
 
 - **Desktop workspace.** Conversation list, chat and details side by side, with a command palette and keyboard shortcuts.
+- **Windows updates.** Stable/Dev channels, optional automatic checks, signed downloads and installation on demand. Available even before connecting a radio; history and drafts are saved before restart.
 - **Phone navigation.** Bottom tabs, a sliding node list over the map, long-press menus and swipe-back navigation.
 - **Light and dark themes.** One Light, One Dark, system theme selection and adjustable text size.
 - **Radio controls.** Name, position, frequency, bandwidth, spreading factor, coding rate, transmit power, contact and telemetry policies, clock, adverts and advanced tuning. Frequency changes have a separate Apply step; remote radio changes support a timed trial.
@@ -98,7 +99,9 @@ Download the [rolling development build](https://github.com/cm4ker/meshnet/relea
 
 **No radio yet?** Run the web client below, open [localhost:5180/?demo](http://localhost:5180/?demo), select **Demo** and connect to **MeshCore-demo**.
 
-The `dev` pre-release is replaced after each successful release workflow for a push to `master`. It contains Windows installers, a debug Android APK and the web bundle. Tags matching `v*` create versioned releases; pull request builds are available as workflow artifacts. iOS builds and TestFlight uploads are handled separately.
+The `dev` page links to the latest successful Dev release with Windows installers, a debug Android APK and the web bundle. Each build is kept separately; `vX.Y.Z` tags matching the root `package.json` version create stable releases. Pull request builds are available as workflow artifacts. iOS builds and TestFlight uploads are handled separately.
+
+On Windows, open **App updates** on the connection screen, **Update** in the sidebar, or **Radio → About**. Checks run at startup and every six hours; downloading and installation are requested by you. Older versions without the updater need one manual installation. See [channels, signing and release setup](docs/desktop-updates.md).
 
 ## Development
 

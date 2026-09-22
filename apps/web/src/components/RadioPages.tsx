@@ -19,6 +19,8 @@ import { CopyIcon } from "./Icons.js";
 import { LogView } from "./LogView.js";
 import { Readings } from "./Readings.js";
 import { ScreenHead, type Chrome } from "./ScreenHead.js";
+import { UpdateButton } from "./Updates.js";
+import { useDesktopUpdateInfo } from "../lib/updates.js";
 
 type Self = NonNullable<SessionState["self"]>;
 
@@ -182,12 +184,7 @@ function PageBody({ page }: { page: RadioPage }) {
     case "power":
       return <PowerPage />;
     case "about":
-      return (
-        <Group note="A companion for MeshCore radios. Messages stay on this device; the radio keeps only what has not been read yet.">
-          <InfoRow label="Meshnet">{__APP_VERSION__}</InfoRow>
-          <InfoRow label="Running in">{shell() === "tauri" ? "the desktop shell" : shell() === "capacitor" ? "the phone shell" : "a browser"}</InfoRow>
-        </Group>
-      );
+      return <AboutPage />;
     default:
       return null;
   }
@@ -525,6 +522,17 @@ function AppearancePage() {
       </Group>
     </>
   );
+}
+
+function AboutPage() {
+  const info = useDesktopUpdateInfo();
+  return <>
+    <Group note="A companion for MeshCore radios. Messages stay on this device; the radio keeps only what has not been read yet.">
+      <InfoRow label="Meshnet">{info.version}</InfoRow>
+      <InfoRow label="Running in">{shell() === "tauri" ? "the desktop shell" : shell() === "capacitor" ? "the phone shell" : "a browser"}</InfoRow>
+    </Group>
+    <UpdateButton />
+  </>;
 }
 
 function ConnectionPage() {

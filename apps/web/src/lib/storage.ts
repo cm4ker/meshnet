@@ -28,8 +28,10 @@ function run<T>(db: IDBDatabase, mode: IDBTransactionMode, op: (store: IDBObject
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, mode);
     const request = op(tx.objectStore(STORE));
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("database request failed"));
+    // A successful request can still be rolled back. Installation must wait for the commit.
+    tx.oncomplete = () => resolve(request.result);
+    tx.onabort = () => reject(tx.error ?? request.error ?? new Error("database transaction aborted"));
+    tx.onerror = () => reject(tx.error ?? request.error ?? new Error("database transaction failed"));
   });
 }
 

@@ -1,0 +1,78 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, basename, dirname } from "node:path";
+import { makeManifest, publish, releaseInfo } from "./release.mjs";
+
+const env = { GITHUB_REF: "refs/heads/master", GITHUB_EVENT_NAME: "push", GITHUB_RUN_NUMBER: "42", GITHUB_RUN_ATTEMPT: "2" };
+test("stable tags must match the shared version; dev runs and retries have unique versions", () => {
+  assert.deepEqual(releaseInfo("0.2.0", env), { version: "0.2.0-dev.42.2", tag: "dev-0.2.0-dev.42.2", channel: "dev", publish: true });
+  assert.equal(releaseInfo("0.2.0", { ...env, GITHUB_REF: "refs/tags/v0.2.0" }).version, "0.2.0");
+  assert.throws(() => releaseInfo("0.2.0", { ...env, GITHUB_REF: "refs/tags/v0.3.0" }), /match/);
+  assert.equal(releaseInfo("0.2.0", { ...env, GITHUB_EVENT_NAME: "pull_request" }).publish, false);
+  assert.equal(releaseInfo("0.2.0", { ...env, GITHUB_EVENT_NAME: "workflow_dispatch" }).publish, false);
+});
+const files = ["Meshnet_0.2.0_x64-setup.exe", "Meshnet_0.2.0_arm64-setup.exe"].flatMap((name) => [name, `${name}.sig`]);
+const options = { version: "0.2.0", tag: "v0.2.0", repository: "cm4ker/meshnet", files, signature: () => "signed-package\n", date: "2026-09-22T00:00:00Z" };
+test("feed selects the exact architecture and immutable release files", () => {
+  const manifest = makeManifest(options);
+  assert.deepEqual(Object.keys(manifest.platforms), ["windows-x86_64", "windows-aarch64"]);
+  assert.match(manifest.platforms["windows-aarch64"].url, /\/v0.2.0\/Meshnet_0.2.0_arm64-setup.exe$/);
+  assert.equal(manifest.platforms["windows-x86_64"].signature, "signed-package");
+});
+test("never publish a partial or mismatched update", () => {
+  assert.throws(() => makeManifest({ ...options, files: files.slice(0, 2) }), /arm64/);
+  assert.throws(() => makeManifest({ ...options, files: files.slice(1) }), /x64/);
+  assert.throws(() => makeManifest({ ...options, files: files.filter((f) => !f.endsWith("arm64-setup.exe.sig")) }), /signature/);
+  assert.throws(() => makeManifest({ ...options, signature: () => " " }), /Empty signature/);
+  assert.throws(() => makeManifest({ ...options, version: "0.3.0" }), /version/);
+  assert.throws(() => makeManifest({ ...options, files: [...files, files[0]] }), /exactly one/);
+});
+
+function publication(t) {
+  const directory = mkdtempSync(join(tmpdir(), "meshnet-release-test-"));
+  t.after(() => {
+    // Remove only the test-created directory, never a supplied path.
+    assert.equal(dirname(directory), tmpdir());
+    assert.ok(basename(directory).startsWith("meshnet-release-test-"));
+    rmSync(directory, { recursive: true });
+  });
+  writeFileSync(join(directory, "latest.json"), JSON.stringify(makeManifest(options)));
+  for (const name of files) writeFileSync(join(directory, name), "test fixture");
+  return { directory, info: { version: "0.2.0", channel: "dev", tag: "dev-test", publish: true }, env: { GITHUB_REPOSITORY: "cm4ker/meshnet", GITHUB_SHA: "abc" } };
+}
+
+test("publishes the complete immutable release before updating the rolling feed", (t) => {
+  const { directory, info, env } = publication(t);
+  const calls = [];
+  publish(info, directory, env, (...args) => {
+    calls.push(args);
+    if (args[0] === "api") return args[1].endsWith("commits/master") ? "abc" : JSON.stringify({ draft: false, assets: [{ name: "Meshnet_0.1.0_x64-setup.exe" }, { name: "latest.json" }] });
+    return "";
+  });
+  assert.deepEqual(calls.slice(0, 3).map((call) => call.slice(0, 3)), [["release", "create", "dev-test"], ["release", "upload", "dev-test"], ["release", "edit", "dev-test"]]);
+  assert.ok(calls[0].includes("--draft"));
+  assert.ok(calls[1].some((arg) => arg.endsWith("arm64-setup.exe.sig")));
+  assert.ok(calls[1].some((arg) => arg.endsWith("x64-setup.exe.sig")));
+  assert.ok(calls[2].includes("--draft=false"));
+  assert.deepEqual(calls.at(-1).slice(0, 3), ["release", "upload", "dev"]);
+  assert.equal(basename(calls.at(-1).at(-1)), "latest.json");
+  const removals = calls.filter((call) => call[1] === "delete-asset");
+  assert.equal(removals.length, 1);
+  assert.deepEqual(removals[0].slice(2, 4), ["dev", "Meshnet_0.1.0_x64-setup.exe"]);
+});
+
+test("an upload failure or stale build never changes the channel feed", (t) => {
+  const { directory, info, env } = publication(t);
+  const calls = [];
+  assert.throws(() => publish(info, directory, env, (...args) => {
+    calls.push(args);
+    if (args[1] === "upload") throw new Error("upload failed");
+    return "";
+  }), /upload failed/);
+  assert.equal(calls.length, 2);
+  calls.length = 0;
+  publish(info, directory, env, (...args) => { calls.push(args); return args[0] === "api" ? "newer-master" : ""; });
+  assert.equal(calls.some((call) => call[2] === "dev"), false);
+});

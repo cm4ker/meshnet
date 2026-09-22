@@ -1,5 +1,6 @@
 {
   "name": "meshnet",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.17.1",
@@ -10,7 +11,7 @@
     "pretypecheck": "pnpm run meshcore",
     "typecheck": "pnpm -r typecheck",
     "pretest": "pnpm run meshcore",
-    "test": "pnpm -r test",
+    "test": "node --test scripts/*.test.mjs && pnpm -r test",
     "preweb": "pnpm run meshcore",
     "web": "pnpm --filter @meshnet/web dev",
     "///": "The shells bundle the built client, so a shell build needs `pnpm build` first. Neither is part of `pnpm -r build`: a workspace-wide build has no reason to want a Rust toolchain, Xcode or the Android SDK.",

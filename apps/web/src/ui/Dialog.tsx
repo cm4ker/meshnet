@@ -5,9 +5,9 @@ import { Button } from "./Button.js";
 /**
  * A native `<dialog>`, opened modally so focus and Escape are the browser's.
  */
-export function Dialog({ open, title, onClose, children, footer }: { open: boolean; title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+export function Dialog({ open, title, onClose, children, footer, dismissible = true }: { open: boolean; title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; dismissible?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
-  useBackLayer(open, onClose);
+  useBackLayer(open, () => { if (dismissible) onClose(); });
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
@@ -15,7 +15,7 @@ export function Dialog({ open, title, onClose, children, footer }: { open: boole
     if (!open && dialog.open) dialog.close();
   }, [open]);
   return (
-    <dialog ref={ref} className="dialog" onClose={onClose} onClick={(e) => e.target === ref.current && onClose()}>
+    <dialog ref={ref} className="dialog" onCancel={(e) => { if (!dismissible) e.preventDefault(); }} onClose={onClose} onClick={(e) => dismissible && e.target === ref.current && onClose()}>
       <div className="dialog-inner" onClick={(e) => e.stopPropagation()}>
         <header className="dialog-head">
           <h2>{title}</h2>

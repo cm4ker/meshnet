@@ -6,6 +6,7 @@ import { Button } from "../ui/Button.js";
 import { Prompt } from "../ui/Dialog.js";
 import { Input, Toggle } from "../ui/Field.js";
 import { LinkIcon } from "./Icons.js";
+import { UpdateButton } from "./Updates.js";
 
 export function ConnectView() {
   const list = useMemo(connectors, []);
@@ -67,6 +68,7 @@ export function ConnectView() {
             setAutoConnect(v);
           }}
         />
+        <UpdateButton />
       </div>
     </div>
   );

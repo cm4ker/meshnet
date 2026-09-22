@@ -905,3 +905,46 @@ test("the routing settings survive a reconnect", async () => {
   assert.deepEqual(second.getState().routing, { resetAfterMin: 30, contacts: { [bobKey()]: { resetAfterMin: 5 } } });
   await second.disconnect();
 });
+
+test("flush serializes writes so an older pending save cannot overwrite the latest history", async () => {
+  const snapshots: PersistedState[] = [];
+  let release!: () => void;
+  let started!: () => void;
+  const firstStarted = new Promise<void>((resolve) => { started = resolve; });
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  const storage = {
+    load: async () => null,
+    save: async (_key: string, snapshot: PersistedState) => {
+      if (snapshots.length === 0) { started(); await pending; }
+      snapshots.push(snapshot);
+    },
+  };
+  const session = new MeshSession({ storage });
+  await session.connect(new ScriptedRadio());
+  session.setDefaultRouteReset(10);
+  const first = session.flush();
+  await firstStarted;
+  session.setDefaultRouteReset(20);
+  const second = session.flush();
+  release();
+  await Promise.all([first, second]);
+  assert.deepEqual(snapshots.map((state) => state.routing?.resetAfterMin), [10, 20]);
+  await session.disconnect();
+  await session.flush();
+  assert.equal(snapshots.at(-1)!.routing?.resetAfterMin, 20);
+});
+
+test("flush reports a storage failure and allows a subsequent retry", async () => {
+  let fail = true;
+  let saved = 0;
+  const session = new MeshSession({ storage: {
+    load: async () => null,
+    save: async () => { if (fail) throw new Error("disk full"); saved++; },
+  } });
+  await session.connect(new ScriptedRadio());
+  await assert.rejects(session.flush(), /disk full/);
+  fail = false;
+  await session.flush();
+  assert.equal(saved, 1);
+  await session.disconnect();
+});

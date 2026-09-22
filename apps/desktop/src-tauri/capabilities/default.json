@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The client's window: the two links to a radio, and the system browser for links in messages. Nothing else is granted.",
+  "description": "Radio connections, system links and installation of signed desktop updates. Update feeds are chosen by the native shell.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -9,6 +9,8 @@
     "core:event:allow-unlisten",
     "blec:default",
     "serialplugin:default",
-    "opener:default"
+    "opener:default",
+    "updater:allow-download",
+    "updater:allow-install"
   ]
 }

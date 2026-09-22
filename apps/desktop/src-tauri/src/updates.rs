@@ -1,0 +1,66 @@
+//! Only the two project feeds may be selected. Downloading, signature verification
+//! and installation remain the official updater plugin's responsibility.
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use tauri::{Manager, Webview};
+use tauri_plugin_updater::UpdaterExt;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Channel {
+    Stable,
+    Dev,
+}
+
+#[tauri::command]
+pub fn desktop_update_info(app: tauri::AppHandle) -> serde_json::Value {
+    let version = &app.package_info().version;
+    serde_json::json!({
+        "version": version.to_string(),
+        "supported": cfg!(windows),
+        "channel": if version.pre.is_empty() { "stable" } else { "dev" },
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMetadata {
+    rid: tauri::ResourceId,
+    current_version: String,
+    version: String,
+    body: Option<String>,
+    raw_json: serde_json::Value,
+}
+
+#[tauri::command]
+pub async fn desktop_check_update(
+    webview: Webview,
+    channel: Channel,
+) -> Result<Option<UpdateMetadata>, String> {
+    if !cfg!(windows) {
+        return Err("In-app updates are currently available on Windows.".into());
+    }
+    let endpoint = match channel {
+        Channel::Stable => "https://github.com/cm4ker/meshnet/releases/latest/download/latest.json",
+        Channel::Dev => "https://github.com/cm4ker/meshnet/releases/download/dev/latest.json",
+    };
+    let update = webview
+        .updater_builder()
+        .endpoints(vec![endpoint
+            .parse()
+            .map_err(|e| format!("Invalid update URL: {e}"))?])
+        .map_err(|e| e.to_string())?
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(update.map(|update| UpdateMetadata {
+        current_version: update.current_version.clone(),
+        version: update.version.clone(),
+        body: update.body.clone(),
+        raw_json: update.raw_json.clone(),
+        rid: webview.resources_table().add(update),
+    }))
+}

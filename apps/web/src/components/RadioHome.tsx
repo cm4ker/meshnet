@@ -6,6 +6,7 @@ import { openRadioPage, type RadioPage } from "../lib/nav.js";
 import { nodeNotificationsWanted, notificationsWanted } from "../lib/notify.js";
 import { session, useSession } from "../lib/session.js";
 import { act } from "../lib/toast.js";
+import { useDesktopUpdateInfo } from "../lib/updates.js";
 import { getPreference, listThemes, subscribeTheme } from "../theme/store.js";
 import { Button } from "../ui/Button.js";
 import { Group, LinkRow } from "../ui/List.js";
@@ -31,6 +32,7 @@ export function advertise(at: { x: number; y: number } | null = null): void {
  * with it, then one row per topic, each with what it is set to now.
  */
 export function RadioHome({ selected }: { selected: RadioPage | null }) {
+  const appInfo = useDesktopUpdateInfo();
   const state = useSession();
   const lookalikes = useLookalikePrefs();
   const theme = useSyncExternalStore(subscribeTheme, getPreference);
@@ -99,7 +101,7 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
         <Group>
           {row("log", <LogIcon size={17} />, plural(state.log.length, "event"))}
           {row("power", <PowerIcon size={17} />)}
-          {row("about", <InfoIcon size={17} />, __APP_VERSION__)}
+          {row("about", <InfoIcon size={17} />, appInfo.version)}
         </Group>
       </div>
     </div>

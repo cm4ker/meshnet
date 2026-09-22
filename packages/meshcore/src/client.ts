@@ -104,6 +104,11 @@ export class MeshCoreClient {
     return this.closedWith !== undefined;
   }
 
+  /** Includes local radio commands as well as requests waiting in the command queue. */
+  get isBusy(): boolean {
+    return this.inFlight !== null || this.queue.length > 0;
+  }
+
   onPush(listener: (frame: PushFrame) => void): () => void {
     this.pushListeners.add(listener);
     return () => this.pushListeners.delete(listener);

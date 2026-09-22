@@ -83,6 +83,25 @@ export async function disconnect(): Promise<void> {
   set({ phase: "idle", error: null, retrying: false, attempt: 0 });
 }
 
+/** Stop reconnecting during installation; restore this exact link if installation fails. */
+export async function pauseForUpdate(): Promise<() => Promise<void>> {
+  const previous = wantedLink;
+  const resume = async () => {
+    if (previous) {
+      // Reconnecting loads history from disk. Never replace unsaved in-memory data with an older copy.
+      await session.flush();
+      await connectWith(previous.connector, previous.device);
+    }
+  };
+  try {
+    await disconnect();
+  } catch (error) {
+    await resume().catch(() => undefined);
+    throw error;
+  }
+  return resume;
+}
+
 function cancelRetry(): void {
   if (retryTimer) clearTimeout(retryTimer);
   retryTimer = null;
