@@ -2049,8 +2049,8 @@ button.hop {
   gap: var(--space-2);
 }
 /*
- * A conversation's composer: one frame for the text and its button, with the
- * radius of a bubble, taking an outgoing bubble's colour once there is text.
+ * A conversation's composer: one frame for the text and its button, a bubble's
+ * outline with nothing painted in it.
  * Its lower edge is the byte meter; the tag above it gives the numbers.
  */
 .compose {
@@ -2080,13 +2080,8 @@ button.hop {
   flex-direction: column;
   border: 1px solid var(--border-strong);
   border-radius: var(--r);
-  background: var(--panel);
-  transition:
-    border-color 0.15s,
-    background-color 0.25s;
-}
-.compose.has .compose-box {
-  background: var(--bubble-out);
+  background: transparent;
+  transition: border-color 0.15s;
 }
 .compose.focus .compose-box {
   border-color: var(--text-faint);
@@ -2162,9 +2157,6 @@ button.hop {
 }
 .compose-field textarea::-webkit-scrollbar {
   display: none;
-}
-.compose-field textarea::placeholder {
-  color: var(--text-faint);
 }
 .compose-send {
   flex: none;

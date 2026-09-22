@@ -1,10 +1,11 @@
 /**
  * Where a message is written: one frame holding the text and its button, the
- * way a bubble holds a message, taking an outgoing bubble's colour once there
- * is something in it. What the message costs stays in sight: the frame's
- * lower edge fills as the 160 bytes run out, ticked where the cipher adds
- * another 16-byte block, and a tag above it gives the bytes and the time on
- * air. What does not fit is marked in the text itself, with two ways out.
+ * outline of a bubble with nothing painted in it, and no hint text, since the
+ * chat above says where the message goes. What the message costs stays in
+ * sight: the frame's lower edge fills as the 160 bytes run out, ticked where
+ * the cipher adds another 16-byte block, and a tag above it gives the bytes
+ * and the time on air. What does not fit is marked in the text itself, with
+ * two ways out.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
@@ -206,7 +207,6 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
     return <footer className="compose compose-note muted">Not in the contacts yet: add the sender to write back.</footer>;
   }
 
-  const placeholder = !online ? "Radio offline · sends when it's back" : target.kind === "channel" && target.index === 0 ? `Everyone on ${title} hears this` : `Message ${title}`;
   const saved = cost.typed - cost.used;
   const button = empty
     ? { cls: "idle", label: "Send", icon: <SendIcon size={18} />, disabled: true, act: () => undefined }
@@ -295,7 +295,6 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
               ref={field}
               rows={1}
               value={text}
-              placeholder={placeholder}
               aria-label={`Message ${title}`}
               aria-describedby={empty ? undefined : `cost-${conversation}`}
               enterKeyHint="send"
