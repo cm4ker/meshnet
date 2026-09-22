@@ -9,6 +9,7 @@ import { ByteWriter, unixNow, utf8 } from "./bytes.js";
 import {
   APP_PROTOCOL_VERSION,
   Cmd,
+  ControlType,
   MAX_PASSWORD_LEN,
   MAX_PATH_SIZE,
   MAX_TEXT_LEN,
@@ -368,6 +369,26 @@ export function sendPathDiscoveryReq(publicKey: Uint8Array): Uint8Array {
 
 export function getStats(type: number): Uint8Array {
   return new ByteWriter().u8(Cmd.GetStats).u8(type).toBytes();
+}
+
+/** A zero-hop control packet; the firmware sends only payloads whose first byte has its top bit set. */
+export function sendControlData(payload: Uint8Array): Uint8Array {
+  return new ByteWriter().u8(Cmd.SendControlData).bytes(payload).toBytes();
+}
+
+/**
+ * Asks the nodes in direct range to say how well they heard this one.
+ * `filter` has a bit per `AdvType` (repeaters are `1 << AdvType.Repeater`);
+ * `since` skips nodes whose settings have not changed since that unix time.
+ * They answer with their whole key unless `prefixOnly` asks for eight bytes.
+ */
+export function nodeDiscoverRequest(tag: number, filter: number, options: { prefixOnly?: boolean; since?: number } = {}): Uint8Array {
+  return new ByteWriter()
+    .u8(ControlType.NodeDiscoverReq | (options.prefixOnly ? 1 : 0))
+    .u8(filter)
+    .u32(tag)
+    .u32(options.since ?? 0)
+    .toBytes();
 }
 
 /** The inbound path the last advert from this contact took, if the radio still has it. */

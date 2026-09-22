@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ByteWriter, fromHex } from "./protocol/bytes.js";
 import { Cmd, Push, Resp, TxtType } from "./protocol/codes.js";
 import { groupTextPayload, heardGroupTextPayload } from "./protocol/group.js";
-import { channelConversation, contactConversation, MeshSession, splitChannelText, type PersistedState } from "./session.js";
+import { channelConversation, contactConversation, MeshSession, pathHashes, routeKey, splitChannelText, traceLegs, type PersistedState } from "./session.js";
 import { BaseTransport } from "./transport.js";
 import { TimeoutError, TransportClosedError } from "./client.js";
 
@@ -113,6 +113,15 @@ class ScriptedRadio extends BaseTransport {
         return [new ByteWriter().u8(Resp.Sent).u8(1).u32(this.binaryTag).u32(2000).toBytes()];
       case Cmd.Logout:
         return [new Uint8Array([Resp.Ok])];
+      case Cmd.SendTracePath:
+        // The radio echoes the trace's own tag, and estimates the way back.
+        return [new ByteWriter().u8(Resp.Sent).u8(0).bytes(frame.subarray(1, 5)).u32(40).toBytes()];
+      case Cmd.SendControlData:
+        return [new Uint8Array([Resp.Ok])];
+      case Cmd.AddUpdateContact:
+        return [new Uint8Array([Resp.Ok])];
+      case Cmd.GetStats:
+        return [new ByteWriter().u8(Resp.Stats).u8(1).u16(-115 & 0xffff).i8(-90).i8(28).u32(120).u32(3400).toBytes()];
       default:
         return [new Uint8Array([Resp.Err, 1])];
     }
@@ -946,5 +955,109 @@ test("flush reports a storage failure and allows a subsequent retry", async () =
   fail = false;
   await session.flush();
   assert.equal(saved, 1);
+  await session.disconnect();
+});
+
+// ---- diagnostics ----
+
+test("a trace's SNRs split into legs: out along the path, back the other way", () => {
+  // Out through two relays and back: at the first, the second, the first again, then ours.
+  assert.deepEqual(traceLegs([-2.5, 8.5, 7.75, -4], 2), [[-2.5, -4], [8.5, 7.75]]);
+  assert.deepEqual(traceLegs([3, 1.5], 1), [[3, 1.5]]);
+  assert.deepEqual(traceLegs([3], 1), []);
+});
+
+test("a path's hashes are read at the size its length byte gives, and routes compare by what they hold", () => {
+  assert.deepEqual(pathHashes(2, "3fa1"), ["3f", "a1"]);
+  assert.deepEqual(pathHashes(0x42, "3f01a102"), ["3f01", "a102"]);
+  assert.equal(routeKey(2, "3fa1".padEnd(128, "0")), "2:3fa1");
+  assert.equal(routeKey(0xff, ""), "none");
+});
+
+test("a trace goes out and back along the path, and resolves with every hop's SNR", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ traceWaitMs: () => 500 });
+  await session.connect(radio);
+  const result = session.traceRoute(["3f", "a1"]);
+  await tick();
+  const frame = radio.sent.find((f) => f[0] === Cmd.SendTracePath)!;
+  assert.deepEqual([...frame.subarray(9)], [0, 0x3f, 0xa1, 0x3f]);
+  radio.push(
+    new ByteWriter()
+      .u8(Push.TraceData)
+      .u8(0)
+      .u8(3)
+      .u8(0)
+      .bytes(frame.subarray(1, 5))
+      .u32(0)
+      .bytes(new Uint8Array([0x3f, 0xa1, 0x3f]))
+      .i8(-10)
+      .i8(34)
+      .i8(31)
+      .i8(-16)
+      .toBytes(),
+  );
+  const back = await result;
+  assert.ok(back);
+  assert.deepEqual(back.snrs, [-2.5, 8.5, 7.75, -4]);
+  await session.disconnect();
+});
+
+test("a trace that does not come back resolves with nothing", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ traceWaitMs: () => 30 });
+  await session.connect(radio);
+  assert.equal(await session.traceRoute(["3f"]), null);
+  await session.disconnect();
+});
+
+test("who hears me asks the repeaters in range, and keeps the answers to this ask", async () => {
+  const radio = new ScriptedRadio();
+  radio.contacts = [contactFrame(BOB, "Hill", 10, 2)];
+  const session = new MeshSession();
+  await session.connect(radio);
+  const heard: string[] = [];
+  const asked = session.discoverRepeaters(60, (r) => heard.push(r.key));
+  await tick();
+  const frame = radio.sent.find((f) => f[0] === Cmd.SendControlData)!;
+  assert.equal(frame[1], 0x80);
+  assert.equal(frame[2], 1 << 2);
+  const tag = frame.subarray(3, 7);
+  const answer = (t: Uint8Array) =>
+    new ByteWriter().u8(Push.ControlData).i8(-16).i8(-100).u8(0).u8(0x92).i8(-10).bytes(t).bytes(BOB).toBytes();
+  radio.push(answer(tag));
+  radio.push(answer(new Uint8Array([9, 9, 9, 9])));
+  const replies = await asked;
+  assert.equal(replies.length, 1);
+  assert.deepEqual(replies[0], { key: bobKey(), known: true, type: 2, heardUs: -2.5, heardThem: -4, rssi: -100, at: replies[0]!.at });
+  assert.deepEqual(heard, [bobKey()]);
+  await session.disconnect();
+});
+
+test("a route written by hand goes to the radio and outlives the time limit on learned routes", async () => {
+  let now = 1_700_000_000_000;
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => now });
+  await session.connect(radio);
+  await session.setRoute(bobKey(), ["3f", "a1"]);
+  const frame = radio.sent.find((f) => f[0] === Cmd.AddUpdateContact)!;
+  assert.equal(frame[35], 2);
+  assert.deepEqual([...frame.subarray(36, 38)], [0x3f, 0xa1]);
+  assert.equal(session.getState().contacts[bobKey()]?.outPathLen, 2);
+  assert.ok(session.routeSetByHand(bobKey()));
+  now += 30 * 60_000;
+  session.setDefaultRouteReset(5);
+  await tick();
+  assert.ok(!radio.sent.some((f) => f[0] === Cmd.ResetPath));
+  await session.disconnect();
+});
+
+test("the radio's own receiver is read without going on the air", async () => {
+  const session = new MeshSession();
+  await session.connect(new ScriptedRadio());
+  const stats = await session.radioStats();
+  assert.equal(stats.noiseFloor, -115);
+  assert.equal(stats.lastSnr, 7);
+  assert.equal(stats.rxAirSecs, 3400);
   await session.disconnect();
 });

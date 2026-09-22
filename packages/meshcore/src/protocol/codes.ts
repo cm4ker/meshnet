@@ -190,6 +190,14 @@ export const StatsType = {
   Packets: 2,
 } as const;
 
+/** The upper four bits of a zero-hop control packet's first byte (`CTL_TYPE_*`). */
+export const ControlType = {
+  /** Who hears me: the low bit asks for key prefixes only. */
+  NodeDiscoverReq: 0x80,
+  /** The answer; the low four bits are the node's `AdvType`. */
+  NodeDiscoverResp: 0x90,
+} as const;
+
 export const TelemMode = {
   Deny: 0,
   AllowFlags: 1,

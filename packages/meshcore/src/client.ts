@@ -506,6 +506,11 @@ export class MeshCoreClient {
     return this.one("getAllowedRepeatFreq", cmd.getAllowedRepeatFreq(), "allowedRepeatFreq").then((f) => f.ranges);
   }
 
+  /** A zero-hop control packet (`nodeDiscoverRequest`); the answers come as `controlData` pushes. */
+  sendControlData(payload: Uint8Array): Promise<void> {
+    return this.ok("sendControlData", cmd.sendControlData(payload));
+  }
+
   sendRawData(path: Uint8Array, payload: Uint8Array): Promise<void> {
     return this.ok("sendRawData", cmd.sendRawData(path, payload));
   }

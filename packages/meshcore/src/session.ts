@@ -10,14 +10,15 @@
  */
 
 import { MeshCoreClient, MeshCoreError, TimeoutError, type TextSendResult } from "./client.js";
-import { bytesEqual, fromHex, toHex, unixNow } from "./protocol/bytes.js";
+import { bytesEqual, fromHex, pathByteLength, toHex, unixNow } from "./protocol/bytes.js";
 import { groupTextPayload, heardGroupTextPayload } from "./protocol/group.js";
 import { PayloadType, parseRawPacket, type RawPacket } from "./protocol/packet.js";
-import { AclRole, AdvType, ContactFlag, MAX_TEXT_LEN, PUB_KEY_PREFIX_SIZE, TxtType } from "./protocol/codes.js";
+import { AclRole, AdvType, ContactFlag, ControlType, MAX_TEXT_LEN, PUB_KEY_PREFIX_SIZE, StatsType, TxtType } from "./protocol/codes.js";
 import {
   accessListRequest,
   avgMinMaxRequest,
   neighboursRequest,
+  nodeDiscoverRequest,
   ownerInfoRequest,
   type OtherParams,
   type RadioParams,
@@ -126,6 +127,12 @@ export interface RoutePolicy {
   flood?: boolean;
   /** Minutes a learned route is kept before it is dropped; null keeps it. Absent follows `RoutingSettings.resetAfterMin`. */
   resetAfterMin?: number | null;
+  /**
+   * The route last written by hand, as `routeKey` gives it. While the radio
+   * still holds that route it is not dropped for its age; the radio replaces
+   * it as soon as it learns another.
+   */
+  manual?: string;
 }
 
 export interface RoutingSettings {
@@ -296,6 +303,58 @@ export interface SessionOptions {
   /** How long to wait for a remote node, from the radio's estimate; for tests. */
   replyWaitMs?: (estimateMs: number, extraMs: number) => number;
   trace?: ConstructorParameters<typeof MeshCoreClient>[1] extends infer O ? (O extends { trace?: infer T } ? T : never) : never;
+  /** How long to wait for a trace to come back, from the radio's estimate; for tests. */
+  traceWaitMs?: (estimateMs: number) => number;
+}
+
+/** One trace that came back. */
+export interface TraceResult {
+  /** From the radio saying it sent the trace to the trace coming back, ms. */
+  rttMs: number;
+  /** The SNR at each node along the path, out and back, then ours of the last hop, dB. */
+  snrs: number[];
+}
+
+/** A node in direct range that answered "who hears me". */
+export interface DiscoverReply {
+  /** Its whole key; only the hex it sent, when it sent a prefix. */
+  key: string;
+  /** Whether it is among the contacts. */
+  known: boolean;
+  /** Its `AdvType`. */
+  type: number;
+  /** How well it heard this radio, dB. */
+  heardUs: number;
+  /** How well this radio heard its answer, dB. */
+  heardThem: number;
+  rssi: number;
+  /** Local clock, ms. */
+  at: number;
+}
+
+/** What the radio says about its own receiver. */
+export interface RadioStats {
+  /** dBm. */
+  noiseFloor: number;
+  lastRssi: number;
+  lastSnr: number;
+  /** Seconds on the air since it booted, sending and receiving. */
+  txAirSecs: number;
+  rxAirSecs: number;
+  /** Local clock, ms. */
+  at: number;
+}
+
+/** A packet the radio received, whoever it was for. */
+export interface HeardPacket {
+  /** Local clock, ms. */
+  at: number;
+  snr: number;
+  rssi: number;
+  /** The whole packet as it was on the air, bytes. */
+  size: number;
+  /** Null when the bytes are not a packet. */
+  packet: RawPacket | null;
 }
 
 export function contactConversation(key: string): string {
@@ -326,6 +385,42 @@ export function isFavourite(contact: ContactRecord): boolean {
 
 export function contactHops(contact: ContactRecord): number | null {
   return contact.outPathLen === 0xff ? null : contact.outPathLen & 63;
+}
+
+/** The hashes of a path as the firmware writes one: the low six bits of `pathLen` count them, the top two size them. */
+export function pathHashes(pathLen: number, path: Uint8Array | string): string[] {
+  const hex = typeof path === "string" ? path : toHex(path);
+  const size = ((pathLen >> 6) + 1) * 2;
+  const hashes: string[] = [];
+  for (let i = 0; i < (pathLen & 63); i++) hashes.push(hex.slice(i * size, (i + 1) * size));
+  return hashes;
+}
+
+/** A route as one string, so two can be compared: its length byte and the hashes it holds. */
+export function routeKey(outPathLen: number, outPath: string): string {
+  return outPathLen === 0xff ? "none" : `${outPathLen}:${outPath.slice(0, pathByteLength(outPathLen) * 2)}`;
+}
+
+/**
+ * A trace that went out through `relays` nodes and came back the same way,
+ * leg by leg from this radio outwards: the SNR at the far end of each leg
+ * going out, and at the near end coming back.
+ */
+export function traceLegs(snrs: number[], relays: number): [out: number, back: number][] {
+  const legs: [number, number][] = [];
+  for (let j = 0; j < relays; j++) {
+    const out = snrs[j];
+    const back = snrs[2 * relays - 1 - j];
+    if (out === undefined || back === undefined) break;
+    legs.push([out, back]);
+  }
+  return legs;
+}
+
+function randomU32(): number {
+  const c = globalThis.crypto;
+  if (c && typeof c.getRandomValues === "function") return c.getRandomValues(new Uint32Array(1))[0]!;
+  return Math.floor(Math.random() * 0x1_0000_0000) >>> 0;
 }
 
 /** The relays of the route the radio holds for a contact, as hex hashes, first relay first; null with none. */
@@ -575,12 +670,18 @@ export class MeshSession {
   private jobCounter = 0;
   /** The next console tag; two hex digits, so the node's `XX|` rule holds. */
   private cliTag = Math.floor(Math.random() * 256);
+  /** Traces on the air, by tag, each waiting for its way back. */
+  private traceWaiters = new Map<number, (frame: Extract<PushFrame, { kind: "traceData" }>) => void>();
+  private controlListeners = new Set<(frame: Extract<PushFrame, { kind: "controlData" }>) => void>();
+  private heardListeners = new Set<(packet: HeardPacket) => void>();
+  private readonly traceWait: (estimateMs: number) => number;
 
   constructor(options: SessionOptions = {}) {
     this.appName = options.appName ?? "Meshnet";
     this.storage = options.storage ?? null;
     this.now = options.now ?? (() => Date.now());
     this.replyWait = options.replyWaitMs ?? replyWaitMs;
+    this.traceWait = options.traceWaitMs ?? ((estimate) => Math.min(30_000, Math.max(2_500, estimate * 1.2 + 500)));
     this.trace = options.trace;
   }
 
@@ -604,6 +705,12 @@ export class MeshSession {
   onDiscovered(listener: (contact: ContactRecord) => void): () => void {
     this.discoveredListeners.add(listener);
     return () => this.discoveredListeners.delete(listener);
+  }
+
+  /** Every packet the radio receives, as it hands them up; kept out of the state, which would change with each. */
+  onHeard(listener: (packet: HeardPacket) => void): () => void {
+    this.heardListeners.add(listener);
+    return () => this.heardListeners.delete(listener);
   }
 
   private set(patch: Partial<SessionState>): void {
@@ -967,18 +1074,46 @@ export class MeshSession {
     void this.sweepRoutes();
   }
 
-  private setPolicy(key: string, patch: { flood?: boolean; resetAfterMin?: number | null | undefined }): void {
+  private setPolicy(key: string, patch: { flood?: boolean; resetAfterMin?: number | null | undefined; manual?: string | undefined }): void {
     const current = this.state.routing.contacts[key] ?? {};
     const flood = "flood" in patch ? patch.flood : current.flood;
     const resetAfterMin = "resetAfterMin" in patch ? patch.resetAfterMin : current.resetAfterMin;
+    const manual = "manual" in patch ? patch.manual : current.manual;
     // What follows the default is stored as absence.
     const policy: RoutePolicy = {};
     if (flood) policy.flood = true;
     if (resetAfterMin !== undefined) policy.resetAfterMin = resetAfterMin;
+    if (manual !== undefined) policy.manual = manual;
     const contacts = { ...this.state.routing.contacts };
     if (Object.keys(policy).length === 0) delete contacts[key];
     else contacts[key] = policy;
     this.set({ routing: { ...this.state.routing, contacts } });
+  }
+
+  /**
+   * Writes the route to a contact by hand: the relays in order, as hex hashes
+   * of one size, none for a neighbour heard direct. It unpins a flood, and is
+   * kept past the time limit until the radio learns a route of its own.
+   */
+  async setRoute(key: string, hashes: string[]): Promise<void> {
+    const contact = this.needContact(key);
+    const size = hashes[0] ? hashes[0].length / 2 : (this.state.device?.pathHashMode ?? 0) + 1;
+    if (!Number.isInteger(size) || size < 1 || size > 4 || hashes.some((h) => h.length !== size * 2 || !/^[0-9a-f]+$/.test(h)) || hashes.length > 63 || hashes.length * size > 64) {
+      throw new Error("not a route the radio can hold");
+    }
+    const outPathLen = hashes.length | ((size - 1) << 6);
+    // Kept at the radio's full width, as it hands contacts back.
+    const outPath = hashes.join("").padEnd(128, "0");
+    await this.writeContact({ ...contact, outPathLen, outPath, pathSince: this.now() });
+    this.setPolicy(key, { flood: false, manual: routeKey(outPathLen, outPath) });
+    this.log("path", `${contact.name || key.slice(0, 12)}: route set by hand, ${hashes.length ? hashes.join(" ") : "direct"}`);
+  }
+
+  /** Whether the route the radio holds for this contact is the one last written by hand. */
+  routeSetByHand(key: string): boolean {
+    const contact = this.state.contacts[key];
+    const manual = this.state.routing.contacts[key]?.manual;
+    return !!contact && !!manual && contact.outPathLen !== 0xff && manual === routeKey(contact.outPathLen, contact.outPath);
   }
 
   /** Why the route to this contact should go now, or null if it may stay. */
@@ -986,6 +1121,7 @@ export class MeshSession {
     if (contact.outPathLen === 0xff || !isConversationType(contact.type)) return null;
     const { flood, resetAfterMin } = this.routePolicy(contact.key);
     if (flood) return "flood pinned";
+    if (this.routeSetByHand(contact.key)) return null;
     if (resetAfterMin === null || contact.pathSince === null) return null;
     return this.now() - contact.pathSince >= resetAfterMin * 60_000 ? `older than ${resetAfterMin} min` : null;
   }
@@ -1560,6 +1696,115 @@ export class MeshSession {
     await this.need().factoryReset();
   }
 
+  // ---- diagnostics ----
+  //
+  // A trace goes out along a path of hashes, each repeater on it adding how
+  // well it heard the one before, and the radio hands it up when it gets back.
+  // It takes no place in the queue for remote nodes below: the radio keeps no
+  // pending request for it, only its tag. Nothing here goes out unless asked.
+
+  /**
+   * What a trace to this contact goes along: the relays of its route, and the
+   * contact itself when it relays too. A repeater nobody has written to has
+   * no route, but its adverts came in along one. Null when neither is known.
+   */
+  async pingPath(key: string): Promise<{ relays: string[]; target: string | null } | null> {
+    const contact = this.needContact(key);
+    let relays = contactRoute(contact);
+    if (relays === null && contact.type === AdvType.Repeater && this.isReady) {
+      try {
+        const advert = await this.need().getAdvertPath(fromHex(key));
+        relays = pathHashes(advert.pathLen, advert.path).reverse();
+      } catch {
+        relays = null;
+      }
+    }
+    if (relays === null) return null;
+    const size = relays[0] ? relays[0].length / 2 : (this.state.device?.pathHashMode ?? 0) + 1;
+    return { relays, target: contact.type === AdvType.Repeater ? key.slice(0, size * 2) : null };
+  }
+
+  /**
+   * One trace out along `hashes` and back the same way. Resolves with how it
+   * came back, or null when it did not within the time the radio estimated.
+   */
+  async traceRoute(hashes: string[]): Promise<TraceResult | null> {
+    if (hashes.length === 0) throw new Error("nothing to trace");
+    const client = this.need();
+    // A trace sizes its hashes in powers of two; a three-byte route is traced on two.
+    const shortest = Math.min(...hashes.map((h) => h.length / 2));
+    const size = shortest >= 4 ? 4 : shortest >= 2 ? 2 : 1;
+    const path = [...hashes, ...hashes.slice(0, -1).reverse()].map((h) => h.slice(0, size * 2));
+    const tag = randomU32();
+    let arrive: (frame: Extract<PushFrame, { kind: "traceData" }>) => void = () => undefined;
+    const back = new Promise<Extract<PushFrame, { kind: "traceData" }>>((resolve) => (arrive = resolve));
+    this.traceWaiters.set(tag, (frame) => arrive(frame));
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      const sent = await client.sendTracePath(tag, 0, Math.log2(size), fromHex(path.join("")));
+      const started = this.now();
+      const wait = this.traceWait(sent.estTimeoutMs);
+      const frame = await Promise.race([back, new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), wait)))]);
+      if (!frame) {
+        this.log("trace", `${path.join(" ")}: no answer in ${(wait / 1000).toFixed(1)} s`);
+        return null;
+      }
+      const rttMs = Math.max(0, this.now() - started);
+      this.log("trace", `${path.join(" ")}: back in ${rttMs} ms, snr ${frame.snrs.map((x) => x.toFixed(2)).join(" / ")}`);
+      return { rttMs, snrs: frame.snrs };
+    } finally {
+      if (timer) clearTimeout(timer);
+      this.traceWaiters.delete(tag);
+    }
+  }
+
+  /**
+   * Asks the repeaters in direct range how well they hear this radio, and
+   * listens for `listenMs`. Each answers after a random pause, and no more
+   * than four times in two minutes; `onReply` hears each answer as it comes.
+   */
+  async discoverRepeaters(listenMs = 10_000, onReply?: (reply: DiscoverReply) => void): Promise<DiscoverReply[]> {
+    const client = this.need();
+    const tag = randomU32();
+    const replies = new Map<string, DiscoverReply>();
+    const listener = (frame: Extract<PushFrame, { kind: "controlData" }>) => {
+      const p = frame.payload;
+      if (p.length < 14 || (p[0]! & 0xf0) !== ControlType.NodeDiscoverResp) return;
+      if ((p[2]! | (p[3]! << 8) | (p[4]! << 16) | (p[5]! << 24)) >>> 0 !== tag) return;
+      const hex = toHex(p.subarray(6));
+      const contact = Object.values(this.state.contacts).find((c) => c.key.startsWith(hex)) ?? null;
+      const reply: DiscoverReply = {
+        key: contact?.key ?? hex,
+        known: contact !== null,
+        type: p[0]! & 0x0f,
+        heardUs: ((p[1]! << 24) >> 24) / 4,
+        heardThem: frame.snr,
+        rssi: frame.rssi,
+        at: this.now(),
+      };
+      replies.set(reply.key, reply);
+      onReply?.(reply);
+    };
+    this.controlListeners.add(listener);
+    try {
+      await client.sendControlData(nodeDiscoverRequest(tag, 1 << AdvType.Repeater));
+      this.log("discover", "asked who hears this radio");
+      await new Promise((resolve) => setTimeout(resolve, listenMs));
+    } finally {
+      this.controlListeners.delete(listener);
+    }
+    this.log("discover", `${replies.size} repeater(s) answered`);
+    return [...replies.values()];
+  }
+
+  /** The radio's own receiver: its noise floor, and how long it has been on the air. Asked of the radio, not of the air. */
+  async radioStats(): Promise<RadioStats> {
+    const frame = await this.need().getStats(StatsType.Radio);
+    if (frame.kind !== "statsRadio") throw new Error(`radio stats: the radio answered ${frame.kind}`);
+    const { noiseFloor, lastRssi, lastSnr, txAirSecs, rxAirSecs } = frame;
+    return { noiseFloor, lastRssi, lastSnr, txAirSecs, rxAirSecs, at: this.now() };
+  }
+
   // ---- repeaters, rooms and sensors ----
   //
   // The radio keeps one request to a remote node pending at a time: each new
@@ -2060,9 +2305,12 @@ export class MeshSession {
         this.remoteEvent({ kind: "path", prefix });
         return;
       }
-      case "traceData":
-        this.log("trace", `tag ${frame.tag.toString(16)}: ${toHex(frame.hashes)} snr ${frame.snrs.map((s) => s.toFixed(1)).join("/")}`);
+      case "traceData": {
+        const waiter = this.traceWaiters.get(frame.tag);
+        if (waiter) waiter(frame);
+        else this.log("trace", `tag ${frame.tag.toString(16)}: ${toHex(frame.hashes)} snr ${frame.snrs.map((s) => s.toFixed(1)).join("/")}`);
         return;
+      }
       case "binaryResponse":
         this.log("binary", `tag ${frame.tag.toString(16)}: ${frame.data.length} byte(s)`);
         this.remoteEvent({ kind: "binary", tag: frame.tag, data: frame.data });
@@ -2070,12 +2318,23 @@ export class MeshSession {
       case "rawData":
         this.log("raw", `snr ${frame.snr} rssi ${frame.rssi}: ${toHex(frame.payload)}`);
         return;
-      case "logRxData":
+      case "logRxData": {
         this.log("rx", `snr ${frame.snr} rssi ${frame.rssi}: ${toHex(frame.raw)}`);
         this.noteHeard(frame.snr, frame.raw);
+        if (this.heardListeners.size === 0) return;
+        const heard: HeardPacket = { at: this.now(), snr: frame.snr, rssi: frame.rssi, size: frame.raw.length, packet: parseRawPacket(frame.raw) };
+        for (const listener of this.heardListeners) {
+          try {
+            listener(heard);
+          } catch (error) {
+            console.error("heard listener threw", error);
+          }
+        }
         return;
+      }
       case "controlData":
         this.log("control", `snr ${frame.snr} rssi ${frame.rssi}: ${toHex(frame.payload)}`);
+        for (const listener of this.controlListeners) listener(frame);
         return;
     }
   }
