@@ -637,6 +637,7 @@ export class MeshSession {
   private state: SessionState = EMPTY;
   private listeners = new Set<() => void>();
   private discoveredListeners = new Set<(contact: ContactRecord) => void>();
+  private receivedListeners = new Set<(message: MessageRecord) => void>();
   private client: MeshCoreClient | null = null;
   private readonly appName: string;
   private readonly storage: SessionStorage | null;
@@ -705,6 +706,16 @@ export class MeshSession {
   onDiscovered(listener: (contact: ContactRecord) => void): () => void {
     this.discoveredListeners.add(listener);
     return () => this.discoveredListeners.delete(listener);
+  }
+
+  /**
+   * A message the radio has just handed over from its queue, once it is in
+   * the state. The history read back from the storage at connect was handed
+   * over on an earlier run and says nothing.
+   */
+  onReceived(listener: (message: MessageRecord) => void): () => void {
+    this.receivedListeners.add(listener);
+    return () => this.receivedListeners.delete(listener);
   }
 
   /** Every packet the radio receives, as it hands them up; kept out of the state, which would change with each. */
@@ -1329,6 +1340,13 @@ export class MeshSession {
         ? this.state.unread
         : { ...this.state.unread, [message.conversation]: (this.state.unread[message.conversation] ?? 0) + 1 };
     this.set({ messages: [...this.state.messages, message], unread });
+    for (const listener of this.receivedListeners) {
+      try {
+        listener(message);
+      } catch (error) {
+        console.error("received listener threw", error);
+      }
+    }
     if (frame.kind === "channelMessage") {
       void this.findChannelCopies(message.id, frame.channelIndex, frame.timestamp, frame.txtType, frame.text);
     } else if (frame.pathLen !== null && message.senderPrefix) {

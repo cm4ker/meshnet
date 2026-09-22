@@ -321,6 +321,24 @@ test("a message-waiting push drains the queue again, and a focused conversation 
   assert.deepEqual(state.unread, {});
 });
 
+test("only messages handed over by the radio are received; the history read back at connect is not", async () => {
+  const storage = new MemoryStorage();
+  const radio = new ScriptedRadio();
+  radio.queue.push(dmFrame(BOB, "old news"));
+  const first = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  await first.connect(radio);
+  await first.disconnect();
+
+  const again = new ScriptedRadio();
+  again.queue.push(channelFrame(0, "Alice: fresh"));
+  const second = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  const received: { text: string; unread: number }[] = [];
+  second.onReceived((m) => received.push({ text: m.text, unread: second.getState().unread[m.conversation] ?? 0 }));
+  await second.connect(again);
+  assert.deepEqual(second.getState().messages.map((m) => m.text), ["old news", "fresh"]);
+  assert.deepEqual(received, [{ text: "fresh", unread: 1 }]);
+});
+
 test("a direct message is sent, then delivered when its ack arrives", async () => {
   const radio = new ScriptedRadio();
   const session = new MeshSession({ now: () => 1_700_000_000_000 });
