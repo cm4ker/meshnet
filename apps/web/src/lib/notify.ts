@@ -51,6 +51,8 @@ interface MeshWatchPlugin {
   configure(options: { messages: boolean; nodes: boolean }): Promise<void>;
   /** The page has announced this tag itself, so the watch withdraws its own notice for it. */
   announced(options: { tag: string }): Promise<void>;
+  /** The radio the page is connected to, by the BLE plugin's device id; none without one. */
+  follow(options: { deviceId?: string }): Promise<void>;
 }
 
 let watch: MeshWatchPlugin | null = null;
@@ -73,6 +75,28 @@ export async function tellWatch(): Promise<void> {
   } catch (error) {
     console.warn("Could not configure iOS background notifications", error);
   }
+}
+
+let followed: string | null = null;
+
+/**
+ * Points the watch at the radio the page has just connected to, or at none.
+ * The watch listens to that one only: the phone may hold links to other
+ * radios, and subscribing to one it is not paired with makes iOS ask for
+ * that radio's PIN.
+ */
+export async function watchRadio(deviceId: string | null): Promise<void> {
+  followed = deviceId;
+  try {
+    await withWatch((w) => w.follow(deviceId ? { deviceId } : {}));
+  } catch (error) {
+    console.warn("Could not point iOS background notifications at the radio", error);
+  }
+}
+
+/** The page let go of this radio: so does the watch, unless it already follows another. */
+export async function unwatchRadio(deviceId: string): Promise<void> {
+  if (followed === deviceId) await watchRadio(null);
 }
 
 type LocalNotificationsModule = typeof import("@capacitor/local-notifications");

@@ -7,6 +7,7 @@
 
 import { useSyncExternalStore } from "react";
 import { session } from "./session.js";
+import type { Transport } from "@meshnet/meshcore";
 import { autoConnectWanted, connectorById, lastLink, rememberLink, type Connector, type FoundDevice } from "../transports/index.js";
 
 export interface LinkState {
@@ -21,6 +22,8 @@ let state: LinkState = { phase: "idle", error: null, retrying: false, attempt: 0
 const listeners = new Set<() => void>();
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let wantedLink: { connector: Connector; device: FoundDevice | null } | null = null;
+/** Bumped by every connect and disconnect: an attempt from before it is no longer wanted. */
+let generation = 0;
 
 function set(patch: Partial<LinkState>): void {
   state = { ...state, ...patch };
@@ -60,16 +63,40 @@ function withTimeout<T>(promise: Promise<T>, what: string): Promise<T> {
   });
 }
 
+/**
+ * Opens a link for attempt `gen`. A link that opens after its wait was given
+ * up, or after another radio was picked, is closed rather than left holding
+ * a radio nobody reads (and, on a phone, reconnected to at the next drop).
+ */
+async function open(connector: Connector, device: FoundDevice | null, gen: number): Promise<Transport | null> {
+  const opening = connector.connect(device);
+  let transport: Transport;
+  try {
+    transport = await withTimeout(opening, device ? device.name : connector.title);
+  } catch (error) {
+    void opening.then((late) => late.close(), () => undefined);
+    throw error;
+  }
+  if (gen === generation) return transport;
+  await transport.close().catch(() => undefined);
+  return null;
+}
+
 export async function connectWith(connector: Connector, device: FoundDevice | null): Promise<void> {
   cancelRetry();
+  const gen = ++generation;
   wantedLink = { connector, device };
   set({ phase: "connecting", error: null });
   try {
-    const transport = await withTimeout(connector.connect(device), device ? `${device.name}` : connector.title);
+    const transport = await open(connector, device, gen);
+    if (!transport) return;
     await session.connect(transport);
+    if (gen !== generation) return;
     rememberLink({ connectorId: connector.id, device: device ?? { id: "", name: transport.label, detail: null, rssi: null } });
     set({ phase: "connected", error: null, retrying: false, attempt: 0 });
   } catch (error) {
+    // Given up for another radio or a disconnect: its failure is no news.
+    if (gen !== generation) return;
     const message = error instanceof Error ? error.message : String(error);
     set({ phase: "failed", error: message });
     throw error;
@@ -78,6 +105,7 @@ export async function connectWith(connector: Connector, device: FoundDevice | nu
 
 export async function disconnect(): Promise<void> {
   cancelRetry();
+  generation++;
   wantedLink = null;
   await session.disconnect();
   set({ phase: "idle", error: null, retrying: false, attempt: 0 });
@@ -126,16 +154,20 @@ function scheduleRetry(): void {
     return;
   }
   const delay = Math.min(30_000, 1000 * 2 ** (attempt - 1));
+  const gen = generation;
   set({ phase: "connecting", retrying: true, attempt, error: null });
   retryTimer = setTimeout(async () => {
     retryTimer = null;
     const link = wantedLink;
-    if (!link) return;
+    if (!link || gen !== generation) return;
     try {
-      const transport = await withTimeout(link.connector.connect(link.device), link.device?.name ?? link.connector.title);
+      const transport = await open(link.connector, link.device, gen);
+      if (!transport) return;
       await session.connect(transport);
+      if (gen !== generation) return;
       set({ phase: "connected", retrying: false, attempt: 0, error: null });
     } catch (error) {
+      if (gen !== generation) return;
       set({ error: error instanceof Error ? error.message : String(error) });
       scheduleRetry();
     }

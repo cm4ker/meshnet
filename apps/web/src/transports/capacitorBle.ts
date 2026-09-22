@@ -6,6 +6,7 @@
 
 import { BaseTransport, BLE } from "@meshnet/meshcore";
 import type { Connector, FoundDevice } from "./types.js";
+import { unwatchRadio, watchRadio } from "../lib/notify.js";
 import { nativePlatform } from "../lib/platform.js";
 import { readSetting, writeSetting } from "../lib/storage.js";
 
@@ -53,6 +54,7 @@ class CapacitorBleTransport extends BaseTransport {
   }
 
   protected async shutdown(): Promise<void> {
+    void unwatchRadio(this.deviceId);
     try {
       await this.client.stopNotifications(this.deviceId, BLE.service, BLE.tx);
     } catch {
@@ -136,8 +138,16 @@ export const capacitorBleConnector: Connector = {
     let transport: CapacitorBleTransport | null = null;
     await client.connect(device.id, () => transport?.onDropped());
     transport = new CapacitorBleTransport(client, device.id, device.name);
-    await client.startNotifications(device.id, BLE.service, BLE.tx, (value) => transport?.receive(value));
+    try {
+      await client.startNotifications(device.id, BLE.service, BLE.tx, (value) => transport?.receive(value));
+    } catch (error) {
+      // A radio left connected after a failed attempt (a PIN prompt turned
+      // down or left to time out) stays taken, and its prompt can come back.
+      await client.disconnect(device.id).catch(() => undefined);
+      throw error;
+    }
     remember(device);
+    void watchRadio(device.id);
     return transport;
   },
 };

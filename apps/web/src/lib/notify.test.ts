@@ -2,7 +2,7 @@ import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { Capacitor } from "@capacitor/core";
 import type { ScheduleOptions } from "@capacitor/local-notifications";
-import { askPermissionOnce, noticeId, notify, pageOnScreen, tellWatch, withdraw } from "./notify.js";
+import { askPermissionOnce, noticeId, notify, pageOnScreen, tellWatch, unwatchRadio, watchRadio, withdraw } from "./notify.js";
 
 const calls: { plugin: string; method: string; options: unknown }[] = [];
 let platform = "ios";
@@ -17,7 +17,7 @@ Object.assign(Capacitor, {
   getPlatform: () => platform,
   PluginHeaders: [
     { name: "LocalNotifications", methods: ["schedule", "checkPermissions", "requestPermissions", "removeDeliveredNotificationsById"].map((name) => ({ name, rtype: "promise" })) },
-    { name: "MeshWatch", methods: ["configure", "announced"].map((name) => ({ name, rtype: "promise" })) },
+    { name: "MeshWatch", methods: ["configure", "announced", "follow"].map((name) => ({ name, rtype: "promise" })) },
   ],
   nativePromise: async (plugin: string, method: string, options: unknown) => {
     calls.push({ plugin, method, options });
@@ -100,6 +100,19 @@ test("the native watch receives notification preferences without treating its pr
   await tellWatch();
   assert.deepEqual(calls, [
     { plugin: "MeshWatch", method: "configure", options: { messages: true, nodes: true } },
+  ]);
+});
+
+test("the native watch follows the radio the page connected to, and a radio let go only while it is the one followed", async () => {
+  await watchRadio("A");
+  await watchRadio("B");
+  // The old radio's link closes after the new one opened.
+  await unwatchRadio("A");
+  await unwatchRadio("B");
+  assert.deepEqual(calls, [
+    { plugin: "MeshWatch", method: "follow", options: { deviceId: "A" } },
+    { plugin: "MeshWatch", method: "follow", options: { deviceId: "B" } },
+    { plugin: "MeshWatch", method: "follow", options: {} },
   ]);
 });
 

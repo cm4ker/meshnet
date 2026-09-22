@@ -21,8 +21,9 @@ import UserNotifications
 ///   name taken from the contact record the push carries.
 ///
 /// It is a second central manager on the connection the BLE plugin already
-/// holds: it only subscribes to the radio's TX characteristic and never
-/// writes, so the page's own traffic is untouched. Its notices are sent only
+/// holds, to the radio the page names (`follow`): it only subscribes to the
+/// radio's TX characteristic and never writes, so the page's own traffic is
+/// untouched. Its notices are sent only
 /// while the app is in the background; in front, the page does its own.
 ///
 /// The page is often still awake for a while in the background, and then it
@@ -43,6 +44,11 @@ final class MeshWatch: NSObject {
 
     private var central: CBCentralManager?
     private var peripheral: CBPeripheral?
+    /// The radio the page is connected to, by the id the BLE plugin knows it
+    /// by. Only that one is watched: the phone may hold links to other radios
+    /// with the same service (another app's, one the page gave up on), and
+    /// subscribing to one it is not paired with makes iOS ask for its PIN.
+    private var followed: UUID?
     private var inBackground = false
     private var waiting = 0
     /// Nodes the page has announced, by notice id: the page can be quicker
@@ -84,6 +90,23 @@ final class MeshWatch: NSObject {
         }
     }
 
+    /// The page connected to this radio, or let go of its radio (`nil`).
+    func follow(_ id: UUID?) {
+        guard id != followed else { return }
+        followed = id
+        release()
+        if inBackground { attach() }
+    }
+
+    /// Drops the watch's own hold on the link. A hold the page no longer has
+    /// would keep that radio connected, and a connect request is never given
+    /// up: iOS would connect again whenever the radio came back.
+    private func release() {
+        guard let peripheral else { return }
+        self.peripheral = nil
+        central?.cancelPeripheralConnection(peripheral)
+    }
+
     /// The page announced something itself (its tag: `c:<conversation>` or
     /// `n:<key hex>`), so the watch's notice for it is withdrawn, shown or not.
     func announced(tag: String) {
@@ -109,9 +132,12 @@ final class MeshWatch: NSObject {
 
     /// Finds the radio the plugin is connected to and subscribes alongside it.
     private func attach() {
-        guard let central, central.state == .poweredOn else { return }
+        guard let central, central.state == .poweredOn, let followed else { return }
         if let peripheral, peripheral.state == .connected { return }
-        guard let radio = central.retrieveConnectedPeripherals(withServices: [MeshWatch.service]).first else { return }
+        // Only while the plugin holds the link: a connect to a radio that is
+        // not connected would wait for it for as long as the app runs.
+        let connected = central.retrieveConnectedPeripherals(withServices: [MeshWatch.service])
+        guard let radio = connected.first(where: { $0.identifier == followed }) else { return }
         peripheral = radio
         radio.delegate = self
         // Each central manager connects on its own terms; to one the system
@@ -190,8 +216,9 @@ extension MeshWatch: CBPeripheralDelegate {
 }
 
 /// The page's way to tell the watch which notices the reader wants,
-/// `configure({ messages, nodes })`, and which it has just announced itself,
-/// `announced({ tag })`.
+/// `configure({ messages, nodes })`, which it has just announced itself,
+/// `announced({ tag })`, and which radio it is connected to,
+/// `follow({ deviceId })` (none without one).
 @objc(MeshWatchPlugin)
 final class MeshWatchPlugin: CAPPlugin, CAPBridgedPlugin {
     let identifier = "MeshWatchPlugin"
@@ -199,6 +226,7 @@ final class MeshWatchPlugin: CAPPlugin, CAPBridgedPlugin {
     let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "configure", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "announced", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "follow", returnType: CAPPluginReturnPromise),
     ]
 
     @objc func configure(_ call: CAPPluginCall) {
@@ -211,6 +239,14 @@ final class MeshWatchPlugin: CAPPlugin, CAPBridgedPlugin {
         // The watch's state belongs to the main queue, where its central manager delivers.
         DispatchQueue.main.async {
             MeshWatch.shared.announced(tag: tag)
+            call.resolve()
+        }
+    }
+
+    @objc func follow(_ call: CAPPluginCall) {
+        let id = call.getString("deviceId").flatMap { UUID(uuidString: $0) }
+        DispatchQueue.main.async {
+            MeshWatch.shared.follow(id)
             call.resolve()
         }
     }
