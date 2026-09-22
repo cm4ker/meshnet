@@ -1,6 +1,8 @@
 package dev.cm4ker.meshnet;
 
 import android.os.Bundle;
+import android.view.Display;
+import android.view.WindowManager;
 import android.webkit.WebView;
 import androidx.activity.OnBackPressedCallback;
 import com.getcapacitor.BridgeActivity;
@@ -17,6 +19,8 @@ public class MainActivity extends BridgeActivity {
         // it as well would apply the setting twice.
         WebView view = getBridge() != null ? getBridge().getWebView() : null;
         if (view != null) view.getSettings().setTextZoom(100);
+
+        preferFastestRefresh();
 
         // Back is the page's to take (back.ts): it closes a sheet or a dialog, then a screen, then
         // returns to Chats. Only when it has no step left does Back leave the app, as Android's own
@@ -41,6 +45,27 @@ public class MainActivity extends BridgeActivity {
                 setEnabled(true);
             }
         });
+    }
+
+    /**
+     * Asks for the panel's fastest mode at the current resolution. Some vendors (ColorOS, for one)
+     * hold an app they do not know at 60 Hz on a 120 Hz screen, and every scroll and sheet then
+     * moves at half the rate the rest of the phone does.
+     */
+    private void preferFastestRefresh() {
+        Display display = getWindowManager().getDefaultDisplay();
+        Display.Mode current = display.getMode();
+        Display.Mode best = current;
+        for (Display.Mode mode : display.getSupportedModes()) {
+            if (mode.getPhysicalWidth() == current.getPhysicalWidth()
+                    && mode.getPhysicalHeight() == current.getPhysicalHeight()
+                    && mode.getRefreshRate() > best.getRefreshRate()) {
+                best = mode;
+            }
+        }
+        WindowManager.LayoutParams params = getWindow().getAttributes();
+        params.preferredDisplayModeId = best.getModeId();
+        getWindow().setAttributes(params);
     }
 
     /** True when the page took the step; false, or anything else, lets the app go. */
