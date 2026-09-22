@@ -185,6 +185,9 @@ export async function notify(title: string, body: string, tag: string): Promise<
           // Without a sound iOS delivers silently. A missing named sound
           // uses the system default; Android already supplies its own.
           ...(nativePlatform() === "ios" ? { sound: "default", foreground: true } : {}),
+          // The notice is shown now, not at a time. Left exact, the plugin opens Android's
+          // "Alarms & reminders" settings over the app for every notice until that is granted.
+          isExactNotification: false,
         }] });
       } catch (error) {
         // Nothing shown, so the watch's stand-in, if any, is left to show.
