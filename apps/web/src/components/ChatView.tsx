@@ -39,6 +39,16 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
     const el = scroller.current;
     if (el && stuck.current) el.scrollTop = el.scrollHeight;
   }, [messages.length, conversation]);
+  // The keyboard coming up shrinks the list from below; the last message stays in sight.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const keep = new ResizeObserver(() => {
+      if (stuck.current) el.scrollTop = el.scrollHeight;
+    });
+    keep.observe(el);
+    return () => keep.disconnect();
+  }, []);
 
   useReveal(scroller, inner, (id) => {
     const message = messages.find((m) => m.id === id);

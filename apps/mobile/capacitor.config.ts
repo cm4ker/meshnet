@@ -24,6 +24,13 @@ const config: CapacitorConfig = {
     allowMixedContent: false,
   },
   plugins: {
+    // iOS leaves the page its full height under the keyboard and scrolls all of it up, header and
+    // all, to show the field. Shrinking the web view instead keeps the header where it is and lays
+    // the conversation out above the keyboard, as Android's adjustResize does.
+    Keyboard: {
+      resize: "native",
+      resizeOnFullScreen: true,
+    },
     BluetoothLe: {
       displayStrings: {
         scanning: "Looking for radios",
