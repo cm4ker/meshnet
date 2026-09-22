@@ -163,11 +163,16 @@ export interface MapProps {
   filter: (contact: ContactRecord) => boolean;
   /** Pixels at the bottom covered by a sheet, so nothing is fitted under it. */
   coverBottom?: number | undefined;
+  /** Pixels at the top under a phone's notch or status bar. */
+  coverTop?: number | undefined;
   /** A phone zooms with two fingers; a desktop has buttons too. */
   zoomButtons?: boolean | undefined;
 }
 
-export default function MapView({ selected, onSelect, onGroup, filter, coverBottom = 0, zoomButtons = false }: MapProps) {
+/** Where the map was left, so coming back to it, from a profile or another section, finds it there. */
+let lastView: { center: L.LatLng; zoom: number } | null = null;
+
+export default function MapView({ selected, onSelect, onGroup, filter, coverBottom = 0, coverTop = 0, zoomButtons = false }: MapProps) {
   const state = useSession();
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
@@ -186,7 +191,18 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
   const selfLon = selfLat !== null ? state.self!.lon : null;
   const self = useMemo(() => (selfLat !== null && selfLon !== null ? { lat: selfLat, lon: selfLon } : null), [selfLat, selfLon]);
   const selfName = state.self?.name ?? "This radio";
-  const padding = useMemo<L.FitBoundsOptions>(() => ({ paddingTopLeft: [40, 56], paddingBottomRight: [64, 40 + coverBottom] }), [coverBottom]);
+  // Read when the map moves rather than when it renders: the sheet over it moves often and should not redraw it.
+  const cover = useRef({ top: coverTop, bottom: coverBottom });
+  cover.current = { top: coverTop, bottom: coverBottom };
+  /** A fit keeps clear of the controls, the attribution, and what lies over the map. */
+  const padding = (): L.FitBoundsOptions => ({ paddingTopLeft: [40, 56 + cover.current.top], paddingBottomRight: [64, 40 + cover.current.bottom] });
+  /** A point in the middle of what is left uncovered, not of the whole map. */
+  const centerOn = (at: L.LatLngExpression, zoom: number) => {
+    const m = map.current;
+    if (!m) return;
+    const { top, bottom } = cover.current;
+    m.setView(m.unproject(m.project(at, zoom).add([0, (bottom - top) / 2]), zoom), zoom);
+  };
 
   const placed = useMemo(() => Object.values(contacts).filter((c) => hasPosition(c.lat, c.lon)).sort((a, b) => (a.key < b.key ? -1 : 1)), [contacts]);
   const shown = useMemo(() => placed.filter(filter), [placed, filter]);
@@ -200,9 +216,19 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
     const tiles = new CachedTileLayer(TILE_URL, { maxZoom: 19, attribution: TILE_ATTRIBUTION }).addTo(m);
     routeLayer.current = L.layerGroup().addTo(m);
     nodesLayer.current = L.layerGroup().addTo(m);
-    m.setView([20, 0], 2);
+    if (lastView) {
+      m.setView(lastView.center, lastView.zoom, { animate: false });
+      fitted.current = true;
+      setZoom(lastView.zoom);
+    } else {
+      m.setView([20, 0], 2);
+    }
     m.on("click", () => calls.current.onSelect(null));
     m.on("zoomend", () => setZoom(m.getZoom()));
+    // Not while hidden under a profile: a map with no size has no middle to remember.
+    m.on("moveend", () => {
+      if (m.getSize().y > 0) lastView = { center: m.getCenter(), zoom: m.getZoom() };
+    });
     map.current = m;
     // The pane is sized by the layout, which changes when a phone turns or a desktop window is resized.
     const resize = new ResizeObserver(() => m.invalidateSize());
@@ -274,12 +300,13 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
         const bounds = L.latLngBounds(entry.members.map((c) => [c.lat, c.lon] as L.LatLngTuple));
         const spread = bounds.getNorthEast().distanceTo(bounds.getSouthWest());
         if (spread < SAME_SPOT_M || m.getZoom() >= m.getMaxZoom()) calls.current.onGroup(entry.members.map((c) => c.key));
-        else m.fitBounds(bounds, { ...padding, maxZoom: m.getMaxZoom() });
+        else m.fitBounds(bounds, { ...padding(), maxZoom: m.getMaxZoom() });
       });
       entry.marker.addTo(layer);
       current.set(id, entry);
     }
-  }, [shown, selected, zoom, padding]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown, selected, zoom]);
 
   // This radio, kept as one marker so its pulse is not restarted by every change.
   useEffect(() => {
@@ -324,9 +351,19 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
       m.invalidateSize();
       const at = L.latLng(c.lat, c.lon);
       const size = m.getSize();
-      const point = m.latLngToContainerPoint(at);
-      const inside = point.x > 40 && point.x < size.x - 64 && point.y > 56 && point.y < size.y - 40 - coverBottom;
-      if (!inside) m.setView(at, Math.max(m.getZoom(), 13));
+      const { top, bottom } = cover.current;
+      const clear = { left: 40, right: size.x - 64, top: top + 56, bottom: size.y - bottom - 40 };
+      if (clear.right <= clear.left || clear.bottom <= clear.top) return;
+      const p = m.latLngToContainerPoint(at);
+      if (p.x > clear.left && p.x < clear.right && p.y > clear.top && p.y < clear.bottom) return;
+      // In sight but under the sheet or at an edge: moved just clear. Out of sight: brought to the middle.
+      if (p.x >= 0 && p.x <= size.x && p.y >= 0 && p.y <= size.y) {
+        const dx = p.x < clear.left ? p.x - clear.left : p.x > clear.right ? p.x - clear.right : 0;
+        const dy = p.y < clear.top ? p.y - clear.top : p.y > clear.bottom ? p.y - clear.bottom : 0;
+        m.panBy([dx, dy]);
+      } else {
+        centerOn(at, Math.max(m.getZoom(), 13));
+      }
     });
     return () => cancelAnimationFrame(frame);
     // Only a new pick moves the map; its neighbours changing, or the sheet moving, do not.
@@ -336,22 +373,24 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
   // The first time there is something to show, show all of it.
   useEffect(() => {
     const m = map.current;
-    if (!m || fitted.current) return;
+    // A map with no size, hidden under a profile, has nothing to fit into.
+    if (!m || fitted.current || m.getSize().y === 0) return;
     const points: L.LatLngTuple[] = placed.map((c) => [c.lat, c.lon]);
     if (self) points.push([self.lat, self.lon]);
-    if (points.length === 1) m.setView(points[0]!, 13);
-    else if (points.length > 1) m.fitBounds(L.latLngBounds(points), { ...padding, maxZoom: 14 });
+    if (points.length === 1) centerOn(points[0]!, 13);
+    else if (points.length > 1) m.fitBounds(L.latLngBounds(points), { ...padding(), maxZoom: 14 });
     if (points.length > 0) {
       fitted.current = true;
       setZoom(m.getZoom());
     }
-  }, [placed, self, padding]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placed, self]);
 
   const fitAll = () => {
     const points: L.LatLngTuple[] = shown.map((c) => [c.lat, c.lon]);
     if (self) points.push([self.lat, self.lon]);
-    if (points.length === 1) map.current?.setView(points[0]!, 14);
-    else if (points.length > 1) map.current?.fitBounds(L.latLngBounds(points), { ...padding, maxZoom: 15 });
+    if (points.length === 1) centerOn(points[0]!, 14);
+    else if (points.length > 1) map.current?.fitBounds(L.latLngBounds(points), { ...padding(), maxZoom: 15 });
   };
 
   return (
@@ -372,7 +411,7 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
           <FitIcon size={18} />
         </IconButton>
         {self ? (
-          <IconButton label="This radio" onClick={() => map.current?.setView([self.lat, self.lon], Math.max(map.current.getZoom(), 14))}>
+          <IconButton label="This radio" onClick={() => map.current && centerOn([self.lat, self.lon], Math.max(map.current.getZoom(), 14))}>
             <LocateIcon size={18} />
           </IconButton>
         ) : null}

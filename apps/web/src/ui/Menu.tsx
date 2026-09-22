@@ -64,12 +64,12 @@ function pick(item: MenuItem): void {
 export function MenuHost() {
   const menu = useMenuState();
   const wide = useWide();
-  if (!menu) return null;
-  if (wide && menu.at) return <Popover menu={menu} />;
+  if (menu && wide && menu.at) return <Popover menu={menu} />;
+  // Mounted while closed too, so the sheet can slide away with the menu it held.
   return (
-    <Sheet open onClose={closeMenu} title={menu.title}>
+    <Sheet open={menu !== null} onClose={closeMenu} title={menu?.title}>
       <div className="group-body">
-        {menu.items.map((item) => (
+        {menu?.items.map((item) => (
           <button key={item.label} type="button" className={["line", "line-action", item.danger ? "danger" : ""].join(" ")} disabled={item.disabled} onClick={() => pick(item)}>
             {item.icon ? <span className="line-icon">{item.icon}</span> : null}
             <span className="line-text">

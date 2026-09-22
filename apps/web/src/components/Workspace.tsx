@@ -95,11 +95,10 @@ function Phone() {
   const content = useRef<HTMLElement>(null);
   useEdgeSwipe(content, stack.length > 0 && !sheet);
 
-  let screen: ReactNode;
+  let screen: ReactNode = null;
   if (shown) screen = <ScreenView key={JSON.stringify(shown)} screen={shown} chrome={{ onBack: back }} wide={false} />;
   else if (nav.section === "chats") screen = <ChatList selected={null} />;
-  else if (nav.section === "mesh") screen = <MeshPhone />;
-  else screen = <RadioHome selected={null} />;
+  else if (nav.section === "radio") screen = <RadioHome selected={null} />;
 
   // The conversation takes the whole height: its composer sits where the tabs were.
   const tabs = shown?.kind !== "chat";
@@ -107,6 +106,8 @@ function Phone() {
     <div className={["app", "narrow", tabs ? "" : "detail"].join(" ")}>
       <main className="content" ref={content}>
         <Offline />
+        {/* The map stays under a node's profile, so Back finds it as it was left: same place, same list, no tiles to fetch again. */}
+        {nav.section === "mesh" ? <MeshPhone hidden={shown !== null} /> : null}
         {screen}
       </main>
       {tabs ? (

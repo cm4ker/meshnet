@@ -4,7 +4,7 @@
  * down to see the map; on a desktop it is the column beside the map.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AdvType, contactConversation, contactRoute, isConversationType, isFavourite, isNodeType, type ContactRecord, type SessionState } from "@meshnet/meshcore";
 import { nameOfHash } from "../lib/echoes.js";
 import { ago, agoPhrase } from "../lib/format.js";
@@ -236,7 +236,7 @@ function NodeRow({ contact: c, selected, yours, onOpen }: { contact: ContactReco
 // ---- the map ----
 
 /** The map with the filter applied, the focus drawn, and taps handed up. */
-export function MeshMap({ selected, onSelect, onGroup, coverBottom, zoomButtons }: { selected: string | null; onSelect: (key: string | null) => void; onGroup: (keys: string[]) => void; coverBottom?: number | undefined; zoomButtons?: boolean | undefined }) {
+export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zoomButtons }: { selected: string | null; onSelect: (key: string | null) => void; onGroup: (keys: string[]) => void; coverTop?: number | undefined; coverBottom?: number | undefined; zoomButtons?: boolean | undefined }) {
   const state = useSession();
   const saved = useSavedPasswords();
   const { kind, query } = useFilter();
@@ -245,7 +245,7 @@ export function MeshMap({ selected, onSelect, onGroup, coverBottom, zoomButtons 
   const test = useCallback(matcher(state, saved, kind, query), [state.logins, state.statusHistory, saved, kind, query]);
   return (
     <Suspense fallback={<div className="empty muted">Loading the map…</div>}>
-      <MapView selected={selected} onSelect={onSelect} onGroup={onGroup} filter={test} coverBottom={coverBottom} zoomButtons={zoomButtons} />
+      <MapView selected={selected} onSelect={onSelect} onGroup={onGroup} filter={test} coverTop={coverTop} coverBottom={coverBottom} zoomButtons={zoomButtons} />
     </Suspense>
   );
 }
@@ -334,71 +334,223 @@ function GroupList({ keys, onPick, onClose }: { keys: string[]; onPick: (key: st
 // ---- the phone ----
 
 type Detent = "peek" | "half" | "full";
+const DETENTS: Detent[] = ["peek", "half", "full"];
 let lastDetent: Detent = "half";
 
-/** The Mesh tab on a phone: the map, and the list in a sheet with three positions. */
-export function MeshPhone() {
+/** A release faster than this, in pixels a millisecond, carries the sheet on to the next position that way. */
+const FLICK = 0.4;
+/** Below its lowest position the sheet still follows the finger, but only this share of the way. */
+const OVERPULL = 0.3;
+
+/**
+ * The Mesh tab on a phone: the map, and the list in a sheet with three
+ * positions. The sheet keeps its full height and slides, so following a
+ * finger moves one layer instead of laying the list out again every frame.
+ * It is pulled by its handle, or by the list itself wherever the list is not
+ * scrolling: anywhere below the top position, and down from the list's top.
+ */
+export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) {
   const nav = useNav();
   const state = useSession();
   const box = useRef<HTMLDivElement>(null);
+  const inset = useRef<HTMLDivElement>(null);
   const sheet = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState(0);
+  const body = useRef<HTMLDivElement>(null);
+  // The box's height, how much of its top the notch or the status bar takes, where the chips end in
+  // the sheet, and how tall a picked node's card is.
+  const [space, setSpace] = useState({ height: 0, top: 0, peek: 0, card: 0 });
   const [detent, setDetentState] = useState<Detent>(() => (Object.values(state.contacts).some((c) => hasPosition(c.lat, c.lon)) ? lastDetent : "full"));
   const [group, setGroup] = useState<string[] | null>(null);
-  const drag = useRef<{ y: number; h: number; moved: boolean } | null>(null);
   const focus = nav.meshFocus && state.contacts[nav.meshFocus] ? nav.meshFocus : null;
-
-  useEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const resize = new ResizeObserver(() => setHeight(el.clientHeight));
-    resize.observe(el);
-    setHeight(el.clientHeight);
-    return () => resize.disconnect();
-  }, []);
-
-  const heights: Record<Detent, number> = useMemo(() => ({ peek: 116, half: Math.round(Math.max(280, height * 0.46)), full: Math.max(300, height - 8) }), [height]);
+  const listed = !focus && !group;
   const setDetent = (d: Detent) => {
     lastDetent = d;
     setDetentState(d);
   };
 
-  // A pick shows its card at half height, unless the list was pulled all the way up to read.
-  useEffect(() => {
-    if (focus && detent === "peek") setDetent("half");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focus]);
+  // A pick shows its card at half height, over the map, even when the list was up to read: "On map" in a
+  // profile comes here. Decided while rendering, so the map learns in the same pass how much the sheet covers.
+  const [picked, setPicked] = useState(focus);
+  if (picked !== focus) {
+    setPicked(focus);
+    if (focus && detent !== "half") setDetent("half");
+  }
 
-  const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if ((e.target as HTMLElement).closest("input, button")) return;
-    drag.current = { y: e.clientY, h: sheet.current?.offsetHeight ?? heights[detent], moved: false };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const onMove = (e: ReactPointerEvent) => {
-    const d = drag.current;
+  useLayoutEffect(() => {
+    const el = box.current;
+    const probe = inset.current;
+    if (!el || !probe) return;
+    const measure = () => {
+      const height = el.clientHeight;
+      const top = probe.offsetHeight;
+      // Hidden under a profile the box has no height; what it had is what it will have again.
+      if (height === 0) return;
+      setSpace((s) => (s.height === height && s.top === top ? s : { ...s, height, top }));
+    };
+    const resize = new ResizeObserver(measure);
+    resize.observe(el);
+    resize.observe(probe);
+    measure();
+    return () => resize.disconnect();
+  }, []);
+
+  // The lowest position shows the search and the chips, and stops before the first line of the list.
+  useLayoutEffect(() => {
     const el = sheet.current;
-    if (!d || !el) return;
-    const dy = e.clientY - d.y;
-    if (Math.abs(dy) > 4) d.moved = true;
-    el.style.transition = "none";
-    el.style.height = `${Math.max(heights.peek - 20, Math.min(heights.full, d.h - dy))}px`;
-  };
-  const onUp = () => {
-    const d = drag.current;
+    const scroller = body.current;
+    const chips = listed ? scroller?.querySelector<HTMLElement>(".chips") : null;
+    if (!el || !scroller || !chips || space.height === 0) return;
+    const peek = Math.round(chips.getBoundingClientRect().bottom - el.getBoundingClientRect().top + scroller.scrollTop);
+    setSpace((s) => (s.peek === peek ? s : { ...s, peek }));
+  }, [listed, space.height]);
+
+  // A card sits at its own height instead of the list's middle one, so more of the map shows around it.
+  useLayoutEffect(() => {
     const el = sheet.current;
-    drag.current = null;
-    if (!d || !el) return;
-    el.style.transition = "";
-    el.style.height = "";
-    if (!d.moved) {
-      // A tap on the handle steps to the next position.
-      setDetent(detent === "peek" ? "half" : detent === "half" ? "full" : "peek");
-      return;
-    }
-    const h = el.offsetHeight;
-    const at = (Object.keys(heights) as Detent[]).reduce((a, b) => (Math.abs(heights[b] - h) < Math.abs(heights[a] - h) ? b : a));
-    setDetent(at);
-  };
+    const card = listed ? null : body.current?.firstElementChild;
+    if (!el || !card) return;
+    const measure = () => {
+      const h = Math.round(card.getBoundingClientRect().bottom - el.getBoundingClientRect().top + (body.current?.scrollTop ?? 0));
+      setSpace((s) => (s.card === h ? s : { ...s, card: h }));
+    };
+    const resize = new ResizeObserver(measure);
+    resize.observe(card);
+    measure();
+    return () => resize.disconnect();
+  }, [listed, focus, group]);
+
+  const full = Math.max(0, space.height - space.top - 8);
+  const middle = Math.max(0, Math.min(full - 48, Math.max(240, Math.round(space.height * 0.46))));
+  const peek = Math.max(0, Math.min(middle - 48, space.peek || 104));
+  const half = !listed && space.card ? Math.max(peek + 48, Math.min(middle, space.card)) : middle;
+  const heights: Record<Detent, number> = { peek, half, full };
+
+  // What the handlers read, so the listeners on the list are set once.
+  const live = useRef({ detent, heights, setDetent });
+  live.current = { detent, heights, setDetent };
+
+  const motion = useMemo(() => {
+    let drag: { from: number; h: number; now: number; moved: boolean; trail: { y: number; t: number }[] } | null = null;
+    const place = (el: HTMLElement, h: number) => {
+      el.style.transform = `translate3d(0, ${live.current.heights.full - h}px, 0)`;
+    };
+    const begin = (y: number) => {
+      const el = sheet.current;
+      if (!el) return;
+      const { detent, heights } = live.current;
+      // Caught while it is still settling, the sheet is taken from where it is.
+      const shift = new DOMMatrixReadOnly(getComputedStyle(el).transform).m42;
+      const h = Number.isFinite(shift) ? heights.full - shift : heights[detent];
+      drag = { from: y, h, now: h, moved: false, trail: [{ y, t: performance.now() }] };
+      el.style.transition = "none";
+      place(el, h);
+    };
+    const follow = (y: number) => {
+      const el = sheet.current;
+      if (!drag || !el) return;
+      const { heights } = live.current;
+      const t = performance.now();
+      drag.trail.push({ y, t });
+      while (drag.trail.length > 2 && t - drag.trail[0]!.t > 100) drag.trail.shift();
+      if (Math.abs(y - drag.from) > 4) drag.moved = true;
+      let h = Math.min(heights.full, drag.h - (y - drag.from));
+      if (h < heights.peek) h = heights.peek - (heights.peek - h) * OVERPULL;
+      drag.now = h;
+      place(el, h);
+    };
+    /**
+     * Lets go at the position the sheet was flung towards, or else the nearest; a tap on the handle
+     * steps on to the next.
+     */
+    const release = (tap: boolean) => {
+      const d = drag;
+      const el = sheet.current;
+      drag = null;
+      if (!d || !el) return;
+      const { detent, heights, setDetent } = live.current;
+      let target: Detent = detent;
+      if (!d.moved) {
+        if (tap) target = detent === "peek" ? "half" : detent === "half" ? "full" : "peek";
+      } else {
+        const first = d.trail[0]!;
+        const last = d.trail.at(-1)!;
+        // A finger that stopped before it lifted flings nothing.
+        const v = performance.now() - last.t < 80 && last.t > first.t ? (last.y - first.y) / (last.t - first.t) : 0;
+        if (v < -FLICK) target = DETENTS.find((k) => heights[k] > d.now + 2) ?? "full";
+        else if (v > FLICK) target = [...DETENTS].reverse().find((k) => heights[k] < d.now - 2) ?? "peek";
+        else target = DETENTS.reduce((a, b) => (Math.abs(heights[b] - d.now) < Math.abs(heights[a] - d.now) ? b : a));
+      }
+      el.style.transition = "";
+      place(el, heights[target]);
+      setDetent(target);
+    };
+    return { begin, follow, release };
+  }, []);
+
+  // The list pulls the sheet by touch; a mouse has the handle and the wheel.
+  useEffect(() => {
+    const el = body.current;
+    if (!el) return;
+    let start: { x: number; y: number } | null = null;
+    let dragging = false;
+    // How far the finger went, from where it came down.
+    let from = 0;
+    let travel = 0;
+    const swallow = (e: Event) => {
+      e.stopPropagation();
+      e.preventDefault();
+    };
+    const down = (e: TouchEvent) => {
+      const t = e.touches[0];
+      start = e.touches.length === 1 && t ? { x: t.clientX, y: t.clientY } : null;
+      if (e.touches.length > 1 && dragging) {
+        dragging = false;
+        motion.release(false);
+      }
+    };
+    const move = (e: TouchEvent) => {
+      const t = e.touches[0];
+      if (!t) return;
+      if (start) {
+        const dx = t.clientX - start.x;
+        const dy = t.clientY - start.y;
+        if (!dx && !dy) return;
+        from = start.y;
+        travel = 0;
+        start = null;
+        // Decided on the first move, while the page can still be told not to scroll. Sideways scrolls
+        // the chips; at the top position the list scrolls, unless it is pulled down from its top.
+        if (Math.abs(dx) > Math.abs(dy)) return;
+        if (live.current.detent === "full" && (dy < 0 || el.scrollTop > 0)) return;
+        dragging = true;
+        motion.begin(from);
+      }
+      if (!dragging) return;
+      e.preventDefault();
+      travel = Math.max(travel, Math.abs(t.clientY - from));
+      motion.follow(t.clientY);
+    };
+    const up = () => {
+      start = null;
+      if (!dragging) return;
+      dragging = false;
+      motion.release(false);
+      // A pull that ends over a row does not open it; a tap whose finger shook a little still does.
+      if (travel <= 10) return;
+      el.addEventListener("click", swallow, { capture: true, once: true });
+      setTimeout(() => el.removeEventListener("click", swallow, { capture: true }), 400);
+    };
+    el.addEventListener("touchstart", down, { passive: true });
+    el.addEventListener("touchmove", move, { passive: false });
+    el.addEventListener("touchend", up);
+    el.addEventListener("touchcancel", up);
+    return () => {
+      el.removeEventListener("touchstart", down);
+      el.removeEventListener("touchmove", move);
+      el.removeEventListener("touchend", up);
+      el.removeEventListener("touchcancel", up);
+    };
+  }, [motion]);
 
   const pick = (key: string | null) => {
     setGroup(null);
@@ -406,19 +558,43 @@ export function MeshPhone() {
   };
 
   return (
-    <div className="mesh-phone" ref={box}>
-      <MeshMap selected={focus} onSelect={pick} onGroup={(keys) => { setGroup(keys); focusOnMap(null); if (detent === "peek") setDetent("half"); }} coverBottom={heights[detent]} />
-      <div ref={sheet} className="mesh-sheet" style={{ height: heights[detent] || undefined }}>
-        <div className="mesh-sheet-head" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
+    <div className="mesh-phone" ref={box} hidden={hidden} data-detent={detent}>
+      <div className="mesh-inset" ref={inset} aria-hidden="true" />
+      {/* Not before the sheet is measured, so the map's first view is fitted to the part left uncovered. */}
+      {space.height ? (
+        <MeshMap
+          selected={focus}
+          onSelect={pick}
+          onGroup={(keys) => {
+            setGroup(keys);
+            focusOnMap(null);
+            if (detent !== "half") setDetent("half");
+          }}
+          coverTop={space.top}
+          coverBottom={heights[detent]}
+        />
+      ) : null}
+      <div ref={sheet} className="mesh-sheet" style={{ height: full, transform: `translate3d(0, ${full - heights[detent]}px, 0)` }}>
+        <div
+          className="mesh-sheet-head"
+          onPointerDown={(e) => {
+            if (e.button !== 0 || (e.target as HTMLElement).closest("input, button, label")) return;
+            e.currentTarget.setPointerCapture(e.pointerId);
+            motion.begin(e.clientY);
+          }}
+          onPointerMove={(e) => motion.follow(e.clientY)}
+          onPointerUp={() => motion.release(true)}
+          onPointerCancel={() => motion.release(false)}
+        >
           <div className="sheet-grab" />
-          {focus || group ? null : (
+          {listed ? (
             <div className="mesh-sheet-tools">
-              <MeshSearchInline onFocus={() => detent === "peek" && setDetent("half")} />
+              <MeshSearchInline onFocus={() => detent !== "full" && setDetent("full")} />
               <FetchButton />
             </div>
-          )}
+          ) : null}
         </div>
-        <div className="mesh-sheet-body">
+        <div className="mesh-sheet-body" ref={body}>
           {focus ? (
             <NodeCard contactKey={focus} onClose={() => pick(null)} />
           ) : group ? (
@@ -426,6 +602,8 @@ export function MeshPhone() {
           ) : (
             <MeshListBodyNoSearch onOpen={(key) => openProfile(key)} />
           )}
+          {/* The part of the sheet below the screen's edge, so the end of the list can be scrolled into view. */}
+          <div aria-hidden="true" style={{ height: full - heights[detent] }} />
         </div>
       </div>
     </div>
@@ -437,7 +615,7 @@ function MeshSearchInline({ onFocus }: { onFocus: () => void }) {
   return (
     <label className="search">
       <SearchIcon size={15} />
-      <input value={query} onFocus={onFocus} onChange={(e) => setFilter({ query: e.target.value })} placeholder="Find a node" aria-label="Find a node" />
+      <input value={query} onFocus={onFocus} onChange={(e) => setFilter({ query: e.target.value })} placeholder="Find a node" aria-label="Find a node" enterKeyHint="search" />
     </label>
   );
 }

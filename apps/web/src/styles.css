@@ -144,8 +144,10 @@ code,
   cursor: pointer;
   white-space: nowrap;
 }
-.button:hover:not(:disabled) {
-  background: var(--hover);
+@media (hover: hover) {
+  .button:hover:not(:disabled) {
+    background: var(--hover);
+  }
 }
 .button:disabled {
   opacity: 0.5;
@@ -156,15 +158,19 @@ code,
   border-color: var(--accent);
   color: var(--accent-contrast);
 }
-.button.primary:hover:not(:disabled) {
-  background: color-mix(in oklab, var(--accent) 88%, var(--text));
+@media (hover: hover) {
+  .button.primary:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--accent) 88%, var(--text));
+  }
 }
 .button.danger {
   color: var(--danger);
   border-color: color-mix(in oklab, var(--danger) 50%, var(--border-strong));
 }
-.button.danger:hover:not(:disabled) {
-  background: var(--danger-subtle);
+@media (hover: hover) {
+  .button.danger:hover:not(:disabled) {
+    background: var(--danger-subtle);
+  }
 }
 .button.ghost {
   border-color: transparent;
@@ -214,9 +220,11 @@ code,
   cursor: pointer;
   flex: none;
 }
-.icon-button:hover:not(:disabled) {
-  background: var(--hover);
-  color: var(--text);
+@media (hover: hover) {
+  .icon-button:hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--text);
+  }
 }
 .icon-button:disabled {
   opacity: 0.4;
@@ -491,8 +499,10 @@ textarea.input {
   text-align: left;
   cursor: pointer;
 }
-.device:hover:not(:disabled) {
-  background: var(--hover);
+@media (hover: hover) {
+  .device:hover:not(:disabled) {
+    background: var(--hover);
+  }
 }
 .device:disabled {
   opacity: 0.6;
@@ -566,9 +576,11 @@ textarea.input {
 .rail button {
   height: 54px;
 }
-.rail button:hover,
-.tabbar button:hover {
-  color: var(--text);
+@media (hover: hover) {
+  .rail button:hover,
+  .tabbar button:hover {
+    color: var(--text);
+  }
 }
 .rail button.on {
   background: var(--selected);
@@ -873,8 +885,10 @@ textarea.input {
 .app.narrow .row {
   min-height: 66px;
 }
-.row:hover {
-  background: var(--hover);
+@media (hover: hover) {
+  .row:hover {
+    background: var(--hover);
+  }
 }
 .row.selected {
   background: var(--selected);
@@ -924,8 +938,10 @@ textarea.input {
 .app.wide .swipe > .row {
   background: var(--panel);
 }
-.app.wide .swipe > .row:hover {
-  background: var(--hover);
+@media (hover: hover) {
+  .app.wide .swipe > .row:hover {
+    background: var(--hover);
+  }
 }
 .app.wide .swipe > .row.selected {
   background: var(--selected);
@@ -1000,9 +1016,11 @@ button.line,
 label.line {
   cursor: pointer;
 }
-button.line:hover:not(:disabled),
-label.line:hover:not(.off) {
-  background: var(--hover);
+@media (hover: hover) {
+  button.line:hover:not(:disabled),
+  label.line:hover:not(.off) {
+    background: var(--hover);
+  }
 }
 button.line:disabled,
 .line.off {
@@ -1166,15 +1184,19 @@ details.more .kv-grid {
   font-weight: 500;
   cursor: pointer;
 }
-.hero-act:hover:not(:disabled) {
-  background: var(--hover);
+@media (hover: hover) {
+  .hero-act:hover:not(:disabled) {
+    background: var(--hover);
+  }
 }
 .hero-act.primary {
   background: var(--accent);
   color: var(--accent-contrast);
 }
-.hero-act.primary:hover:not(:disabled) {
-  background: color-mix(in oklab, var(--accent) 88%, var(--text));
+@media (hover: hover) {
+  .hero-act.primary:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--accent) 88%, var(--text));
+  }
 }
 .hero-act:disabled {
   opacity: 0.45;
@@ -1229,9 +1251,24 @@ details.more .kv-grid {
   .sheet-scrim {
     animation: fade-in 0.2s;
   }
+  /* Closing, it slides on down from wherever it was let go. */
+  .sheet-layer.leaving:not(.wide) .sheet {
+    animation: sheet-down 0.2s cubic-bezier(0.4, 0, 1, 1) forwards;
+  }
+  .sheet-layer.leaving .sheet-scrim {
+    animation: fade-out 0.2s forwards;
+  }
+}
+.sheet-layer.leaving {
+  pointer-events: none;
 }
 @keyframes sheet-up {
   from {
+    transform: translateY(100%);
+  }
+}
+@keyframes sheet-down {
+  to {
     transform: translateY(100%);
   }
 }
@@ -1239,6 +1276,17 @@ details.more .kv-grid {
   from {
     opacity: 0;
   }
+}
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+/* The handle and the title: what the sheet is pulled down by. */
+.sheet-head {
+  flex: none;
+  cursor: grab;
+  touch-action: none;
 }
 .sheet-grab {
   flex: none;
@@ -1306,10 +1354,15 @@ details.more .kv-grid {
 .popover button > span:nth-child(2) {
   flex: 1;
 }
-.popover button:hover:not(:disabled),
 .popover button:focus-visible {
   background: var(--hover);
   outline: none;
+}
+@media (hover: hover) {
+  .popover button:hover:not(:disabled) {
+    background: var(--hover);
+    outline: none;
+  }
 }
 .popover button.danger {
   color: var(--danger);
@@ -1542,8 +1595,10 @@ details.more .kv-grid {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.chat-route:hover {
-  color: var(--text);
+@media (hover: hover) {
+  .chat-route:hover {
+    color: var(--text);
+  }
 }
 .chat-route.pinned {
   color: var(--accent);
@@ -1566,9 +1621,10 @@ details.more .kv-grid {
   padding: 0 var(--space-3);
   transition: transform 0.25s ease;
 }
+/* A pill in the middle; it sits in a message's wrapper, a block, so it centres itself by its margins. */
 .day {
-  align-self: center;
-  margin: var(--space-2) 0;
+  width: fit-content;
+  margin: var(--space-2) auto;
   padding: 2px var(--space-2);
   border-radius: 10px;
   background: var(--panel);
@@ -1768,8 +1824,10 @@ details.more .kv-grid {
 button.hop {
   cursor: pointer;
 }
-button.hop:hover {
-  background: var(--hover);
+@media (hover: hover) {
+  button.hop:hover {
+    background: var(--hover);
+  }
 }
 .hop-hash {
   font-family: var(--font-mono);
@@ -1989,8 +2047,10 @@ button.hop:hover {
   cursor: pointer;
   border-radius: var(--radius);
 }
-.kv-action:hover {
-  background: var(--hover);
+@media (hover: hover) {
+  .kv-action:hover {
+    background: var(--hover);
+  }
 }
 .kv-label {
   color: var(--text-muted);
@@ -2184,8 +2244,10 @@ button.hop:hover {
   white-space: nowrap;
   cursor: pointer;
 }
-.tabs button:hover:not(:disabled) {
-  color: var(--text);
+@media (hover: hover) {
+  .tabs button:hover:not(:disabled) {
+    color: var(--text);
+  }
 }
 .tabs button.on {
   color: var(--text);
@@ -2709,8 +2771,10 @@ button.hop:hover {
 .pick button + button {
   border-top: 1px solid var(--border);
 }
-.pick button:hover {
-  background: var(--hover);
+@media (hover: hover) {
+  .pick button:hover {
+    background: var(--hover);
+  }
 }
 .pick button.on {
   background: var(--selected);
@@ -2758,35 +2822,78 @@ button.hop:hover {
   box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
 }
 
-/* The phone's Mesh: the map under a sheet that holds the list. */
+/* The phone's Mesh: the map under a sheet that holds the list. The map runs up under the notch;
+   what sits on it keeps below. Under the offline line the notch is already cleared. */
 .mesh-phone {
+  --mesh-top: var(--safe-top);
   position: relative;
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
+.mesh-phone[hidden] {
+  display: none;
+}
+.offline ~ .mesh-phone {
+  --mesh-top: 0px;
+}
+/* Read by the sheet, to stop short of the notch. */
+.mesh-inset {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: var(--mesh-top);
+  visibility: hidden;
+  pointer-events: none;
+}
 .mesh-phone .map-view {
   position: absolute;
   inset: 0;
+  /* Its own stacking context, so Leaflet's panes and controls stay under the sheet. */
+  z-index: 0;
 }
 .mesh-phone .map-controls {
-  top: calc(var(--safe-top) + var(--space-3));
+  top: calc(var(--mesh-top) + var(--space-3));
 }
 .mesh-phone .leaflet-top {
-  top: var(--safe-top);
+  top: var(--mesh-top);
+}
+/* With the list all the way up the map is out of sight, and its credit would show cut in the gap above. */
+.mesh-phone .leaflet-control-attribution {
+  transition: opacity 0.2s;
+}
+.mesh-phone[data-detent="full"] .leaflet-control-attribution {
+  opacity: 0;
+}
+/* The status bar's clock and battery, legible over a busy map. */
+.mesh-phone::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+  height: var(--mesh-top);
+  background: linear-gradient(color-mix(in oklab, var(--bg) 88%, transparent), color-mix(in oklab, var(--bg) 40%, transparent));
+  pointer-events: none;
 }
 .mesh-sheet {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 600;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   border-radius: 16px 16px 0 0;
   background: var(--elevated);
   box-shadow: 0 -6px 24px rgb(0 0 0 / 0.22);
-  transition: height 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: transform 0.34s cubic-bezier(0.22, 0.9, 0.3, 1);
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mesh-sheet {
+    transition-duration: 0.01s;
+  }
 }
 .mesh-sheet-head {
   flex: none;
@@ -2967,4 +3074,40 @@ button.hop:hover {
 /* A phone's header has no room to say the radio is idle; it says so only when busy. */
 .app.narrow .queue:not(.busy) {
   display: none;
+}
+
+/* iOS zooms the page into any field whose text is under 16px, and leaves it zoomed. On a touch
+   screen every field is 16px, whatever its own rule says. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"], [type="radio"], [type="range"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* A touch screen has no pointer resting on things, and a hover a tap leaves behind would stay lit.
+   There a press lights what is pressed, for as long as the finger is on it. */
+@media (hover: none) {
+  .button:active:not(:disabled),
+  .icon-button:active:not(:disabled),
+  .device:active:not(:disabled),
+  .row:active,
+  button.line:active:not(:disabled),
+  label.line:active:not(.off),
+  .hero-act:active:not(:disabled),
+  .popover button:active:not(:disabled),
+  button.hop:active,
+  .kv-action:active,
+  .pick button:active,
+  .chip:active {
+    background: var(--hover);
+  }
+  .button.primary:active:not(:disabled),
+  .hero-act.primary:active:not(:disabled) {
+    background: color-mix(in oklab, var(--accent) 88%, var(--text));
+  }
+  .button.danger:active:not(:disabled) {
+    background: var(--danger-subtle);
+  }
 }

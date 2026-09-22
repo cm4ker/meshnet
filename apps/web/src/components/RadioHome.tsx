@@ -69,7 +69,8 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
           </div>
           {self ? (
             <div className="radio-card-freq mono">
-              {frequency(self.frequencyKhz)} · {bandwidth(self.bandwidthHz)} · SF{self.spreadingFactor} · CR 4/{self.codingRate} · {self.txPower} dBm
+              {/* A narrow phone breaks the line between values, never inside one. */}
+              {[frequency(self.frequencyKhz), bandwidth(self.bandwidthHz), `SF${self.spreadingFactor}`, `CR 4/${self.codingRate}`, `${self.txPower} dBm`].map((part) => part.replaceAll(" ", " ")).join(" · ")}
             </div>
           ) : null}
           <div className="radio-card-actions">
