@@ -2187,24 +2187,22 @@ button.hop {
   position: absolute;
   left: calc(var(--r) - 4px);
   right: calc(var(--r) - 4px);
-  bottom: -1px;
-  height: 2px;
+  bottom: -2px;
+  height: 3px;
   pointer-events: none;
 }
 /* Nothing typed, nothing to weigh: not even the channel's name shows. */
 .compose:not(.has) .compose-meter {
   visibility: hidden;
 }
-.compose-meter i {
+/* One pill from the left edge: the channel's name and the text weigh the same. */
+.compose-meter .fill {
   position: absolute;
   top: 0;
   bottom: 0;
-}
-.compose-meter .pre {
   left: 0;
-  background: color-mix(in oklab, var(--text-faint) 60%, transparent);
-}
-.compose-meter .fill {
+  min-width: 3px;
+  border-radius: 999px;
   background: var(--accent);
   transition:
     width 0.12s ease-out,

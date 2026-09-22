@@ -351,8 +351,7 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
           </button>
         </div>
         <div className="compose-meter" aria-hidden="true">
-          <i className="pre" style={{ width: share(cost.prefix) }} />
-          <i className={["fill", tone].join(" ")} style={{ left: share(cost.prefix), width: over ? `${100 - (cost.prefix / MAX_TEXT_LEN) * 100}%` : share(cost.used) }} />
+          <i className={["fill", tone].join(" ")} style={{ width: share(cost.prefix + cost.used) }} />
           {EDGES.map((edge) => (
             <span key={edge} className="tick" style={{ left: share(edge) }} />
           ))}
