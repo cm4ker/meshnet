@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useBackLayer, useSectionsBack } from "../lib/back.js";
 import { summarize, totalUnread } from "../lib/conversations.js";
 import { batteryPercent } from "../lib/format.js";
 import { useLink } from "../lib/link.js";
@@ -30,6 +31,7 @@ const SECTIONS: { id: Section; label: string; icon: ReactNode }[] = [
 
 export function Workspace() {
   const wide = useWide();
+  useSectionsBack();
   return (
     <>
       {wide ? <Desktop /> : <Phone />}
@@ -137,7 +139,7 @@ function Badge({ section, badges }: { section: Section; badges: ReturnType<typeo
 
 /**
  * A swipe from the left edge goes back, as on iOS; Android's own back
- * gesture arrives as a history step (see nav.ts). The screen follows the
+ * gesture comes through the shell (see back.ts). The screen follows the
  * finger, and goes if let go past a third of the way.
  */
 function useEdgeSwipe(ref: React.RefObject<HTMLElement | null>, enabled: boolean) {
@@ -284,6 +286,7 @@ function Desktop() {
 
   const panelChrome: Chrome = { onClose: closePanel, onBack: panelDepth > 1 ? back : undefined };
   const groupPanel = nav.section === "mesh" && !panel && !full && group ? <GroupPanel keys={group} onClose={() => setGroup(null)} /> : null;
+  useBackLayer(groupPanel !== null, () => setGroup(null));
 
   return (
     <div className="app wide">

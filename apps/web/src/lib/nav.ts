@@ -4,11 +4,8 @@
  * the top of the current stack; the desktop lays the same stack out side by
  * side, the conversation in the middle and whatever was opened from it in
  * the panel on the right. One small store, so the tab bar, the rail,
- * notifications and the back gesture all read the same thing.
- *
- * While a stack is deeper than its root, one history entry stands guard
- * above the page: the browser's back button, Android's, and a mouse's back
- * key take it, and the store pops a screen instead of the page leaving.
+ * notifications and the back gesture all read the same thing. What a Back
+ * button does with it is in back.ts.
  */
 
 import { useSyncExternalStore } from "react";
@@ -74,44 +71,11 @@ const listeners = new Set<() => void>();
 function set(next: Nav): void {
   nav = next;
   writeSetting(KEY, nav);
-  guard();
   for (const listener of listeners) listener();
 }
 
 function same(a: Screen | undefined, b: Screen): boolean {
   return !!a && JSON.stringify(a) === JSON.stringify(b);
-}
-
-// ---- the history guard ----
-
-let guarded = false;
-let swallowPop = false;
-
-function guard(): void {
-  if (typeof window === "undefined" || !window.history) return;
-  const deep = nav.stacks[nav.section].length > 0;
-  if (deep && !guarded) {
-    window.history.pushState({ meshnet: "back" }, "");
-    guarded = true;
-  } else if (!deep && guarded) {
-    guarded = false;
-    swallowPop = true;
-    window.history.back();
-  }
-}
-
-if (typeof window !== "undefined") {
-  window.addEventListener("popstate", () => {
-    if (swallowPop) {
-      swallowPop = false;
-      return;
-    }
-    if (!guarded) return;
-    guarded = false;
-    back();
-  });
-  // A reload lands on a deep stack with no guard in the history yet.
-  queueMicrotask(guard);
 }
 
 // ---- reading ----
@@ -120,14 +84,13 @@ export function getNav(): Nav {
   return nav;
 }
 
+export function subscribeNav(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 export function useNav(): Nav {
-  return useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    () => nav,
-  );
+  return useSyncExternalStore(subscribeNav, () => nav);
 }
 
 export function topOf(state: Nav, section: Section = state.section): Screen | null {

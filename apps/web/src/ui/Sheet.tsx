@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useBackLayer } from "../lib/back.js";
 import { useWide } from "../lib/layout.js";
 
 /** Pulled down this far, or flung down faster than this many pixels a millisecond, the sheet goes. */
@@ -22,6 +23,7 @@ export function Sheet({ open, onClose, title, children, className }: { open: boo
   // Callers pass a fresh closure every render; the effect below runs once per opening.
   const close = useRef(onClose);
   close.current = onClose;
+  useBackLayer(open, onClose);
   // A sheet opened by a long press appears under the finger, and the click that ends the press
   // lands on the scrim. Only a press that began on the scrim is a tap past the sheet.
   const pressedScrim = useRef(false);

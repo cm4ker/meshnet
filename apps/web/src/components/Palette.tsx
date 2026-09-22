@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useBackLayer } from "../lib/back.js";
 import { summarize } from "../lib/conversations.js";
 import { disconnect } from "../lib/link.js";
 import { kindLabel } from "../lib/nodes.js";
@@ -29,6 +30,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
   const [at, setAt] = useState(0);
   const field = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  useBackLayer(open, onClose);
 
   useEffect(() => {
     if (!open) return;

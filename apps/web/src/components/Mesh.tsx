@@ -6,6 +6,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AdvType, contactConversation, contactRoute, isConversationType, isFavourite, isNodeType, type ContactRecord, type SessionState } from "@meshnet/meshcore";
+import { useBackLayer } from "../lib/back.js";
 import { nameOfHash } from "../lib/echoes.js";
 import { ago, agoPhrase } from "../lib/format.js";
 import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "../lib/geo.js";
@@ -368,6 +369,11 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
     lastDetent = d;
     setDetentState(d);
   };
+
+  // Back puts away what covers the map: the list of nodes at one spot, or the list pulled all the way up.
+  const mapped = Object.values(state.contacts).some((c) => hasPosition(c.lat, c.lon));
+  useBackLayer(!hidden && group !== null, () => setGroup(null));
+  useBackLayer(!hidden && listed && mapped && detent === "full", () => setDetent("half"));
 
   // A pick shows its card at half height, over the map, even when the list was up to read: "On map" in a
   // profile comes here. Decided while rendering, so the map learns in the same pass how much the sheet covers.

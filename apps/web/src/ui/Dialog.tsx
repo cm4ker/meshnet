@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useBackLayer } from "../lib/back.js";
 import { Button } from "./Button.js";
 
 /**
@@ -6,6 +7,7 @@ import { Button } from "./Button.js";
  */
 export function Dialog({ open, title, onClose, children, footer }: { open: boolean; title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
+  useBackLayer(open, onClose);
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
