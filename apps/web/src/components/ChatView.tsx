@@ -1,42 +1,37 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AdvType, isConversationType, parseConversation, type MessageRecord } from "@meshnet/meshcore";
+import { GEO, MENTION } from "../lib/composer.js";
 import { messagesIn, titleOf } from "../lib/conversations.js";
 import { nameOfHash, relaysOf } from "../lib/echoes.js";
-import { dayLabel, timeOfDay, utf8Length } from "../lib/format.js";
-import { packLookalikes, useLookalikePrefs } from "../lib/lookalikes.js";
+import { dayLabel, timeOfDay } from "../lib/format.js";
 import { openChannel, openMessage, openProfile, openRoute } from "../lib/nav.js";
 import { usePress } from "../lib/press.js";
 import { routeWords } from "../lib/routes.js";
 import { session, useSession } from "../lib/session.js";
 import { toast } from "../lib/toast.js";
 import { IconButton } from "../ui/Button.js";
-import { showMenu } from "../ui/Menu.js";
+import { showMenu, type MenuItem } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
-import { AlertIcon, CheckIcon, ChevronRightIcon, ClockIcon, CopyIcon, DoubleCheckIcon, InfoIcon, NodesIcon, SendIcon, WavesIcon } from "./Icons.js";
+import { Composer, type Reply } from "./Composer.js";
+import { AlertIcon, CheckIcon, ChevronRightIcon, ClockIcon, CopyIcon, DoubleCheckIcon, InfoIcon, LocationIcon, LockIcon, NodesIcon, ReplyIcon, TrashIcon, WavesIcon } from "./Icons.js";
 import { ScreenHead, type Chrome } from "./ScreenHead.js";
-
-/** A conversation's composer counts bytes only once they begin to matter. */
-const COUNT_FROM = 0.8;
 
 export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversation: string; chrome: Chrome; infoOpen?: boolean | undefined; onInfo?: () => void }) {
   const state = useSession();
-  const lookalikes = useLookalikePrefs();
   const messages = useMemo(() => messagesIn(state, conversation), [state, conversation]);
   const title = titleOf(state, conversation);
   const target = parseConversation(conversation);
   const contact = target.kind === "contact" ? state.contacts[target.key] : undefined;
   // A room relays many voices, so its messages are named like a channel's.
   const many = target.kind === "channel" || contact?.type === AdvType.Room;
-  const online = state.status === "ready";
+  // A room takes posts only from those signed in to it.
+  const locked = contact?.type === AdvType.Room && !state.logins[contact.key]?.ok;
   const scroller = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const budget = session.textBudget(conversation);
-  const packed = packLookalikes(text, lookalikes);
-  const used = utf8Length(packed);
-  const saved = utf8Length(text) - used;
+  const [reply, setReply] = useState<Reply | null>(null);
+  const answer = (message: MessageRecord) => {
+    if (message.sender) setReply({ name: message.sender, text: message.text });
+  };
 
   useEffect(() => {
     session.focus(conversation);
@@ -50,36 +45,15 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
     if (el && stuck.current) el.scrollTop = el.scrollHeight;
   }, [messages.length, conversation]);
 
-  useReveal(scroller, inner);
-
-  const send = async () => {
-    const body = text.trim();
-    if (!body || sending || used > budget) return;
-    setSending(true);
-    setError(null);
-    try {
-      await session.sendText(conversation, packLookalikes(body, lookalikes), { original: body });
-      setText("");
-      stuck.current = true;
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void send();
-    }
-  };
+  useReveal(scroller, inner, (id) => {
+    const message = messages.find((m) => m.id === id);
+    if (message) answer(message);
+  });
 
   // Who this is: the profile of the person or room, the page of the channel.
   const details = onInfo ?? (target.kind === "contact" ? () => openProfile(target.key) : target.kind === "channel" ? () => openChannel(target.index) : undefined);
   const route = contact && isConversationType(contact.type) ? routeWords(contact) : null;
-  const over = used > budget;
-  const counting = used >= budget * COUNT_FROM;
+  const me = state.self?.name ?? null;
 
   return (
     <div className="screen chat">
@@ -129,41 +103,61 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
             return (
               <div key={m.id}>
                 {newDay ? <div className="day">{dayLabel(m.timestamp)}</div> : null}
-                <Message message={m} showSender={many && m.direction === "in" && !sameSender} />
+                <Message message={m} showSender={many && m.direction === "in" && !sameSender} me={me} onReply={many && m.direction === "in" && m.sender ? () => answer(m) : undefined} />
               </div>
             );
           })}
         </div>
       </div>
 
-      <footer className="composer">
-        {error ? <div className="composer-error">{error}</div> : null}
-        <div className="composer-row">
-          <textarea
-            className="composer-input"
-            rows={1}
-            placeholder={online ? `Message ${title}` : "Radio offline"}
-            value={text}
-            disabled={!online}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={onKey}
-            aria-label={`Message ${title}`}
-          />
-          <IconButton label="Send" className="composer-send" disabled={!online || sending || !text.trim() || over} onClick={() => void send()}>
-            <SendIcon size={18} />
-          </IconButton>
-        </div>
-        {counting ? (
-          <div className="composer-meta">
-            <span className={["composer-note", over ? "over" : ""].join(" ")}>{over ? `${used - budget} bytes too long` : saved > 0 ? `Lookalike letters saved ${saved} bytes` : ""}</span>
-            <span className={["composer-count", over ? "over" : ""].join(" ")}>
-              {used}/{budget}
-            </span>
-          </div>
-        ) : null}
-      </footer>
+      {locked && contact ? (
+        <footer className="compose">
+          <button type="button" className="compose-login" onClick={() => openProfile(contact.key)}>
+            <LockIcon size={16} /> Log in to {title} to post
+          </button>
+        </footer>
+      ) : (
+        <Composer
+          conversation={conversation}
+          title={title}
+          reply={reply}
+          onReplyDone={() => setReply(null)}
+          onSent={() => {
+            stuck.current = true;
+          }}
+        />
+      )}
     </div>
   );
+}
+
+/** A message's text, with mentions and positions picked out; a mention of this radio stands out more. */
+function richText(text: string, me: string | null): ReactNode {
+  const pattern = new RegExp(`${MENTION.source}|${GEO.source}`, "g");
+  const out: ReactNode[] = [];
+  let at = 0;
+  for (const m of text.matchAll(pattern)) {
+    const start = m.index ?? 0;
+    if (start > at) out.push(text.slice(at, start));
+    if (m[1] !== undefined) {
+      out.push(
+        <span key={start} className={m[1] === me ? "mention me" : "mention"}>
+          @{m[1]}
+        </span>,
+      );
+    } else {
+      out.push(
+        <span key={start} className="geo" title={m[0]}>
+          <LocationIcon size={12} />
+          {m[2]}, {m[3]}
+        </span>,
+      );
+    }
+    at = start + m[0].length;
+  }
+  if (at === 0) return text;
+  if (at < text.length) out.push(text.slice(at));
+  return out.map((part, i) => <Fragment key={i}>{part}</Fragment>);
 }
 
 /** Signal and hops, which the bubble keeps out of sight until asked. */
@@ -180,7 +174,7 @@ function techOf(message: MessageRecord, relays: number): string {
   return bits.join(" · ");
 }
 
-function Message({ message, showSender }: { message: MessageRecord; showSender: boolean }) {
+function Message({ message, showSender, me, onReply }: { message: MessageRecord; showSender: boolean; me: string | null; onReply: (() => void) | undefined }) {
   const { contacts } = useSession();
   const out = message.direction === "out";
   const [busy, setBusy] = useState(false);
@@ -200,21 +194,27 @@ function Message({ message, showSender }: { message: MessageRecord; showSender: 
     }
   };
 
-  const press = usePress((at) =>
+  const press = usePress((at) => {
+    const items: (MenuItem | null)[] = [
+      onReply ? { label: "Reply", icon: <ReplyIcon size={17} />, onSelect: onReply } : null,
+      { label: "Copy the text", icon: <CopyIcon size={17} />, onSelect: () => void navigator.clipboard?.writeText(message.text).then(() => toast("Copied")) },
+      retryable ? { label: flood ? "Send again by flood" : "Send again", icon: <AlertIcon size={17} />, air: true, onSelect: () => void retry() } : null,
+      message.status === "queued" ? { label: "Don't send", icon: <TrashIcon size={17} />, danger: true, onSelect: () => session.discardQueued(message.id) } : null,
+      { label: "How it travelled", icon: <NodesIcon size={17} />, onSelect: () => openMessage(message.conversation, message.id) },
+    ];
     showMenu(
-      [
-        { label: "Copy the text", icon: <CopyIcon size={17} />, onSelect: () => void navigator.clipboard?.writeText(message.text).then(() => toast("Copied")) },
-        ...(retryable ? [{ label: flood ? "Send again by flood" : "Send again", icon: <AlertIcon size={17} />, air: true, onSelect: () => void retry() }] : []),
-        { label: "How it travelled", icon: <NodesIcon size={17} />, onSelect: () => openMessage(message.conversation, message.id) },
-      ],
+      items.filter((x): x is MenuItem => x !== null),
       { at },
-    ),
-  );
+    );
+  });
 
   const relayTitle = relays.length ? `Relayed by ${relays.length}: ${relays.map((r) => nameOfHash(r.hash, contacts) ?? r.hash).join(", ")}` : undefined;
 
   return (
-    <div className={["msg", out ? "out" : "in"].join(" ")}>
+    <div className={["msg", out ? "out" : "in"].join(" ")} data-reply={onReply ? message.id : undefined}>
+      <span className="msg-reply-cue" aria-hidden="true">
+        <ReplyIcon size={16} />
+      </span>
       <div className="msg-col">
         {/* A div, not a button: its text stays selectable for copying with a mouse. */}
         <div
@@ -236,7 +236,7 @@ function Message({ message, showSender }: { message: MessageRecord; showSender: 
           {...press}
         >
           {showSender && message.sender ? <span className="msg-sender">{message.sender}</span> : null}
-          <span className="msg-text">{message.text}</span>
+          <span className="msg-text">{richText(message.text, me)}</span>
           <span className="msg-meta">
             {tech ? <span className="msg-tech">{tech} ·</span> : null}
             <span>{timeOfDay(message.timestamp)}</span>
@@ -262,6 +262,12 @@ function Message({ message, showSender }: { message: MessageRecord; showSender: 
 
 function Status({ message }: { message: MessageRecord }) {
   switch (message.status) {
+    case "queued":
+      return (
+        <span className="queued" title="Waiting for the radio; it goes as soon as the radio is back">
+          <ClockIcon size={12} /> queued
+        </span>
+      );
     case "sending":
       return (
         <span title="Sending">
@@ -286,46 +292,70 @@ function Status({ message }: { message: MessageRecord }) {
   }
 }
 
+/** How far a message is pulled right before letting go answers it. */
+const REPLY_PULL = 56;
+
 /**
  * Pulling the conversation left, on a touch screen, shows every message's
- * signal and hops at once; letting go hides them again.
+ * signal and hops at once; letting go hides them again. Pulling one message
+ * right, in a channel or a room, answers it.
  */
-function useReveal(scroller: React.RefObject<HTMLDivElement | null>, inner: React.RefObject<HTMLDivElement | null>) {
+function useReveal(scroller: React.RefObject<HTMLDivElement | null>, inner: React.RefObject<HTMLDivElement | null>, onReply: (id: string) => void) {
+  const replyRef = useRef(onReply);
+  replyRef.current = onReply;
   useEffect(() => {
     const el = scroller.current;
     const body = inner.current;
     if (!el || !body) return;
     let start: { x: number; y: number } | null = null;
-    let active = false;
+    let mode: "reveal" | "reply" | null = null;
+    let row: HTMLElement | null = null;
+    let pulled = 0;
     const down = (e: TouchEvent) => {
       const t = e.touches[0];
       start = t && e.touches.length === 1 ? { x: t.clientX, y: t.clientY } : null;
-      active = false;
+      row = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-reply]") : null;
+      mode = null;
+      pulled = 0;
     };
     const move = (e: TouchEvent) => {
       const t = e.touches[0];
       if (!start || !t) return;
       const dx = t.clientX - start.x;
       const dy = t.clientY - start.y;
-      if (!active) {
+      if (!mode) {
         if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
-        if (dx > 0 || Math.abs(dy) > Math.abs(dx)) {
+        if (Math.abs(dy) > Math.abs(dx) || (dx > 0 && !row)) {
           start = null;
           return;
         }
-        active = true;
-        body.style.transition = "none";
+        mode = dx > 0 ? "reply" : "reveal";
+        (mode === "reply" ? row! : body).style.transition = "none";
       }
       e.preventDefault();
-      body.style.transform = `translateX(${Math.max(-76, Math.min(0, dx))}px)`;
+      if (mode === "reveal") {
+        body.style.transform = `translateX(${Math.max(-76, Math.min(0, dx))}px)`;
+        return;
+      }
+      const reach = Math.max(0, Math.min(REPLY_PULL + 16, dx));
+      if (reach >= REPLY_PULL && pulled < REPLY_PULL) navigator.vibrate?.(8);
+      pulled = reach;
+      row!.style.transform = `translateX(${reach}px)`;
+      row!.style.setProperty("--pull", String(Math.min(1, reach / REPLY_PULL)));
     };
     const up = () => {
-      if (active) {
+      if (mode === "reveal") {
         body.style.transition = "";
         body.style.transform = "";
+      } else if (mode === "reply" && row) {
+        row.style.transition = "";
+        row.style.transform = "";
+        row.style.removeProperty("--pull");
+        if (pulled >= REPLY_PULL && row.dataset.reply) replyRef.current(row.dataset.reply);
       }
       start = null;
-      active = false;
+      mode = null;
+      row = null;
     };
     el.addEventListener("touchstart", down, { passive: true });
     el.addEventListener("touchmove", move, { passive: false });

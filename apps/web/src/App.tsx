@@ -46,7 +46,14 @@ export function App() {
         const focused = conversationIsVisible(m.conversation, shown);
         if (!focused && notificationsWanted()) {
           const title = titleOf(current, m.conversation);
-          void notify(m.sender && m.conversation.startsWith("ch:") ? `${m.sender} in ${title}` : title, m.text, `c:${m.conversation}`);
+          const me = current.self?.name;
+          const mentioned = !!me && m.text.includes(`@[${me}]`);
+          const heading = mentioned
+            ? `${m.sender ?? title} mentioned you${m.sender && m.sender !== title ? ` in ${title}` : ""}`
+            : m.sender && m.conversation.startsWith("ch:")
+              ? `${m.sender} in ${title}`
+              : title;
+          void notify(heading, m.text, `c:${m.conversation}`);
         }
       }
       known = new Set(current.messages.map((m) => m.id));

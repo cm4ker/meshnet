@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { isFavourite, parseConversation } from "@meshnet/meshcore";
 import { ago } from "../lib/format.js";
 import { summarize, type ConversationSummary } from "../lib/conversations.js";
+import { useDraft } from "../lib/drafts.js";
 import { openConversation, setStack } from "../lib/nav.js";
 import { usePress } from "../lib/press.js";
 import { session, useSession } from "../lib/session.js";
@@ -51,7 +52,7 @@ export function ChatList({ selected }: { selected: string | null }) {
       ) : (
         <ul className="list" role="list">
           {shown.map((row) => (
-            <ChatRow key={row.id} row={row} selected={selected === row.id} onDelete={() => setDeleting(row)} />
+            <ChatRow key={row.id} row={row} radio={state.self?.key ?? ""} selected={selected === row.id} onDelete={() => setDeleting(row)} />
           ))}
         </ul>
       )}
@@ -76,8 +77,9 @@ export function ChatList({ selected }: { selected: string | null }) {
   );
 }
 
-function ChatRow({ row, selected, onDelete }: { row: ConversationSummary; selected: boolean; onDelete: () => void }) {
+function ChatRow({ row, radio, selected, onDelete }: { row: ConversationSummary; radio: string; selected: boolean; onDelete: () => void }) {
   const target = parseConversation(row.id);
+  const draft = useDraft(radio, row.id);
   const press = usePress((at) => {
     const items: (MenuItem | null)[] = [
         target.kind === "channel"
@@ -107,7 +109,15 @@ function ChatRow({ row, selected, onDelete }: { row: ConversationSummary; select
             {row.lastAt ? <span className="row-when muted">{ago(row.lastAt)}</span> : null}
           </span>
           <span className="row-bottom">
-            <span className="row-sub muted">{row.preview ?? (row.kind === "channel" ? "Quiet so far." : "")}</span>
+            <span className="row-sub muted">
+              {draft ? (
+                <>
+                  <span className="row-draft">Draft:</span> {draft}
+                </>
+              ) : (
+                (row.preview ?? (row.kind === "channel" ? "Quiet so far." : ""))
+              )}
+            </span>
             {row.unread > 0 ? <span className="badge">{row.unread}</span> : null}
           </span>
         </span>
