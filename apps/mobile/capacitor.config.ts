@@ -24,11 +24,13 @@ const config: CapacitorConfig = {
     allowMixedContent: false,
   },
   plugins: {
-    // iOS leaves the page its full height under the keyboard and scrolls all of it up, header and
-    // all, to show the field. Shrinking the web view instead keeps the header where it is and lays
-    // the conversation out above the keyboard, as Android's adjustResize does.
+    // iOS: the page makes room for the keyboard itself, rising with it (apps/web/src/lib/keyboard.ts).
+    // "native" would shrink the web view instead, but only once the keyboard is up, plus a fifth of
+    // a second, in one step, so the keyboard first slid over the conversation and then the
+    // conversation jumped. The plugin still takes the web view's own keyboard handling away, which
+    // is what scrolled the whole page, header and all, to show a field.
     Keyboard: {
-      resize: "native",
+      resize: "none",
       resizeOnFullScreen: true,
     },
     BluetoothLe: {

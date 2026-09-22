@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.js";
 import { goBack } from "./lib/back.js";
+import { followKeyboard } from "./lib/keyboard.js";
 import { autoConnect, connectWith, disconnect, getLink } from "./lib/link.js";
 import { isCapacitor, nativePlatform } from "./lib/platform.js";
 import { session } from "./lib/session.js";
@@ -29,11 +30,13 @@ if (isCapacitor()) {
   if (viewport) viewport.content += ", maximum-scale=1, user-scalable=no";
 }
 
-// The page is laid out to the screen and never scrolls as a whole. iOS scrolls
-// it anyway to bring a field above the keyboard, though the web view has
-// already shrunk to make room (capacitor.config.ts), and would leave the
-// header above the top of the screen; it goes straight back.
+// The page is laid out to the screen and never scrolls as a whole. On iOS it
+// makes room for the keyboard itself, rising as the keyboard does
+// (lib/keyboard.ts). Should iOS still scroll the page to bring a field above the
+// keyboard, which would leave the header above the top of the screen, it goes
+// straight back.
 if (nativePlatform() === "ios") {
+  followKeyboard();
   window.addEventListener("scroll", () => {
     if (window.scrollY !== 0) window.scrollTo(0, 0);
   }, { passive: true });
