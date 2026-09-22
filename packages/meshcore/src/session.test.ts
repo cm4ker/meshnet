@@ -761,6 +761,72 @@ test("a direct message that went unacknowledged along a route is retried as a fl
   await session.disconnect();
 });
 
+test("a message written while the radio is away waits, then goes out stamped with the moment it is sent", async () => {
+  const storage = new MemoryStorage();
+  let now = 1_700_000_000_000;
+  const session = new MeshSession({ storage, now: () => now });
+  await session.connect(new ScriptedRadio());
+  await session.disconnect();
+
+  const queued = await session.sendText(contactConversation(bobKey()), "on my way");
+  const later = await session.sendText(channelConversation(0), "and you?");
+  assert.equal(queued.status, "queued");
+  assert.equal(later.status, "queued");
+
+  now += 3_600_000;
+  const radio = new ScriptedRadio();
+  await session.connect(radio);
+  await tick(20);
+  const [dm, ch] = session.getState().messages;
+  assert.equal(dm?.status, "sent");
+  assert.equal(ch?.status, "sent");
+  // Sent now, an hour after it was written; the second a second after the first.
+  assert.equal(dm?.timestamp, Math.floor(now / 1000));
+  assert.equal(ch?.timestamp, Math.floor(now / 1000) + 1);
+  const codes = radio.sent.map((f) => f[0]);
+  assert.ok(codes.indexOf(Cmd.SendTxtMsg) < codes.indexOf(Cmd.SendChannelTxtMsg));
+  await session.disconnect();
+});
+
+test("a queued message can be taken back before the radio is back", async () => {
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(new ScriptedRadio());
+  await session.disconnect();
+  const queued = await session.sendText(contactConversation(bobKey()), "never mind");
+  session.discardQueued(queued.id);
+  assert.equal(session.getState().messages.length, 0);
+});
+
+test("a message sent by flood on request drops the route first", async () => {
+  const radio = new ScriptedRadio();
+  radio.contacts = [contactFrame(BOB, "Bob", 1_699_999_990, 1, [0x7f])];
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  await session.sendText(contactConversation(bobKey()), "flood this", { flood: true });
+  const codes = radio.sent.map((f) => f[0]);
+  assert.ok(codes.indexOf(Cmd.ResetPath) >= 0 && codes.indexOf(Cmd.ResetPath) < codes.indexOf(Cmd.SendTxtMsg));
+  await session.disconnect();
+});
+
+test("a text too long for the attempt number goes round its first four attempts again", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  const long = await session.sendText(contactConversation(bobKey()), "x".repeat(159));
+  const short = await session.sendText(contactConversation(bobKey()), "short");
+  for (let i = 0; i < 5; i++) {
+    await session.retry(long.id);
+    await session.retry(short.id);
+  }
+  const attempts = radio.sent.filter((f) => f[0] === Cmd.SendTxtMsg).map((f) => ({ attempt: f[2], length: f.length }));
+  const longOnes = attempts.filter((a) => a.length > 100).map((a) => a.attempt);
+  const shortOnes = attempts.filter((a) => a.length <= 100).map((a) => a.attempt);
+  assert.deepEqual(longOnes, [0, 1, 2, 3, 0, 1]);
+  assert.deepEqual(shortOnes, [0, 1, 2, 3, 4, 5]);
+  assert.equal(session.getState().messages.find((m) => m.id === long.id)?.attempt, 5);
+  await session.disconnect();
+});
+
 test("a flood's acknowledgement brings back the route it took", async () => {
   const radio = new ScriptedRadio();
   radio.sendsFlood = true;

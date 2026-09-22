@@ -69,7 +69,8 @@ export interface ChannelRecord {
   secret: string;
 }
 
-export type MessageStatus = "sending" | "sent" | "delivered" | "unconfirmed" | "failed";
+/** `queued`: written while the radio was away; it goes out, in order, once the radio is back. */
+export type MessageStatus = "queued" | "sending" | "sent" | "delivered" | "unconfirmed" | "failed";
 
 /**
  * A copy of a message the radio heard: for one of ours on a channel, a repeater
@@ -552,6 +553,8 @@ export class MeshSession {
   private contactsRefreshQueued = false;
   private focused: string | null = null;
   private ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** The queue of messages written while the radio was away is being sent. */
+  private flushing = false;
   /**
    * What recent messages look like on the air (payload hex), to know their
    * copies by: ours on a channel, and incoming ones whose packet was found.
@@ -657,6 +660,13 @@ export class MeshSession {
 
   async connect(transport: Transport): Promise<void> {
     if (this.client) await this.disconnect();
+    // What changed since the link dropped (a message queued meanwhile) is
+    // saved before the history is read back from the storage.
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+      await this.saveNow();
+    }
     const client = new MeshCoreClient(transport, this.trace ? { trace: this.trace } : {});
     this.client = client;
     this.set({
@@ -718,6 +728,7 @@ export class MeshSession {
       // Node keeps a process alive for an interval; a browser has no such notion.
       (this.routeTimer as { unref?: () => void }).unref?.();
       await this.syncMessages();
+      void this.flushQueue();
       void this.refreshBattery();
       void this.sweepRoutes();
     } catch (error) {
@@ -1244,11 +1255,13 @@ export class MeshSession {
   /**
    * Sends text to a conversation and records it; the record's status follows
    * the ack. `original` is what was typed, when `text` was reworked to fit.
+   * `flood` drops a contact's route first, so that this message floods. With
+   * the radio away the message is queued, and goes out once it is back.
    */
-  async sendText(conversation: string, text: string, options: { original?: string } = {}): Promise<MessageRecord> {
-    const client = this.need();
+  async sendText(conversation: string, text: string, options: { original?: string; flood?: boolean } = {}): Promise<MessageRecord> {
     const target = parseConversation(conversation);
     if (target.kind === "prefix") throw new Error("this sender is not in the contacts yet");
+    const client = this.isReady ? this.client : null;
     const now = this.now();
     const message: MessageRecord = {
       id: newId(now),
@@ -1262,10 +1275,11 @@ export class MeshSession {
       snr: null,
       hops: null,
       txtType: TxtType.Plain,
-      status: "sending",
+      status: client ? "sending" : "queued",
       ackTag: null,
       roundTripMs: null,
-      flood: null,
+      // A queued message keeps the wish to flood here until it goes; the send then says how it went.
+      flood: !client && options.flood ? true : null,
       attempt: 0,
       error: null,
       echoes: [],
@@ -1273,8 +1287,44 @@ export class MeshSession {
       ...(options.original !== undefined && options.original !== text ? { original: options.original } : {}),
     };
     this.set({ messages: [...this.state.messages, message] });
-    await this.transmit(client, message, target);
+    if (!client) return message;
+    await this.transmit(client, message, target, options.flood ? "flood asked for" : false);
     return this.state.messages.find((m) => m.id === message.id) ?? message;
+  }
+
+  /**
+   * Sends what was written while the radio was away, oldest first. A new
+   * message goes out stamped with the moment it is sent: the others sort by
+   * the sender's clock, and an hour-old stamp would file it an hour back in
+   * their chats. A retry keeps its stamp, being the same message again.
+   */
+  private async flushQueue(): Promise<void> {
+    if (this.flushing) return;
+    this.flushing = true;
+    try {
+      let last = 0;
+      for (;;) {
+        const client = this.isReady ? this.client : null;
+        const next = this.state.messages.find((m) => m.status === "queued");
+        if (!client || !next) return;
+        const timestamp = next.attempt > 0 ? next.timestamp : Math.max(Math.floor(this.now() / 1000), last + 1);
+        last = timestamp;
+        this.patchMessage(next.id, { status: "sending", timestamp });
+        try {
+          await this.transmit(client, { ...next, timestamp }, parseConversation(next.conversation), next.flood === true ? "flood asked for" : false);
+        } catch {
+          // The record says it failed; the rest still go.
+        }
+      }
+    } finally {
+      this.flushing = false;
+    }
+  }
+
+  /** Takes back a message still waiting for the radio. */
+  discardQueued(id: string): void {
+    const messages = this.state.messages.filter((m) => !(m.id === id && m.status === "queued"));
+    if (messages.length !== this.state.messages.length) this.set({ messages });
   }
 
   /**
@@ -1285,11 +1335,16 @@ export class MeshSession {
   async retry(id: string): Promise<void> {
     const message = this.state.messages.find((m) => m.id === id);
     if (!message || message.direction !== "out") throw new Error("not an outgoing message");
-    const client = this.need();
     const attempt = message.attempt + 1;
     const flood = message.status === "unconfirmed" && message.flood === false;
+    if (!this.isReady) {
+      // It goes again with the queue, once the radio is back.
+      this.patchMessage(id, { status: "queued", error: null, attempt, ackTag: null, roundTripMs: null, route: null, flood: flood ? true : null });
+      return;
+    }
+    const client = this.need();
     this.patchMessage(id, { status: "sending", error: null, attempt, ackTag: null, roundTripMs: null, route: null });
-    await this.transmit(client, { ...message, attempt }, parseConversation(message.conversation), flood);
+    await this.transmit(client, { ...message, attempt }, parseConversation(message.conversation), flood ? "no acknowledgement" : false);
   }
 
   /** Whether a retry of this message will drop the route and flood. */
@@ -1297,11 +1352,12 @@ export class MeshSession {
     return message.direction === "out" && message.status === "unconfirmed" && message.flood === false && message.conversation.startsWith("c:");
   }
 
+  /** `dropRoute`, when given, is why a contact's route is dropped before the send, so that it floods. */
   private async transmit(
     client: MeshCoreClient,
     message: MessageRecord,
     target: ReturnType<typeof parseConversation>,
-    dropRoute = false,
+    dropRoute: string | false = false,
   ): Promise<void> {
     try {
       if (target.kind === "channel") {
@@ -1318,7 +1374,7 @@ export class MeshSession {
       if (!contact) throw new Error("unknown contact");
       // The sweep runs every half minute and a phone may have slept through
       // it, so a route past its time is caught here too.
-      const reason = contact.outPathLen === 0xff ? null : dropRoute ? "no acknowledgement" : this.staleReason(contact);
+      const reason = contact.outPathLen === 0xff ? null : dropRoute || this.staleReason(contact);
       if (reason) {
         try {
           await this.dropRoute(client, contact.key, reason);
@@ -1327,8 +1383,12 @@ export class MeshSession {
         }
       }
       const route = contactRoute(this.state.contacts[target.key] ?? contact);
+      // Past the fourth attempt the firmware hides the attempt number in two
+      // bytes after the text, which a text this long has no room for, and
+      // refuses the send; such a text goes round its four attempts again.
+      const long = new TextEncoder().encode(message.text).length > MAX_TEXT_LEN - 2;
       const result = await client.sendTextMessage(fromHex(contact.prefix), message.text, {
-        attempt: message.attempt,
+        attempt: long && message.attempt > 3 ? message.attempt & 3 : message.attempt,
         timestamp: message.timestamp,
       });
       this.armAck(message.id, result, result.flood ? null : route);
