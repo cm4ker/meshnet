@@ -15,6 +15,7 @@ import { routeWords } from "../lib/routes.js";
 import { useSavedPasswords } from "../lib/secrets.js";
 import { session, useSession } from "../lib/session.js";
 import { act } from "../lib/toast.js";
+import { getTextScale, subscribeTextSize } from "../theme/textSize.js";
 import { IconButton } from "../ui/Button.js";
 import { Avatar } from "./Avatar.js";
 import { ChatIcon, CloseIcon, InfoIcon, RefreshIcon, SearchIcon, StarFilledIcon } from "./Icons.js";
@@ -395,14 +396,16 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
   }, []);
 
   // The lowest position shows the search and the chips, and stops before the first line of the list.
+  // A new text size moves where the chips end; hidden, the sheet has nowhere to measure.
+  const textScale = useSyncExternalStore(subscribeTextSize, getTextScale);
   useLayoutEffect(() => {
     const el = sheet.current;
     const scroller = body.current;
     const chips = listed ? scroller?.querySelector<HTMLElement>(".chips") : null;
-    if (!el || !scroller || !chips || space.height === 0) return;
+    if (!el || !scroller || !chips || space.height === 0 || hidden) return;
     const peek = Math.round(chips.getBoundingClientRect().bottom - el.getBoundingClientRect().top + scroller.scrollTop);
     setSpace((s) => (s.peek === peek ? s : { ...s, peek }));
-  }, [listed, space.height]);
+  }, [listed, space.height, hidden, textScale]);
 
   // A card sits at its own height instead of the list's middle one, so more of the map shows around it.
   useLayoutEffect(() => {

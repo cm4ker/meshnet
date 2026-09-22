@@ -6,14 +6,17 @@ import { isCapacitor } from "./lib/platform.js";
 import { session } from "./lib/session.js";
 import { connectors } from "./transports/index.js";
 import { initTheme } from "./theme/store.js";
+import { initTextSize } from "./theme/textSize.js";
 import "./styles.css";
 
 // For the console, and for driving the shell from a test rig: the session,
 // the link and the connectors, under one name.
 Object.assign(window, { meshnet: { session, getLink, connectWith, disconnect, connectors } });
 
-// Before the first render, so the page never paints in one palette and resolves into another.
+// Before the first render, so the page never paints in one palette or one text size and resolves
+// into another.
 initTheme();
+initTextSize();
 
 // In the phone app the page is the whole app, laid out to the screen, and a
 // pinch that zooms it only leaves it scrolling sideways. The same cap stops

@@ -14,26 +14,32 @@
   --space-5: 24px;
   --space-6: 32px;
 
-  --text-xs: 11px;
-  --text-sm: 12px;
-  --text-base: 13px;
-  --text-lg: 15px;
-  --text-xl: 18px;
+  /* The reader's text size (theme/textSize.ts), as a share of the sizes below. Text grows by all of
+     it; a box that holds a line of text grows by half as much, enough to keep the line inside
+     without the layout ballooning. Icons, gaps and hairlines keep their size. */
+  --text-scale: 1;
+  --box-scale: calc(0.5 + var(--text-scale) / 2);
+
+  --text-xs: calc(11px * var(--text-scale));
+  --text-sm: calc(12px * var(--text-scale));
+  --text-base: calc(13px * var(--text-scale));
+  --text-lg: calc(15px * var(--text-scale));
+  --text-xl: calc(18px * var(--text-scale));
 
   --radius: 4px;
   --radius-lg: 8px;
   --radius-bubble: 12px;
 
-  --control-h-sm: 24px;
-  --control-h: 32px;
-  --control-h-lg: 40px;
+  --control-h-sm: calc(24px * var(--box-scale));
+  --control-h: calc(32px * var(--box-scale));
+  --control-h-lg: calc(40px * var(--box-scale));
 
   --font-ui: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, monospace;
 
   --rail-width: 60px;
-  --pane-width: 320px;
-  --tabbar-height: 52px;
+  --pane-width: calc(320px * var(--box-scale));
+  --tabbar-height: calc(52px * var(--box-scale));
 
   --avatar-l: 62%;
   --avatar-c: 0.11;
@@ -361,10 +367,10 @@ textarea.input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
+  min-width: calc(18px * var(--text-scale));
+  height: calc(18px * var(--text-scale));
   padding: 0 6px;
-  border-radius: 9px;
+  border-radius: 999px;
   background: var(--accent);
   color: var(--accent-contrast);
   font-size: var(--text-xs);
@@ -574,7 +580,7 @@ textarea.input {
   cursor: pointer;
 }
 .rail button {
-  height: 54px;
+  height: calc(54px * var(--box-scale));
 }
 @media (hover: hover) {
   .rail button:hover,
@@ -587,11 +593,11 @@ textarea.input {
   color: var(--text);
 }
 .rail .rail-search {
-  height: 36px;
+  height: calc(36px * var(--box-scale));
   margin-bottom: var(--space-2);
 }
 .rail .rail-radio {
-  height: 58px;
+  height: calc(58px * var(--box-scale));
 }
 .rail-radio .dot {
   position: absolute;
@@ -604,15 +610,15 @@ textarea.input {
   position: absolute;
   top: 4px;
   left: calc(50% + 4px);
-  min-width: 16px;
-  height: 16px;
+  min-width: calc(16px * var(--text-scale));
+  height: calc(16px * var(--text-scale));
   padding: 0 4px;
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--accent);
   color: var(--accent-contrast);
-  font-size: 10px;
+  font-size: calc(10px * var(--text-scale));
   font-weight: 600;
-  line-height: 16px;
+  line-height: calc(16px * var(--text-scale));
 }
 .tab-dot {
   position: absolute;
@@ -803,7 +809,7 @@ textarea.input {
 }
 .list-head h1 {
   flex: 1;
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
   font-weight: 600;
   letter-spacing: -0.01em;
 }
@@ -818,7 +824,7 @@ textarea.input {
   gap: var(--space-2);
   margin: 0 var(--space-3) var(--space-2);
   padding: 0 10px;
-  height: 34px;
+  height: calc(34px * var(--box-scale));
   border-radius: var(--radius-lg);
   background: var(--hover);
   color: var(--text-faint);
@@ -831,7 +837,7 @@ textarea.input {
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 .search:focus-within {
   outline: 2px solid var(--accent);
@@ -1003,7 +1009,7 @@ textarea.input {
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   text-align: left;
 }
 .line + .line,
@@ -1087,6 +1093,44 @@ button.line:disabled,
 .line-block {
   padding: var(--space-3);
 }
+/* The text size slider: a small A and a large one at its ends, and the size as a number. The As
+   keep their size while the text around them grows, so they read as the ends of the range. */
+.text-size {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.text-size input {
+  flex: 1;
+  min-width: 0;
+}
+.text-size-a {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.text-size-a.large {
+  font-size: 20px;
+}
+.text-size-value {
+  min-width: 4ch;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* A window onto a chat, on the chat's own ground, where a message's bubble stands out. */
+.line-block.text-sample {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0 var(--space-3) var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  box-shadow: none;
+}
+.text-sample .bubble {
+  cursor: default;
+}
 .air-mark {
   flex: none;
   display: inline-flex;
@@ -1153,7 +1197,7 @@ details.more .kv-grid {
 }
 .hero h1 {
   margin-top: var(--space-2);
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
   font-weight: 600;
   letter-spacing: -0.01em;
   overflow-wrap: anywhere;
@@ -1437,7 +1481,7 @@ details.more .kv-grid {
 }
 .palette-field input {
   flex: 1;
-  height: 48px;
+  height: calc(48px * var(--box-scale));
   border: 0;
   outline: 0;
   background: transparent;
@@ -1547,7 +1591,7 @@ details.more .kv-grid {
   gap: 6px;
 }
 .preset-chips .chip {
-  height: 28px;
+  height: calc(28px * var(--box-scale));
   padding: 0 10px;
 }
 .page-actions {
@@ -1657,7 +1701,7 @@ details.more .kv-grid {
   border-radius: 16px;
   background: var(--bubble-in);
   color: var(--text);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   cursor: pointer;
@@ -1722,11 +1766,11 @@ details.more .kv-grid {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 24px;
+  height: calc(24px * var(--box-scale));
   margin-top: 4px;
   padding: 0 10px 0 8px;
   border: 1px solid currentColor;
-  border-radius: 12px;
+  border-radius: 999px;
   background: transparent;
   font: inherit;
   font-size: var(--text-xs);
@@ -1749,7 +1793,7 @@ details.more .kv-grid {
   flex-direction: column;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 .quote.out {
   background: var(--bubble-out);
@@ -1780,7 +1824,7 @@ details.more .kv-grid {
   color: var(--text);
 }
 .details-label {
-  font-size: 10px;
+  font-size: calc(10px * var(--text-scale));
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1811,10 +1855,10 @@ details.more .kv-grid {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 22px;
+  height: calc(22px * var(--box-scale));
   padding: 0 7px;
   border: 1px solid var(--border-strong);
-  border-radius: 11px;
+  border-radius: 999px;
   background: var(--bg);
   color: var(--text);
   font: inherit;
@@ -1831,7 +1875,7 @@ button.hop {
 }
 .hop-hash {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--text-scale));
   color: var(--text-faint);
 }
 .hop.end {
@@ -2192,11 +2236,11 @@ button.hop {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 26px;
+  height: calc(26px * var(--box-scale));
   max-width: 45%;
   padding: 0 var(--space-2);
   border: 1px solid var(--border);
-  border-radius: 13px;
+  border-radius: 999px;
   color: var(--text-muted);
   font-size: var(--text-sm);
   white-space: nowrap;
@@ -2235,7 +2279,7 @@ button.hop {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 38px;
+  height: calc(38px * var(--box-scale));
   padding: 0 var(--space-3);
   border: 0;
   background: transparent;
@@ -2293,10 +2337,10 @@ button.hop {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 20px;
+  height: calc(20px * var(--box-scale));
   padding: 0 7px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 999px;
   background: var(--panel);
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -2344,7 +2388,7 @@ button.hop {
   font-size: var(--text-sm);
 }
 .stat-value {
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
   font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.25;
@@ -2559,7 +2603,7 @@ button.hop {
   display: flex;
   justify-content: space-between;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: calc(10px * var(--text-scale));
   font-variant-numeric: tabular-nums;
 }
 .range-values {
@@ -3077,12 +3121,12 @@ button.hop {
 }
 
 /* iOS zooms the page into any field whose text is under 16px, and leaves it zoomed. On a touch
-   screen every field is 16px, whatever its own rule says. */
+   screen every field is at least 16px, whatever its own rule says, and grows with the text size. */
 @media (pointer: coarse) {
   input:not([type="checkbox"], [type="radio"], [type="range"]),
   textarea,
   select {
-    font-size: 16px !important;
+    font-size: max(16px, var(--text-base)) !important;
   }
 }
 

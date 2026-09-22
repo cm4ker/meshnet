@@ -10,6 +10,7 @@ import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.
 import { session, storage, useSession } from "../lib/session.js";
 import { act, toast } from "../lib/toast.js";
 import { getPreference, listThemes, setPreference, subscribeTheme } from "../theme/store.js";
+import { getSystemTextScale, getTextScale, getTextSizePreference, hasSystemTextSize, setTextSizePreference, subscribeTextSize, TEXT_STEPS } from "../theme/textSize.js";
 import { autoConnectWanted, setAutoConnect } from "../transports/index.js";
 import { Button } from "../ui/Button.js";
 import { Confirm } from "../ui/Dialog.js";
@@ -463,10 +464,66 @@ function MessagesPage() {
 
 function AppearancePage() {
   const preference = useSyncExternalStore(subscribeTheme, getPreference);
+  const textSize = useSyncExternalStore(subscribeTextSize, getTextSizePreference);
+  const scale = useSyncExternalStore(subscribeTextSize, getTextScale);
+  const system = useSyncExternalStore(subscribeTextSize, getSystemTextScale);
+  // The step nearest the size drawn now; the system's own size may fall between two.
+  const step = TEXT_STEPS.reduce((best, s, i) => (Math.abs(s - scale) < Math.abs((TEXT_STEPS[best] ?? 1) - scale) ? i : best), 0);
+  const percent = (s: number) => `${Math.round(s * 100)}%`;
   return (
-    <Group>
-      <SelectRow label="Theme" value={preference} options={[{ value: "system", label: "Follow the system" }, ...listThemes().map((t) => ({ value: t.id, label: t.name }))]} onChange={(v) => setPreference(v)} />
-    </Group>
+    <>
+      <Group>
+        <SelectRow label="Theme" value={preference} options={[{ value: "system", label: "Follow the system" }, ...listThemes().map((t) => ({ value: t.id, label: t.name }))]} onChange={(v) => setPreference(v)} />
+      </Group>
+      <Group title="Text size">
+        {hasSystemTextSize() ? (
+          <SwitchRow label="Follow the system" hint={`The phone's text size, ${percent(system)}`} checked={textSize === "system"} onChange={(v) => setTextSizePreference(v ? "system" : String(TEXT_STEPS[step] ?? 1))} />
+        ) : null}
+        <Block className="text-size">
+          <span className="text-size-a" aria-hidden="true">
+            A
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={TEXT_STEPS.length - 1}
+            step={1}
+            value={step}
+            aria-label="Text size"
+            aria-valuetext={percent(scale)}
+            onChange={(e) => setTextSizePreference(String(TEXT_STEPS[Number(e.target.value)] ?? 1))}
+          />
+          <span className="text-size-a large" aria-hidden="true">
+            A
+          </span>
+          <span className="text-size-value">{percent(scale)}</span>
+        </Block>
+        {/* What a chat looks like at this size, drawn by the chat's own rules. */}
+        <Block className="text-sample">
+          <div className="msg in">
+            <div className="msg-col">
+              <div className="bubble">
+                <span className="msg-sender">Ridge</span>
+                <span className="msg-text">Anyone hearing me from the valley?</span>
+                <span className="msg-meta">
+                  <span>18:04</span>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="msg out">
+            <div className="msg-col">
+              <div className="bubble">
+                <span className="msg-text">Loud and clear, two hops.</span>
+                <span className="msg-meta">
+                  <span>18:05</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </Block>
+      </Group>
+    </>
   );
 }
 

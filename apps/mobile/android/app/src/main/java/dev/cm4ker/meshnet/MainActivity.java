@@ -10,7 +10,13 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         // Plugins that live in this app rather than in a package are registered by hand, before the bridge starts.
         registerPlugin(MeshTcpPlugin.class);
+        registerPlugin(SystemTextPlugin.class);
         super.onCreate(savedInstanceState);
+
+        // The page draws its text at the system's size itself (SystemTextPlugin); the WebView scaling
+        // it as well would apply the setting twice.
+        WebView view = getBridge() != null ? getBridge().getWebView() : null;
+        if (view != null) view.getSettings().setTextZoom(100);
 
         // The client keeps a history entry while a screen is open over a section's root, so Back
         // closes that screen; only at a root does Back leave the app, as Android's own apps do.
