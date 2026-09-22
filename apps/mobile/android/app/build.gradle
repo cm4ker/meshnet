@@ -62,7 +62,7 @@ tasks.register('validatePlayRelease') {
             throw new GradleException('Unset CAP_SERVER_URL before building a release. The app must carry its web assets.')
         }
         if (!hasUploadKey || !rootProject.file(uploadStore).isFile()) {
-            throw new GradleException('Configure the upload key in keystore.properties or ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD. See docs/google-play.md.')
+            throw new GradleException('Configure the upload key in keystore.properties or ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD.')
         }
     }
 }

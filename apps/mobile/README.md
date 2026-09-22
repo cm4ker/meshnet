@@ -34,16 +34,6 @@ methods and events on both. The framing is the client's
 
 CI builds a debug APK on every push (`.github/workflows/build.yml`).
 
-For Google Play, use the **Google Play** GitHub Actions workflow to build, sign
-and upload to a selected track. Its default is an internal draft. Pull requests
-validate the release build using a disposable key, without publishing.
-
-For an optional local build, use `pnpm android:aab` from the repository root with JDK 21,
-`ANDROID_VERSION_CODE` and an upload key configured. It builds and syncs only
-Android, checks the release assets, runs Android lint and creates a signed AAB.
-See [Google Play preparation](../../docs/google-play.md) for signing, store
-copy, privacy disclosures, review access and device checks.
-
 ## iOS
 
 It needs a Mac with Xcode. The Mac here is `server.lan`, the same one the Sovabox
