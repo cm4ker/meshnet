@@ -2196,21 +2196,12 @@ button.hop {
   background: var(--chrome);
   color: var(--text);
 }
-.compose-send.pin {
-  color: var(--text-muted);
-}
-.compose-send.pin:disabled {
-  opacity: 0.5;
+.compose-send.idle {
+  cursor: default;
 }
 .compose-send.over {
   color: var(--danger);
   cursor: default;
-}
-@media (hover: hover) {
-  .compose-send.pin:hover {
-    background: var(--hover);
-    color: var(--accent);
-  }
 }
 /* The meter runs along the frame's lower edge, between its rounded corners. */
 .compose-meter {

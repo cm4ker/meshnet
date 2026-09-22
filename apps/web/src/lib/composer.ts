@@ -196,9 +196,4 @@ export function hasCyrillic(text: string): boolean {
   return /[Ѐ-ӿ]/.test(text);
 }
 
-/** A position as text other clients read as a link too: four decimals, about 11 m. */
-export function geoText(lat: number, lon: number): string {
-  return `geo:${lat.toFixed(4)},${lon.toFixed(4)}`;
-}
-
 export const GEO = /geo:(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/g;

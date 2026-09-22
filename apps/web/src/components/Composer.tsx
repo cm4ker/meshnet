@@ -9,17 +9,16 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { AdvType, MAX_TEXT_LEN, parseConversation } from "@meshnet/meshcore";
-import { costOf, blockEdges, geoText, hasCyrillic, headerBytes, mentionOf, mentionQuery, pathBytes, segments, splitParts, translit } from "../lib/composer.js";
+import { costOf, blockEdges, hasCyrillic, headerBytes, mentionOf, mentionQuery, pathBytes, segments, splitParts, translit } from "../lib/composer.js";
 import { messagesIn } from "../lib/conversations.js";
 import { getDraft, setDraft } from "../lib/drafts.js";
 import { utf8Length } from "../lib/format.js";
 import { packLookalikes, useLookalikePrefs } from "../lib/lookalikes.js";
 import { usePress } from "../lib/press.js";
 import { session, useSession } from "../lib/session.js";
-import { toast } from "../lib/toast.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
-import { ClockIcon, CloseIcon, LocationIcon, ReplyIcon, SendIcon, TextIcon, WavesIcon } from "./Icons.js";
+import { ClockIcon, CloseIcon, ReplyIcon, SendIcon, TextIcon, WavesIcon } from "./Icons.js";
 
 /** A message being answered: on the air, only its author's name before the text. */
 export interface Reply {
@@ -37,7 +36,6 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
   const [text, setText] = useState(() => getDraft(radio, conversation));
   const [focused, setFocused] = useState(false);
   const [pick, setPick] = useState<{ start: number; end: number; query: string; index: number } | null>(null);
-  const [locating, setLocating] = useState(false);
   const [shake, setShake] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
@@ -152,28 +150,6 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
     }
   };
 
-  const locate = () => {
-    const put = (lat: number, lon: number) => replace(0, text.length, geoText(lat, lon));
-    // The radio's own position is the fallback: set by hand or from GPS, it is where the radio said it was.
-    const fallback = () => {
-      if (self && (self.lat !== 0 || self.lon !== 0)) put(self.lat, self.lon);
-      else toast("Neither this device nor the radio knows where it is", "error");
-    };
-    if (!("geolocation" in navigator)) return fallback();
-    setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocating(false);
-        put(pos.coords.latitude, pos.coords.longitude);
-      },
-      () => {
-        setLocating(false);
-        fallback();
-      },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60_000 },
-    );
-  };
-
   // Held, or right-clicked: the other ways to send this.
   const press = usePress((at) => {
     if (empty) return;
@@ -233,7 +209,7 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
   const placeholder = !online ? "Radio offline · sends when it's back" : target.kind === "channel" && target.index === 0 ? `Everyone on ${title} hears this` : `Message ${title}`;
   const saved = cost.typed - cost.used;
   const button = empty
-    ? { cls: "pin", label: "Share my location", icon: <LocationIcon size={19} />, disabled: locating, act: locate }
+    ? { cls: "idle", label: "Send", icon: <SendIcon size={18} />, disabled: true, act: () => undefined }
     : over
       ? { cls: "over", label: "Too long to send", icon: <SendIcon size={18} />, disabled: true, act: () => undefined }
       : online
@@ -341,7 +317,6 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
             type="button"
             className={["compose-send", button.cls].join(" ")}
             aria-label={button.label}
-            title={button.cls === "pin" ? "Share my location: puts it in the message as a geo: link" : undefined}
             disabled={button.disabled}
             onMouseDown={(e) => e.preventDefault()}
             onClick={button.act}

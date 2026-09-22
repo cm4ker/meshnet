@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { airtimeMs, blockEdges, costOf, geoText, headerBytes, mentionQuery, segments, splitParts, translit } from "./composer.js";
+import { airtimeMs, blockEdges, costOf, headerBytes, mentionQuery, segments, splitParts, translit } from "./composer.js";
 import { packLookalikes } from "./lookalikes.js";
 import { utf8Length } from "./format.js";
 
@@ -76,9 +76,4 @@ test("a long text splits between words, each part within the budget with its mar
 test("translit keeps capitals and drops the hard and soft signs", () => {
   assert.equal(translit("Щука съела Ёжика"), "Schuka sela Yozhika");
   assert.ok(utf8Length(translit("Привет, как слышно?")) < utf8Length("Привет, как слышно?"));
-});
-
-test("a position goes as a geo: link with four decimals", () => {
-  assert.equal(geoText(59.938612, 30.314129), "geo:59.9386,30.3141");
-  assert.equal(utf8Length(geoText(59.938612, 30.314129)), 19);
 });
