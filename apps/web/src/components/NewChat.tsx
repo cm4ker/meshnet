@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { channelConversation, contactConversation, fromHex, isConversationType, isFavourite } from "@meshnet/meshcore";
 import { freeChannelIndex, parseSecret, randomSecret } from "../lib/channels.js";
 import { openConversation } from "../lib/nav.js";
-import { kindLabel } from "../lib/nodes.js";
+import { heardAt, kindLabel } from "../lib/nodes.js";
 import { routeWords } from "../lib/routes.js";
 import { session, useSession } from "../lib/session.js";
 import { Button } from "../ui/Button.js";
@@ -44,7 +44,7 @@ function People({ onDone }: { onDone: () => void }) {
     const q = query.trim().toLowerCase();
     return Object.values(state.contacts)
       .filter((c) => isConversationType(c.type) && (!q || c.name.toLowerCase().includes(q)))
-      .sort((a, b) => Number(isFavourite(b)) - Number(isFavourite(a)) || Math.max(b.lastHeardAt ?? 0, b.lastAdvert * 1000) - Math.max(a.lastHeardAt ?? 0, a.lastAdvert * 1000));
+      .sort((a, b) => Number(isFavourite(b)) - Number(isFavourite(a)) || heardAt(b) - heardAt(a));
   }, [state.contacts, query]);
   return (
     <>

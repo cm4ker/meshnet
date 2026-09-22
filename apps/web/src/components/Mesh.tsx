@@ -16,7 +16,7 @@ import { useDiscovery } from "../lib/discovery.js";
 import { contactEnd, defaultHeight, discoveryOverlay, EMPTY_OVERLAY, editOverlay, hearsOverlay, losOverlay, relayOf, routeOverlay, selfEnd, type MapHandle, type MapOverlay } from "../lib/mapOverlay.js";
 import { useMeshTool, type LosEnd } from "../lib/meshTool.js";
 import { focusOnMap, openConversation, openProfile, useNav } from "../lib/nav.js";
-import { kindLabel } from "../lib/nodes.js";
+import { heardAt as heard, kindLabel } from "../lib/nodes.js";
 import { usePing, measuredLegs } from "../lib/ping.js";
 import { routeWords } from "../lib/routes.js";
 import { useSavedPasswords } from "../lib/secrets.js";
@@ -88,10 +88,6 @@ function matcher(state: SessionState, saved: readonly string[], kind: Kind, quer
         return true;
     }
   };
-}
-
-function heard(c: ContactRecord): number {
-  return Math.max(c.lastHeardAt ?? 0, c.lastAdvert * 1000);
 }
 
 /** A node of yours in trouble: its last status says its battery is low. */

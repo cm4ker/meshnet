@@ -38,6 +38,17 @@ export function hopsLabel(contact: ContactRecord): string {
   return hops === null ? "no route" : hops === 0 ? "direct" : `${hops} hop${hops === 1 ? "" : "s"}`;
 }
 
+/**
+ * When this radio last heard the node, ms, or 0. An advert carries the sender's own clock,
+ * and some run hours ahead: taken as is, such a node reads "just now" and tops every list for
+ * as long as its clock is wrong. The radio stamps the contact with its own clock (`lastMod`)
+ * when it stores the advert, so the advert counts no later than that.
+ */
+export function heardAt(contact: ContactRecord): number {
+  const advert = contact.lastMod > 0 ? Math.min(contact.lastAdvert, contact.lastMod) : contact.lastAdvert;
+  return Math.max(contact.lastHeardAt ?? 0, advert * 1000);
+}
+
 export function nodeKindName(type: number): string {
   return type === AdvType.Repeater ? "Repeater" : type === AdvType.Room ? "Room" : type === AdvType.Sensor ? "Sensor" : "Node";
 }

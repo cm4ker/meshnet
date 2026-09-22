@@ -3,7 +3,7 @@ import { AdvType, aclRoleName, contactConversation, isConversationType, isFavour
 import { ago, agoPhrase } from "../lib/format.js";
 import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "../lib/geo.js";
 import { openConversation, openNodePage, openRoute, showOnMap, type NodePage } from "../lib/nav.js";
-import { isAdmin, kindLabel } from "../lib/nodes.js";
+import { heardAt, isAdmin, kindLabel } from "../lib/nodes.js";
 import { routeWords } from "../lib/routes.js";
 import { forgetPassword, hasSavedPassword, useSavedPasswords } from "../lib/secrets.js";
 import { session, useSession } from "../lib/session.js";
@@ -61,7 +61,7 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
   const self = state.self;
   const placed = hasPosition(contact.lat, contact.lon);
   const where = self && placed && hasPosition(self.lat, self.lon) ? `${formatDistance(distanceKm(self.lat, self.lon, contact.lat, contact.lon))} ${compass(bearingDeg(self.lat, self.lon, contact.lat, contact.lon))} of you` : placed ? "" : "No position shared";
-  const heard = Math.max(contact.lastHeardAt ?? 0, contact.lastAdvert * 1000) || null;
+  const heard = heardAt(contact) || null;
   const route = routeWords(contact);
   const telemetry = state.telemetry[key];
   const owner = state.ownerInfo[key];

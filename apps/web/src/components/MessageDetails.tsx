@@ -3,6 +3,7 @@ import type { ContactRecord, MessageEcho, MessageRecord } from "@meshnet/meshcor
 import { candidatesOfHash, nameOfHash, relaysOf } from "../lib/echoes.js";
 import { ago, utf8Length } from "../lib/format.js";
 import { openProfile } from "../lib/nav.js";
+import { heardAt } from "../lib/nodes.js";
 import { useSession } from "../lib/session.js";
 
 /**
@@ -88,7 +89,7 @@ export function MessageDetails({ message, peer }: { message: MessageRecord; peer
           </span>
           {candidates.map((c) => (
             <button key={c.key} type="button" className="link" onClick={() => openProfile(c.key)}>
-              {c.name || c.prefix} · heard {ago(Math.max(c.lastHeardAt ?? 0, c.lastAdvert * 1000) || null)}
+              {c.name || c.prefix} · heard {ago(heardAt(c) || null)}
             </button>
           ))}
         </div>
