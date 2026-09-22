@@ -35,7 +35,8 @@
    GitHub Pages публикует её из ветки `gh-pages`. Проверить контактные данные перед отправкой.
    Исходник [privacy.html](../apps/web/public/privacy.html) также включён в приложение.
    При изменении политики обновляйте файл и опубликованную копию согласованно.
-5. Подготовить постоянный upload key и его резервную копию. Ключ для локальной проверки
+5. Сделать переносимую резервную копию уже созданного постоянного upload key
+   (расположение и хранение пароля описаны ниже). Ключ для локальной проверки
    с именем `validation-only` не использовать в Play Console.
 6. Выполнить проверки на реальных телефонах ниже, загрузить AAB сначала в Internal testing,
    пройти pre-launch report, заполнить App content и только затем выпускать приложение.
@@ -89,7 +90,29 @@ pnpm android:aab
 менеджере паролей вместе с резервной копией keystore. Файл сертификата `.pem` публичный.
 Сам ключ или пароль не нужно отправлять в чат.
 
-В environment `google-play` добавьте secrets:
+Для текущего репозитория Google Cloud уже настроен:
+
+- проект `pc-api-7217932541284121197-138`, Google Play Android Developer API включён;
+- сервисный аккаунт
+  `github-ommesh-play@pc-api-7217932541284121197-138.iam.gserviceaccount.com`;
+- `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` сохранён в обоих environments:
+  `google-play` и `google-play-production`;
+- резервный JSON-ключ находится в
+  `%USERPROFILE%/.android/ommesh-google-play/google-play-service-account.json`,
+  вне репозитория, в каталоге с ограниченным доступом.
+
+Авторизация сервисного аккаунта проверена. На 22 сентября API отвечает
+`Package not found: dev.cm4ker.meshnet`: доступ к пакету ещё не подтверждён,
+загрузки в Play не выполнялись. Владелец должен добавить указанный email в
+Play Console → Users and permissions с доступом к Ommesh и зарегистрировать
+пакет первой загрузкой через Console. Вход в Google Cloud не выдаёт права в Play.
+
+Первый подписанный AAB уже собран на CI: версия `0.2.0`, `versionCode 1`,
+[успешный запуск](https://github.com/cm4ker/meshnet/actions/runs/35712081261).
+Артефакт `ommesh-google-play-1` хранится в GitHub 30 дней. Постоянный upload key
+повторно создавать не нужно.
+
+В environment `google-play` используются secrets:
 
 | Secret | Значение |
 | --- | --- |
@@ -105,7 +128,8 @@ pnpm android:aab
 соответствующие права публикации. Не выдавайте доступ ко всем приложениям, если он не нужен.
 [Настройка Google Play API](https://developers.google.com/android-publisher/getting_started).
 
-Если доступ к Google настраивается с нуля:
+Следующие шаги нужны для настройки нового проекта или восстановления доступа;
+Google Cloud и GitHub Secrets текущего репозитория уже настроены:
 
 1. Войдите в [Play Console](https://play.google.com/console/) и создайте приложение **Ommesh**.
    Завершите обязательные проверки аккаунта и примите условия Google.
@@ -130,10 +154,19 @@ Get-Content -Raw 'C:/private/google-play-service-account.json' | gh secret set G
 аккаунта CI выполнить вместо владельца не может.
 
 Для production job используется отдельный environment `google-play-production`;
-добавьте туда `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` с нужными правами либо используйте
-одноимённый repository secret. Upload keystore нужен только job сборки в `google-play`.
+секрет `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` туда уже добавлен. Права выпуска в
+production назначаются этому аккаунту отдельно в Play Console.
+Upload keystore нужен только job сборки в `google-play`.
 
 После попадания workflow в `master`: Actions → Google Play → Run workflow.
+До merge запуск доступен через GitHub CLI с `--ref codex/google-play-ci`:
+
+```powershell
+gh workflow run android-play.yml --repo cm4ker/meshnet --ref codex/google-play-ci -f version_code=2 -f upload=true -f track=internal -f status=draft -f send_for_review=true
+```
+
+В примере код `2` подходит только если ранее был загружен лишь код `1`.
+Запуск с `upload=true` возможен после выдачи прав и первой загрузки через Console.
 
 | Поле | Значение |
 | --- | --- |
@@ -147,7 +180,8 @@ Get-Content -Raw 'C:/private/google-play-service-account.json' | gh secret set G
 Запустите workflow с `upload=false`, скачайте artifact `ommesh-google-play-<version_code>`
 и выполните первоначальную загрузку через Console: API требует уже существующий пакет.
 Дальнейшие версии можно полностью собирать и загружать из CI.
-[Ограничение первоначальной загрузки и параметры action](https://github.com/r0adkll/upload-google-play).
+[Ограничение первоначальной загрузки в документации Google](https://developers.google.com/android-publisher/edits),
+[параметры action](https://github.com/r0adkll/upload-google-play).
 
 Workflow проверяет TypeScript, тесты, Android lint и подпись. AAB сохраняется перед загрузкой,
 поэтому ошибка API не теряет артефакт. Не перезапускайте загрузку того же `versionCode`, если
