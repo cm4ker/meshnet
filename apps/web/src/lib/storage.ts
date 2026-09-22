@@ -13,13 +13,24 @@ import type { PersistedState, SessionStorage } from "@meshnet/meshcore";
 const DB_NAME = "meshnet";
 const STORE = "radios";
 
-function openDb(): Promise<IDBDatabase> {
+/**
+ * Opened at whatever version it is (1 when new), so an older build reads it as
+ * well. A database without the store, as one opened by some other code at 1
+ * would be, is opened once more a version up to add it.
+ */
+function openDb(version?: number): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
+    const request = version === undefined ? indexedDB.open(DB_NAME) : indexedDB.open(DB_NAME, version);
     request.onupgradeneeded = () => {
-      request.result.createObjectStore(STORE);
+      if (!request.result.objectStoreNames.contains(STORE)) request.result.createObjectStore(STORE);
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      if (db.objectStoreNames.contains(STORE)) return resolve(db);
+      const next = db.version + 1;
+      db.close();
+      resolve(openDb(next));
+    };
     request.onerror = () => reject(request.error ?? new Error("could not open the database"));
   });
 }
@@ -35,38 +46,63 @@ function run<T>(db: IDBDatabase, mode: IDBTransactionMode, op: (store: IDBObject
   });
 }
 
+/**
+ * One connection, opened when first needed and opened again when it is lost.
+ * iOS closes a web view's database connections while the app is in the
+ * background; the connection kept from before then fails every request with
+ * "Connection to Indexed Database server lost" until the app restarts.
+ */
 export class IndexedDbStorage implements SessionStorage {
   private db: Promise<IDBDatabase> | null = null;
 
   private open(): Promise<IDBDatabase> {
-    this.db ??= openDb();
-    return this.db;
+    if (this.db) return this.db;
+    const opening = openDb().then((db) => {
+      const lost = () => {
+        if (this.db === opening) this.db = null;
+      };
+      db.onclose = lost;
+      db.onversionchange = () => {
+        db.close();
+        lost();
+      };
+      return db;
+    });
+    opening.catch(() => {
+      if (this.db === opening) this.db = null;
+    });
+    this.db = opening;
+    return opening;
   }
 
-  async load(radioKey: string): Promise<PersistedState | null> {
+  /** Once on the connection held, and once more on a new one if that fails. */
+  private async request<T>(mode: IDBTransactionMode, op: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+    const first = this.open();
     try {
-      const db = await this.open();
-      const value = await run<PersistedState | undefined>(db, "readonly", (s) => s.get(radioKey));
-      return value ?? null;
-    } catch (error) {
-      console.warn("history could not be read", error);
-      return null;
+      return await run(await first, mode, op);
+    } catch {
+      if (this.db === first) this.db = null;
+      void first.then((db) => db.close()).catch(() => undefined);
+      return run(await this.open(), mode, op);
     }
   }
 
+  /** Null when nothing is stored for the radio; a history that cannot be read rejects, so it is not taken for none. */
+  async load(radioKey: string): Promise<PersistedState | null> {
+    const value = await this.request<PersistedState | undefined>("readonly", (s) => s.get(radioKey));
+    return value ?? null;
+  }
+
   async save(radioKey: string, state: PersistedState): Promise<void> {
-    const db = await this.open();
-    await run(db, "readwrite", (s) => s.put(state, radioKey));
+    await this.request("readwrite", (s) => s.put(state, radioKey));
   }
 
   async forget(radioKey: string): Promise<void> {
-    const db = await this.open();
-    await run(db, "readwrite", (s) => s.delete(radioKey));
+    await this.request("readwrite", (s) => s.delete(radioKey));
   }
 
   async listRadios(): Promise<string[]> {
-    const db = await this.open();
-    const keys = await run<IDBValidKey[]>(db, "readonly", (s) => s.getAllKeys());
+    const keys = await this.request<IDBValidKey[]>("readonly", (s) => s.getAllKeys());
     return keys.map(String);
   }
 }

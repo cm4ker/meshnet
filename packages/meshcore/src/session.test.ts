@@ -400,6 +400,65 @@ test("what was heard survives a reconnect through the storage, keyed by the radi
   assert.equal(fetch.length, 5);
 });
 
+test("back on the same radio, the session goes on from the history it holds, not an older stored copy", async () => {
+  // A phone's web view can lose its database in the background: saves fail, and the stored copy falls behind.
+  class LosingStorage extends MemoryStorage {
+    lost = false;
+    override async save(key: string, state: PersistedState): Promise<void> {
+      if (this.lost) throw new Error("Connection to Indexed Database server lost");
+      await super.save(key, state);
+    }
+  }
+  const storage = new LosingStorage();
+  const session = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  const radio = new ScriptedRadio();
+  radio.queue.push(dmFrame(BOB, "before"));
+  await session.connect(radio);
+  await session.disconnect();
+
+  storage.lost = true;
+  const again = new ScriptedRadio();
+  again.queue.push(dmFrame(BOB, "while nothing saves"));
+  await session.connect(again);
+  await session.disconnect();
+
+  storage.lost = false;
+  await session.connect(new ScriptedRadio());
+  assert.deepEqual(session.getState().messages.map((m) => m.text), ["before", "while nothing saves"]);
+});
+
+test("a stored history that cannot be read is not written over", async () => {
+  class UnreadableStorage extends MemoryStorage {
+    unreadable = false;
+    override async load(key: string): Promise<PersistedState | null> {
+      if (this.unreadable) throw new Error("Connection to Indexed Database server lost");
+      return super.load(key);
+    }
+  }
+  const storage = new UnreadableStorage();
+  const first = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  const radio = new ScriptedRadio();
+  radio.queue.push(dmFrame(BOB, "keep me"));
+  await first.connect(radio);
+  await first.disconnect();
+  const key = first.getState().self!.key;
+
+  storage.unreadable = true;
+  const second = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  const again = new ScriptedRadio();
+  again.queue.push(dmFrame(BOB, "new"));
+  await second.connect(again);
+  assert.deepEqual(second.getState().messages.map((m) => m.text), ["new"]);
+  assert.ok(second.getState().log.some((e) => e.kind === "error" && e.text.startsWith("history could not be read")));
+  await second.disconnect();
+  assert.deepEqual(storage.saved.get(key)!.messages.map((m) => m.text), ["keep me"]);
+
+  // Readable again, it is read again rather than taken from what the session held meanwhile.
+  storage.unreadable = false;
+  await second.connect(new ScriptedRadio());
+  assert.deepEqual(second.getState().messages.map((m) => m.text), ["keep me"]);
+});
+
 test("history saved with the raw path_len byte is read back as a hop count", async () => {
   const storage = new MemoryStorage();
   const session = new MeshSession({ storage, now: () => 1_700_000_000_000 });

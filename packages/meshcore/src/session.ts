@@ -295,6 +295,7 @@ export interface PersistedState {
 }
 
 export interface SessionStorage {
+  /** Null when nothing is stored for the radio. A history that is there but cannot be read rejects: it is not the same as none. */
   load(radioKey: string): Promise<PersistedState | null>;
   save(radioKey: string, state: PersistedState): Promise<void>;
 }
@@ -525,6 +526,12 @@ function guessPathSince(lastMod: number, now: number): number {
   return at > now - 7 * 24 * 3600 * 1000 && at <= now ? at : now;
 }
 
+/** The part of the state that is kept per radio. */
+function historyOf(state: SessionState): PersistedState {
+  const { contacts, contactsCursor, channels, messages, unread, logins, statusHistory, routing } = state;
+  return { contacts, contactsCursor, channels, messages, unread, logins, statusHistory, routing };
+}
+
 /**
  * `previous` is what was known of the contact: its route's age carries over
  * while the route is the same. `learnedAt` is set when the radio has just said
@@ -662,6 +669,10 @@ export class MeshSession {
   private readonly trace: SessionOptions["trace"];
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private saveChain: Promise<void> = Promise.resolve();
+  /** The radio whose stored history could not be read at connect: nothing is written over it until it can be. */
+  private unreadHistory: string | null = null;
+  /** The history of the radio last connected, kept through failed attempts to connect again. */
+  private held: { key: string; history: PersistedState } | null = null;
   private syncQueued = false;
   private contactsRefreshQueued = false;
   private focused: string | null = null;
@@ -776,8 +787,9 @@ export class MeshSession {
     if (!this.storage || !this.state.self) return;
     const storage = this.storage;
     const key = this.state.self.key;
-    const { contacts, contactsCursor, channels, messages, unread, logins, statusHistory, routing } = this.state;
-    const saving = this.saveChain.catch(() => undefined).then(() => storage.save(key, { contacts, contactsCursor, channels, messages, unread, logins, statusHistory, routing }));
+    if (this.unreadHistory === key) return;
+    const history = historyOf(this.state);
+    const saving = this.saveChain.catch(() => undefined).then(() => storage.save(key, history));
     this.saveChain = saving;
     try {
       await saving;
@@ -818,6 +830,14 @@ export class MeshSession {
       this.saveTimer = null;
       await this.saveNow();
     }
+    // The history this session already holds. Back on the same radio it goes
+    // on from there rather than from the stored copy, which is never newer and
+    // is older when a save failed: a phone's web view can lose its database
+    // while the app is in the background, and a reconnect then read nothing and
+    // showed the chats empty. It is kept aside, since an attempt that fails
+    // leaves the state empty and a weak link can take a few. A history that
+    // could not be read at connect is read again instead.
+    if (this.state.self) this.held = this.unreadHistory === this.state.self.key ? null : { key: this.state.self.key, history: historyOf(this.state) };
     const client = new MeshCoreClient(transport, this.trace ? { trace: this.trace } : {});
     this.client = client;
     this.set({
@@ -846,7 +866,8 @@ export class MeshSession {
       const { publicKey: _omit, ...rest } = selfInfo;
       const self = { ...rest, key, prefix: key.slice(0, PUB_KEY_PREFIX_SIZE * 2) };
 
-      const persisted = this.storage ? await this.storage.load(key) : null;
+      const persisted = this.held?.key === key ? this.held.history : await this.readHistory(key);
+      this.held = null;
       const now = this.now();
       // Contacts saved before route ages were kept have none: a route of theirs
       // is dated as a route learned while nobody was listening.
@@ -890,6 +911,20 @@ export class MeshSession {
       }
       await client.close().catch(() => undefined);
       throw error;
+    }
+  }
+
+  /** The stored history of a radio, or null; one that cannot be read is logged, and kept from being written over. */
+  private async readHistory(key: string): Promise<PersistedState | null> {
+    if (!this.storage) return null;
+    try {
+      const history = await this.storage.load(key);
+      if (this.unreadHistory === key) this.unreadHistory = null;
+      return history;
+    } catch (error) {
+      this.unreadHistory = key;
+      this.log("error", `history could not be read, and is not saved over: ${(error as Error).message}`);
+      return null;
     }
   }
 

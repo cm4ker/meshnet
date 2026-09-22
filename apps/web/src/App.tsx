@@ -101,6 +101,16 @@ export function App() {
   // The iPhone's native watch learns the switches at every start.
   useEffect(() => { void tellWatch(); }, []);
 
+  // A phone may end the app in the background without a word, and history is
+  // saved a moment after it changes: on the way out it is saved at once.
+  useEffect(() => {
+    const away = () => {
+      if (document.visibilityState === "hidden") void session.flush().catch(() => undefined);
+    };
+    document.addEventListener("visibilitychange", away);
+    return () => document.removeEventListener("visibilitychange", away);
+  }, []);
+
   // Back on screen, the queue is read again: a phone suspends the page in the
   // background, and a "message waiting" push that arrived meanwhile may never
   // reach it. Reading an empty queue costs one short exchange.
