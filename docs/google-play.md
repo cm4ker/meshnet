@@ -22,12 +22,12 @@
   Ручной запуск собирает AAB, подписывает постоянным upload key и загружает в выбранный
   трек Google Play вместе с release notes. По умолчанию — черновик Internal testing.
 
-## Что нужно от владельца перед загрузкой
+## Что осталось перед публичным выпуском
 
-1. Подтвердить, что это первая публикация именно `dev.cm4ker.meshnet`.
-   Для существующего приложения нужны его package name, upload key и следующий свободный
-   `versionCode`; менять идентификатор опубликованного приложения нельзя.
-2. Создать/выбрать приложение в Play Console и завершить проверку аккаунта разработчика.
+1. Карточка [Ommesh](https://play.google.com/console/u/0/developers/7217932541284121197/app/4973381219606096949)
+   уже создана. Первый пакет `dev.cm4ker.meshnet` зарегистрирован загрузкой AAB
+   с `versionCode 1`; сервисному аккаунту выдан доступ.
+2. Завершить проверки аккаунта разработчика, если Console ещё показывает такие задачи.
 3. Указать действующий email поддержки, имя разработчика, страны распространения,
    цену и целевую аудиторию. Эти данные не выводятся автоматически из GitHub-профиля.
 4. Указать в Console опубликованный URL политики:
@@ -61,7 +61,7 @@ keytool -genkeypair -v -keystore "$env:USERPROFILE/.android/ommesh-upload.jks" -
 pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm test
-$env:ANDROID_VERSION_CODE = '1' # Только если этот код ещё не загружался в Play.
+$env:ANDROID_VERSION_CODE = '3' # Только если этот код ещё не загружался в Play.
 Remove-Item Env:CAP_SERVER_URL -ErrorAction SilentlyContinue
 pnpm android:aab
 ```
@@ -101,11 +101,16 @@ pnpm android:aab
   `%USERPROFILE%/.android/ommesh-google-play/google-play-service-account.json`,
   вне репозитория, в каталоге с ограниченным доступом.
 
-Авторизация сервисного аккаунта проверена. На 22 сентября API отвечает
-`Package not found: dev.cm4ker.meshnet`: доступ к пакету ещё не подтверждён,
-загрузки в Play не выполнялись. Владелец должен добавить указанный email в
-Play Console → Users and permissions с доступом к Ommesh и зарегистрировать
-пакет первой загрузкой через Console. Вход в Google Cloud не выдаёт права в Play.
+Авторизация и доступ сервисного аккаунта к `dev.cm4ker.meshnet` проверены
+22 сентября через Google Play API. Владелец зарегистрировал приложение первой
+загрузкой через Console и выдал аккаунту права. Начальный AAB с `versionCode 1`
+совпадает по SHA-256 с артефактом CI.
+
+[Проверочный запуск с загрузкой](https://github.com/cm4ker/meshnet/actions/runs/35726164629)
+полностью прошёл: TypeScript, тесты, release AAB, Android lint, подпись и upload.
+Google Play API подтвердил `versionCode 2` в треке `internal` со статусом `draft`.
+Следующий номер загрузки — не меньше `3`, с проверкой занятых кодов в Console.
+Черновик ещё не выпущен тестерам или публичным пользователям.
 
 Первый подписанный AAB уже собран на CI: версия `0.2.0`, `versionCode 1`,
 [успешный запуск](https://github.com/cm4ker/meshnet/actions/runs/35712081261).
@@ -162,10 +167,10 @@ Upload keystore нужен только job сборки в `google-play`.
 До merge запуск доступен через GitHub CLI с `--ref codex/google-play-ci`:
 
 ```powershell
-gh workflow run android-play.yml --repo cm4ker/meshnet --ref codex/google-play-ci -f version_code=2 -f upload=true -f track=internal -f status=draft -f send_for_review=true
+gh workflow run android-play.yml --repo cm4ker/meshnet --ref codex/google-play-ci -f version_code=3 -f upload=true -f track=internal -f status=draft -f send_for_review=true
 ```
 
-В примере код `2` подходит только если ранее был загружен лишь код `1`.
+В примере код `3` подходит только если ранее были загружены лишь коды `1` и `2`.
 Запуск с `upload=true` возможен после выдачи прав и первой загрузки через Console.
 
 | Поле | Значение |
@@ -187,12 +192,19 @@ Workflow проверяет TypeScript, тесты, Android lint и подпис
 поэтому ошибка API не теряет артефакт. Не перезапускайте загрузку того же `versionCode`, если
 Google уже принял bundle: завершите релиз в Console или используйте новый код.
 Черновик не доступен тестерам до выпуска. Production может потребовать review и production access;
-`completed` не обходит решения и ограничения Google. Описания карточки, изображения, privacy URL
-и анкеты App content настраиваются в Console отдельно.
+`completed` не обходит решения и ограничения Google. Workflow обновляет AAB и release notes;
+остальные данные карточки, privacy URL и анкеты App content поддерживаются отдельно.
+Основной язык карточки — `en-GB`; для него workflow использует английские release notes
+из `en-US`, а также загружает отдельные notes для `en-US` и `ru-RU`.
 
 ## Карточка и графика
 
 Тексты лежат в `docs/google-play/en-US` и `ru-RU`. Категория для обсуждения: **Communication**.
+22 сентября через API в карточке сохранены название, короткое и полное описания
+для `en-GB`, `en-US` и `ru-RU`, а также иконка и feature graphic для каждого языка.
+Для `en-GB` используется тот же английский текст, что для `en-US`.
+Email поддержки, скриншоты и обязательные формы перед публикацией ещё нужно завершить.
+
 В коде нет рекламы, покупок или учётной записи сервиса Ommesh. Для реальной связи нужна
 совместимая MeshCore companion-радиостанция; Android поддерживает Bluetooth LE и Wi-Fi/TCP,
 USB на Android не заявляется. Интерфейс сейчас английский; русское описание не означает
