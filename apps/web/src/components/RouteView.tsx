@@ -1,5 +1,5 @@
-import { AdvType, contactRoute, isConversationType, NoReplyError } from "@meshnet/meshcore";
-import { useState } from "react";
+import { AdvType, contactRoute, isConversationType } from "@meshnet/meshcore";
+import { discover as discoverPath, useDiscovery } from "../lib/discovery.js";
 import { nameOfHash } from "../lib/echoes.js";
 import { agoPhrase, timeOfDay } from "../lib/format.js";
 import { inMinutes, limitLabel, limitValue, parseLimit, ROUTE_LIMITS, routeWords, useNow } from "../lib/routes.js";
@@ -16,7 +16,7 @@ import { Gone, ScreenHead, type Chrome } from "./ScreenHead.js";
 export function RouteView({ contactKey, chrome }: { contactKey: string; chrome: Chrome }) {
   const state = useSession();
   const now = useNow();
-  const [discovering, setDiscovering] = useState(false);
+  const discovering = useDiscovery(contactKey)?.running ?? false;
   const contact = state.contacts[contactKey];
   if (!contact) return <Gone chrome={chrome} title="Route" text="This contact is no longer on the radio." />;
   const key = contact.key;
@@ -31,16 +31,14 @@ export function RouteView({ contactKey, chrome }: { contactKey: string; chrome: 
   // A repeater or a room answers a discovery only from a radio signed in to it.
   const needsSignIn = (contact.type === AdvType.Repeater || contact.type === AdvType.Room) && !state.logins[key]?.ok;
 
+  // The map draws what it found too, when the node is on it.
   const discover = async () => {
-    setDiscovering(true);
-    try {
-      const found = await session.discoverPath(key);
-      const via = found.out.length === 0 ? "heard direct" : `via ${found.out.map((h) => nameOfHash(h, state.contacts) ?? h).join(" › ")}`;
-      toast(governed && policy.flood ? `Found ${via}; it still floods` : found.changed ? `Found ${via}: now the route` : `Found ${via}, the route it had`);
-    } catch (error) {
-      toast(error instanceof NoReplyError ? (needsSignIn ? `No answer. ${name} answers only a radio signed in to it.` : `No answer from ${name}: out of range for now.`) : (error as Error).message, "error");
-    } finally {
-      setDiscovering(false);
+    const d = await discoverPath(key);
+    if (d.found) {
+      const via = d.found.out.length === 0 ? "heard direct" : `via ${d.found.out.map((h) => nameOfHash(h, state.contacts) ?? h).join(" › ")}`;
+      toast(governed && policy.flood ? `Found ${via}; it still floods` : d.found.changed ? `Found ${via}: now the route` : `Found ${via}, the route it had`);
+    } else {
+      toast(d.silent ? (needsSignIn ? `No answer. ${name} answers only a radio signed in to it.` : `No answer from ${name}: out of range for now.`) : (d.error ?? "Discovery failed"), "error");
     }
   };
 

@@ -3,19 +3,24 @@
  * along the route and back, and what came of it in a line. A repeater is
  * pinged itself; a person, a room or a sensor passes nothing on, so what is
  * checked is the way to its last repeater. Where the route breaks is asked
- * only once nothing came back.
+ * only once nothing came back. Beside it, Discover floods a request and the
+ * way it finds becomes the route; the map draws it, and the way back.
  */
 
 import { AdvType, contactRoute, type ContactRecord, type SessionState } from "@meshnet/meshcore";
+import { useState } from "react";
+import { discover, undoDiscovery, useDiscovery, type Discovery } from "../../lib/discovery.js";
 import { nameOfHash } from "../../lib/echoes.js";
 import { formatSnr, quality, QUALITY_WORDS, traceAirtimeMs } from "../../lib/los.js";
 import { contactEnd, relayOf, selfEnd } from "../../lib/mapOverlay.js";
 import { findBreak, measuredLegs, ping, ROUNDS, stopPing, usePing, weakestLeg, type Ping } from "../../lib/ping.js";
 import { session, useSession } from "../../lib/session.js";
+import { act, toast } from "../../lib/toast.js";
 import { changeRoute, openLineOfSight } from "../../lib/toolActions.js";
 import { Button } from "../../ui/Button.js";
 import { AirMark } from "../../ui/List.js";
-import { AlertIcon, ChevronRightIcon, SignalIcon, WavesIcon } from "../Icons.js";
+import { AirIcon, AlertIcon, ChevronRightIcon, SignalIcon, WavesIcon } from "../Icons.js";
+import { SignIn } from "../node/SignIn.js";
 
 export function QualityChip({ snr, numbers = true }: { snr: number; numbers?: boolean }) {
   const q = quality(snr);
@@ -46,6 +51,7 @@ export function legEnds(p: Ping, contact: ContactRecord, state: SessionState, in
 export function NodeCheck({ contactKey, route: showRoute = true }: { contactKey: string; route?: boolean }) {
   const state = useSession();
   const p = usePing(contactKey);
+  const d = useDiscovery(contactKey);
   const contact = state.contacts[contactKey];
   if (!contact) return null;
   const relaysItself = contact.type === AdvType.Repeater;
@@ -53,6 +59,9 @@ export function NodeCheck({ contactKey, route: showRoute = true }: { contactKey:
   const route = contactRoute(contact);
   const byHand = session.routeSetByHand(contactKey);
   const running = p?.running ?? false;
+  const asking = d?.running ?? false;
+  // The newer of the two says what it found.
+  const shownDiscovery = d && (d.running || !p || d.at >= p.at) ? d : null;
 
   const via =
     route === null
@@ -90,15 +99,99 @@ export function NodeCheck({ contactKey, route: showRoute = true }: { contactKey:
         </button>
       </div>
       ) : null}
-      {p && !p.via ? <PingResult p={p} contact={contact} state={state} onLeg={openLeg} /> : null}
-      <Button variant={running ? "default" : "primary"} size="lg" disabled={!online || (!canCheck && !running)} onClick={() => (running ? stopPing(contactKey) : void ping(contactKey))}>
-        <SignalIcon size={18} />
-        {running ? "Stop" : relaysItself ? (p?.runs.length ? "Ping again" : "Ping") : "Check the route"}
-      </Button>
+      {shownDiscovery ? <DiscoveryResult d={shownDiscovery} contact={contact} state={state} /> : p && !p.via ? <PingResult p={p} contact={contact} state={state} onLeg={openLeg} /> : null}
+      <div className="check-buttons">
+        <Button size="lg" busy={asking} disabled={!online || running} onClick={() => void discover(contactKey)}>
+          <AirIcon size={18} />
+          Discover
+        </Button>
+        <Button variant={running ? "default" : "primary"} size="lg" disabled={!online || asking || (!canCheck && !running)} onClick={() => (running ? stopPing(contactKey) : void ping(contactKey))}>
+          <SignalIcon size={18} />
+          {running ? "Stop" : relaysItself ? (p?.runs.length ? "Ping again" : "Ping") : "Check"}
+        </Button>
+      </div>
       <div className="check-cost">
         <WavesIcon size={13} />
         {canCheck ? `${ROUNDS} round trips${air ? ` · ${air.toFixed(1)} s on air` : ""}` : "Nothing between you to check"}
       </div>
+    </div>
+  );
+}
+
+/**
+ * What a discovery came to: the flood on its way, the way it found (drawn on
+ * the map with the way back and the route it replaced), or the silence, and
+ * the one thing to do about it.
+ */
+function DiscoveryResult({ d, contact, state }: { d: Discovery; contact: ContactRecord; state: SessionState }) {
+  const [signingIn, setSigningIn] = useState(false);
+  const name = contact.name || contact.prefix;
+  if (d.running) {
+    const job = state.remote.active?.key === d.key && state.remote.active.label === "path discovery" ? state.remote.active : null;
+    const total = job?.until && job.startedAt ? Math.round((job.until - job.startedAt) / 1000) : null;
+    return (
+      <div className="disc">
+        <p className="disc-line">{total ? `Flooding… an answer takes up to ${total} s` : "Waiting for the radio…"}</p>
+        {job?.until ? (
+          <span className="disc-bar" aria-hidden="true">
+            <i key={job.id} style={{ animationDuration: `${job.until - (job.startedAt ?? job.until)}ms` }} />
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+  if (d.found) {
+    const f = d.found;
+    const onMap = !!contactEnd(contact);
+    const head = f.out.length === 0 ? "Heard direct, no relays" : f.changed ? `Found a way via ${f.out.length} relay${f.out.length === 1 ? "" : "s"}` : "Same way as the route";
+    return (
+      <div className="disc">
+        <p className="disc-line">
+          <b>{head}</b> · {f.changed ? "now the route" : "it still works"}
+          {f.changed ? (
+            <>
+              {" · "}
+              <button type="button" className="check-link" disabled={state.status !== "ready"} onClick={() => void act(() => undoDiscovery(d.key), "Route put back")}>
+                Undo
+              </button>
+            </>
+          ) : null}
+        </p>
+        {onMap ? (
+          <span className="disc-key">
+            <span><i className="found" />there</span>
+            <span><i className="back" />back</span>
+            {f.changed && d.before ? <span><i className="was" />was</span> : null}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+  // A repeater or a room answers only a radio signed in to it.
+  const needsSignIn = (contact.type === AdvType.Repeater || contact.type === AdvType.Room) && !state.logins[contact.key]?.ok;
+  if (!d.silent) return <p className="check-note">{d.error}</p>;
+  return (
+    <div className="disc">
+      <p className="disc-line bad">
+        <b>No answer in {d.waitedS} s.</b> {needsSignIn ? `${name} answers only a radio signed in to it.` : "It may be out of range right now."}
+        {needsSignIn ? (
+          <>
+            {" "}
+            <button type="button" className="check-link" onClick={() => setSigningIn(true)}>
+              Sign in
+            </button>
+          </>
+        ) : null}
+      </p>
+      <SignIn
+        open={signingIn}
+        nodeKey={contact.key}
+        onClose={() => setSigningIn(false)}
+        onSignedIn={() => {
+          setSigningIn(false);
+          toast(`Signed in to ${name}`);
+        }}
+      />
     </div>
   );
 }

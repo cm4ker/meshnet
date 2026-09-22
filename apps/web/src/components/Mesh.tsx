@@ -12,7 +12,8 @@ import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "..
 import { useHears } from "../lib/hears.js";
 import { legId, useLegVerdicts } from "../lib/legVerdicts.js";
 import type { LinkRadio } from "../lib/los.js";
-import { contactEnd, defaultHeight, EMPTY_OVERLAY, editOverlay, hearsOverlay, losOverlay, relayOf, routeOverlay, selfEnd, type MapHandle, type MapOverlay } from "../lib/mapOverlay.js";
+import { useDiscovery } from "../lib/discovery.js";
+import { contactEnd, defaultHeight, discoveryOverlay, EMPTY_OVERLAY, editOverlay, hearsOverlay, losOverlay, relayOf, routeOverlay, selfEnd, type MapHandle, type MapOverlay } from "../lib/mapOverlay.js";
 import { useMeshTool, type LosEnd } from "../lib/meshTool.js";
 import { focusOnMap, openConversation, openProfile, useNav } from "../lib/nav.js";
 import { kindLabel } from "../lib/nodes.js";
@@ -255,11 +256,13 @@ function NodeRow({ contact: c, selected, yours, onOpen }: { contact: ContactReco
 
 /**
  * What goes over the nodes: the tool in use, or else the route to the node
- * picked, coloured by its last ping.
+ * picked, coloured by its last ping, or as its last discovery found it,
+ * whichever is newer.
  */
 function useMeshOverlay(selected: string | null, state: SessionState): MapOverlay {
   const tool = useMeshTool();
   const ping = usePing(tool?.kind === "route" ? tool.key : selected);
+  const discovery = useDiscovery(selected);
   const hears = useHears();
   const self = state.self;
   const radio: LinkRadio | null = useMemo(
@@ -286,7 +289,9 @@ function useMeshOverlay(selected: string | null, state: SessionState): MapOverla
         : tool?.kind === "hears"
           ? hearsOverlay(hears, state)
           : selected
-            ? routeOverlay(selected, state, ping)
+            ? discovery && (discovery.running || discovery.found) && discovery.at >= (ping?.at ?? 0)
+              ? discoveryOverlay(selected, state, discovery)
+              : routeOverlay(selected, state, ping)
             : EMPTY_OVERLAY;
   // The state changes with every packet heard; the lines are drawn again only when they change.
   const same = JSON.stringify(overlay);

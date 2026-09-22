@@ -346,7 +346,8 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
         [line.from.lat, line.from.lon],
         [line.to.lat, line.to.lon],
       ];
-      L.polyline(points, { className: "map-leg-under", interactive: false }).addTo(layer);
+      // Thin lines drawn beside a route go without its halo.
+      if (line.tone !== "back" && line.tone !== "was") L.polyline(points, { className: "map-leg-under", interactive: false }).addTo(layer);
       L.polyline(points, { className: `map-leg ${line.tone}`, interactive: false }).addTo(layer);
       if (line.tappable) {
         // A wide line nobody sees, so a finger finds a thin one.
@@ -364,6 +365,10 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
       L.marker([pin.lat, pin.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: "map-spot", html: "<span></span>", iconSize: [20, 20], iconAnchor: [10, 20] }) }).addTo(layer);
     }
     for (const handle of overlay.handles) dragHandle(layer, handle, handle.key ? overlay.numbers[handle.key] : undefined);
+    if (overlay.pulse) {
+      // A flood going out: rings spreading from this radio, under the nodes.
+      L.marker([overlay.pulse.lat, overlay.pulse.lon], { interactive: false, keyboard: false, zIndexOffset: -1000, icon: L.divIcon({ className: "map-flood", html: "<i></i><i></i><i></i>", iconSize: [260, 260], iconAnchor: [130, 130] }) }).addTo(layer);
+    }
   }, [overlay]);
 
   /** The node nearest to a point, within reach of a finger letting go. */

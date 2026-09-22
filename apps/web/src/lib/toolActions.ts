@@ -6,7 +6,7 @@
 
 import { AdvType, contactRoute, type SessionState } from "@meshnet/meshcore";
 import { askWhoHears } from "./hears.js";
-import { contactEnd, relayOf, selfEnd, shownRelays, type MapHandle } from "./mapOverlay.js";
+import { contactEnd, relayOf, selfEnd, type MapHandle } from "./mapOverlay.js";
 import { getMeshTool, setMeshTool, type LosEnd } from "./meshTool.js";
 import { focusOnMap, getNav, showOnMap } from "./nav.js";
 import { clearPing, getPing } from "./ping.js";
@@ -62,8 +62,7 @@ export function dropOnRoute(key: string, handle: MapHandle, onto: string): void 
   const contact = state.contacts[key];
   if (!contact) return;
   const tool = getMeshTool();
-  const relays =
-    tool?.kind === "route" && tool.key === key ? tool.relays : (shownRelays(contact, getPing(key)) ?? []).map((h) => relayOf(h, state.contacts)?.key ?? h);
+  const relays = tool?.kind === "route" && tool.key === key ? tool.relays : handle.relays.map((h) => state.contacts[h]?.key ?? relayOf(h, state.contacts)?.key ?? h);
   const own = handle.kind === "hop" ? relays[handle.index] : undefined;
   if (onto === own) return;
   const inRoute = onto === "self" || onto === key || relays.includes(onto);

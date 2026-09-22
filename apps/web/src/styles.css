@@ -3651,6 +3651,79 @@ button.hop {
 .check .button {
   width: 100%;
 }
+.check-buttons {
+  display: flex;
+  gap: var(--space-2);
+}
+.check-buttons .button {
+  flex: 1;
+  min-width: 0;
+}
+/* What a discovery found: a line, the key to the lines on the map, or a bar while the flood is out. */
+.disc {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.disc-line {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.disc-line b {
+  color: var(--text);
+  font-weight: 600;
+}
+.disc-line.bad b {
+  color: var(--danger);
+}
+.disc-bar {
+  display: block;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in oklch, var(--accent) 22%, transparent);
+}
+.disc-bar i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transform-origin: left;
+  animation: disc-wait linear forwards;
+}
+@keyframes disc-wait {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.disc-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+.disc-key > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.disc-key i {
+  display: inline-block;
+  width: 18px;
+  border-top: 3px solid var(--accent);
+}
+.disc-key i.back {
+  border-top: 2px dashed var(--accent);
+}
+.disc-key i.was {
+  border-top: 3px dotted var(--text-faint);
+}
 .check-cost {
   display: flex;
   align-items: center;
@@ -4009,6 +4082,55 @@ button.hop {
 }
 .map-leg.look {
   stroke-dasharray: 6 5;
+}
+/* A discovery: the way it found there, the way its answer came back, the route it replaced. */
+.map-leg.back {
+  stroke-width: 2;
+  stroke-dasharray: 6 6;
+  stroke-opacity: 0.85;
+}
+.map-leg.was {
+  stroke: var(--text-faint);
+  stroke-width: 3;
+  stroke-dasharray: 1.5 7;
+}
+.leaflet-marker-icon.map-flood {
+  pointer-events: none;
+}
+.map-flood i {
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  opacity: 0;
+  transform: scale(0.06);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .map-flood i {
+    animation: map-flood 1.8s ease-out infinite;
+  }
+  .map-flood i:nth-child(2) {
+    animation-delay: 0.6s;
+  }
+  .map-flood i:nth-child(3) {
+    animation-delay: 1.2s;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-flood i:first-child {
+    opacity: 0.5;
+    transform: scale(0.4);
+  }
+}
+@keyframes map-flood {
+  from {
+    opacity: 0.8;
+    transform: scale(0.06);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1);
+  }
 }
 .leaflet-marker-icon.map-leg-label {
   display: grid;

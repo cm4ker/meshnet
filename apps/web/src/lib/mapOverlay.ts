@@ -9,12 +9,14 @@ import { AdvType, contactRoute, type ContactRecord, type SessionState } from "@m
 import { candidatesOfHash } from "./echoes.js";
 import { hasPosition } from "./geo.js";
 import { legId } from "./legVerdicts.js";
+import type { Discovery } from "./discovery.js";
 import type { Hears } from "./hears.js";
 import { quality } from "./los.js";
 import type { LosEnd, MeshTool } from "./meshTool.js";
 import { measuredLegs, type Ping } from "./ping.js";
 
-export type LineTone = "good" | "fair" | "weak" | "fail" | "flight" | "plain" | "unknown" | "dest" | "look";
+/** `found` is the way a discovery found there, `back` the way its answer came, `was` the route it replaced. */
+export type LineTone = "good" | "fair" | "weak" | "fail" | "flight" | "plain" | "unknown" | "dest" | "look" | "found" | "back" | "was";
 
 export interface OverlayLine {
   from: LosEnd;
@@ -41,6 +43,8 @@ export interface MapHandle {
   to: LosEnd | null;
   /** The relay's contact, which a tap on the hop picks. */
   key: string | null;
+  /** The relays of the route it belongs to, as hashes or contact keys, this radio's end first. */
+  relays: string[];
 }
 
 export interface MapOverlay {
@@ -50,9 +54,11 @@ export interface MapOverlay {
   /** Relays of a route being changed, by contact key, numbered in order. */
   numbers: Record<string, number>;
   handles: MapHandle[];
+  /** Where a flood is going out from, drawn as rings spreading from it. */
+  pulse: { lat: number; lon: number } | null;
 }
 
-export const EMPTY_OVERLAY: MapOverlay = { lines: [], pins: [], numbers: {}, handles: [] };
+export const EMPTY_OVERLAY: MapOverlay = { lines: [], pins: [], numbers: {}, handles: [], pulse: null };
 
 export function selfEnd(state: SessionState): LosEnd | null {
   const self = state.self;
@@ -98,7 +104,7 @@ export function sameRelays(hashes: string[], relays: string[]): boolean {
  * with no place on the map is skipped: the line goes round it, and the leg
  * cannot be tapped for its line of sight.
  */
-function chainOverlay(nodes: (LosEnd | null)[], toneOf: (leg: number) => LineTone, label: (a: LosEnd, b: LosEnd) => string | undefined, handles: boolean): MapOverlay {
+function chainOverlay(nodes: (LosEnd | null)[], relays: string[], toneOf: (leg: number) => LineTone, label: (a: LosEnd, b: LosEnd) => string | undefined, handles: boolean): MapOverlay {
   const worse = (a: LineTone, b: LineTone): LineTone => {
     const order: LineTone[] = ["fail", "weak", "fair", "good", "flight", "dest", "unknown", "plain"];
     return order.indexOf(a) <= order.indexOf(b) ? a : b;
@@ -114,7 +120,7 @@ function chainOverlay(nodes: (LosEnd | null)[], toneOf: (leg: number) => LineTon
       let tone = toneOf(first);
       for (let j = first + 1; j < i; j++) tone = worse(tone, toneOf(j));
       lines.push({ from, to, tone, tappable: i - first === 1, label: label(from, to) });
-      gaps.push({ kind: "gap", index: first, lat: (from.lat + to.lat) / 2, lon: (from.lon + to.lon) / 2, from, to, key: null });
+      gaps.push({ kind: "gap", index: first, lat: (from.lat + to.lat) / 2, lon: (from.lon + to.lon) / 2, from, to, key: null, relays });
     }
     from = to;
     first = i;
@@ -126,9 +132,9 @@ function chainOverlay(nodes: (LosEnd | null)[], toneOf: (leg: number) => LineTon
   const hops: MapHandle[] = [];
   for (let i = 1; i < nodes.length - 1; i++) {
     const at = nodes[i];
-    if (at) hops.push({ kind: "hop", index: i - 1, lat: at.lat, lon: at.lon, from: drawn(i, -1), to: drawn(i, 1), key: at.key });
+    if (at) hops.push({ kind: "hop", index: i - 1, lat: at.lat, lon: at.lon, from: drawn(i, -1), to: drawn(i, 1), key: at.key, relays });
   }
-  return { lines, pins: [], numbers: {}, handles: handles ? [...gaps, ...hops] : [] };
+  return { lines, pins: [], numbers: {}, handles: handles ? [...gaps, ...hops] : [], pulse: null };
 }
 
 /** The tone of each leg of a chain, from what a ping measured along it. */
@@ -160,7 +166,35 @@ export function routeOverlay(key: string, state: SessionState, ping: Ping | null
   if (relays === null || !target) return EMPTY_OVERLAY;
   const nodes: (LosEnd | null)[] = [selfEnd(state), ...relays.map((h) => { const r = relayOf(h, state.contacts); return r ? contactEnd(r) : null; }), target];
   const measured = ping?.via ? null : ping;
-  return chainOverlay(nodes, pingTone(measured, nodes.length - 1, contact.type !== AdvType.Repeater), () => undefined, !ping?.running);
+  return chainOverlay(nodes, relays, pingTone(measured, nodes.length - 1, contact.type !== AdvType.Repeater), () => undefined, !ping?.running);
+}
+
+/** The nodes along relays given as hashes, from `from` to `to`; a relay not on the map is null. */
+function along(from: LosEnd | null, relays: string[], to: LosEnd | null, contacts: Record<string, ContactRecord>): (LosEnd | null)[] {
+  return [from, ...relays.map((h) => { const r = relayOf(h, contacts); return r ? contactEnd(r) : null; }), to];
+}
+
+/**
+ * A path discovery on the map. While the flood is out, rings spread from
+ * this radio over the route held. Once it is answered: the way it found
+ * there, which is the route now and can be dragged; the way the answer came
+ * back; and, faint, the route it replaced.
+ */
+export function discoveryOverlay(key: string, state: SessionState, d: Discovery): MapOverlay {
+  const contact = state.contacts[key];
+  if (!contact) return EMPTY_OVERLAY;
+  const me = selfEnd(state);
+  const target = contactEnd(contact);
+  if (d.running) {
+    const held = routeOverlay(key, state, null);
+    return { ...held, handles: [], pulse: me ? { lat: me.lat, lon: me.lon } : null };
+  }
+  if (!d.found || !target) return routeOverlay(key, state, null);
+  const out = chainOverlay(along(me, d.found.out, target, state.contacts), d.found.out, () => "found", () => undefined, true);
+  const back = chainOverlay(along(target, d.found.back, me, state.contacts), d.found.back, () => "back", () => undefined, false);
+  const was = d.found.changed && d.before ? chainOverlay(along(me, d.before.relays, target, state.contacts), d.before.relays, () => "was", () => undefined, false) : null;
+  const plain = (lines: OverlayLine[]) => lines.map((l) => ({ ...l, tappable: false }));
+  return { ...out, lines: [...plain(was?.lines ?? []), ...plain(back.lines), ...out.lines] };
 }
 
 /**
@@ -175,14 +209,14 @@ export function editOverlay(tool: Extract<MeshTool, { kind: "route" }>, state: S
   const pinged = ping?.via && sameRelays(ping.via, tool.relays) ? ping : null;
   const measured = pingTone(pinged, ends.length - 1, toPerson);
   const tone = (i: number): LineTone => (pinged ? measured(i) : i === ends.length - 2 && toPerson ? "dest" : "unknown");
-  const overlay = chainOverlay(ends, tone, (a, b) => (blocked.has(legId(a, b)) ? "blocked" : undefined), !pinged?.running);
+  const overlay = chainOverlay(ends, tool.relays, tone, (a, b) => (blocked.has(legId(a, b)) ? "blocked" : undefined), !pinged?.running);
   const numbers: Record<string, number> = {};
   tool.relays.forEach((k, i) => (numbers[k] = i + 1));
   return { ...overlay, lines: overlay.lines.map((l) => ({ ...l, tappable: true })), numbers };
 }
 
 export function losOverlay(tool: Extract<MeshTool, { kind: "los" }>): MapOverlay {
-  return { lines: [{ from: tool.from, to: tool.to, tone: "look", tappable: false }], pins: tool.to.key === null ? [{ lat: tool.to.lat, lon: tool.to.lon }] : [], numbers: {}, handles: [] };
+  return { lines: [{ from: tool.from, to: tool.to, tone: "look", tappable: false }], pins: tool.to.key === null ? [{ lat: tool.to.lat, lon: tool.to.lon }] : [], numbers: {}, handles: [], pulse: null };
 }
 
 /** A line from this radio to each repeater that answered, coloured by how well it heard us. */
@@ -195,5 +229,5 @@ export function hearsOverlay(hears: Hears, state: SessionState): MapOverlay {
     const end = c ? contactEnd(c) : null;
     if (end) lines.push({ from: me, to: end, tone: quality(reply.heardUs), tappable: true });
   }
-  return { lines, pins: [], numbers: {}, handles: [] };
+  return { lines, pins: [], numbers: {}, handles: [], pulse: null };
 }
