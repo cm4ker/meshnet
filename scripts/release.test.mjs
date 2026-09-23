@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, basename, dirname } from "node:path";
-import { makeManifest, publish, releaseInfo } from "./release.mjs";
+import { makeManifest, newerBuild, publish, releaseInfo } from "./release.mjs";
 
 const env = { GITHUB_REF: "refs/heads/master", GITHUB_EVENT_NAME: "push", GITHUB_RUN_NUMBER: "42", GITHUB_RUN_ATTEMPT: "2" };
 test("stable tags must match the shared version; dev runs and retries have unique versions", () => {
@@ -38,9 +38,11 @@ function publication(t) {
     assert.ok(basename(directory).startsWith("meshnet-release-test-"));
     rmSync(directory, { recursive: true });
   });
-  writeFileSync(join(directory, "latest.json"), JSON.stringify(makeManifest(options)));
-  for (const name of files) writeFileSync(join(directory, name), "test fixture");
-  return { directory, info: { version: "0.2.0", channel: "dev", tag: "dev-test", publish: true }, env: { GITHUB_REPOSITORY: "cm4ker/meshnet", GITHUB_SHA: "abc" } };
+  const version = "0.2.0-dev.42.1";
+  const devFiles = files.map((name) => name.replace("0.2.0", version));
+  writeFileSync(join(directory, "latest.json"), JSON.stringify(makeManifest({ ...options, version, tag: "dev-test", files: devFiles })));
+  for (const name of devFiles) writeFileSync(join(directory, name), "test fixture");
+  return { directory, info: { version, channel: "dev", tag: "dev-test", publish: true }, env: { GITHUB_REPOSITORY: "cm4ker/meshnet", GITHUB_SHA: "abc" } };
 }
 
 test("publishes the complete immutable release before updating the rolling feed", (t) => {
@@ -48,7 +50,8 @@ test("publishes the complete immutable release before updating the rolling feed"
   const calls = [];
   publish(info, directory, env, (...args) => {
     calls.push(args);
-    if (args[0] === "api") return args[1].endsWith("commits/master") ? "abc" : JSON.stringify({ draft: false, assets: [{ name: "Meshnet_0.1.0_x64-setup.exe" }, { name: "latest.json" }] });
+    if (args[1] === "download") return JSON.stringify({ version: "0.2.0-dev.41.1" });
+    if (args[0] === "api") return JSON.stringify({ draft: false, assets: [{ name: "Meshnet_0.1.0_x64-setup.exe" }, { name: "latest.json" }] });
     return "";
   });
   assert.deepEqual(calls.slice(0, 3).map((call) => call.slice(0, 3)), [["release", "create", "dev-test"], ["release", "upload", "dev-test"], ["release", "edit", "dev-test"]]);
@@ -73,6 +76,14 @@ test("an upload failure or stale build never changes the channel feed", (t) => {
   }), /upload failed/);
   assert.equal(calls.length, 2);
   calls.length = 0;
-  publish(info, directory, env, (...args) => { calls.push(args); return args[0] === "api" ? "newer-master" : ""; });
-  assert.equal(calls.some((call) => call[2] === "dev"), false);
+  publish(info, directory, env, (...args) => { calls.push(args); return args[1] === "download" ? JSON.stringify({ version: "0.2.0-dev.43.1" }) : ""; });
+  assert.equal(calls.some((call) => call[2] === "dev" && call[1] !== "download"), false);
+});
+
+test("a build reaches the feed when it is newer than the feed, even if master moved on", () => {
+  assert.equal(newerBuild("0.2.0-dev.47.1", "0.2.0-dev.45.1"), true);
+  assert.equal(newerBuild("0.2.0-dev.45.2", "0.2.0-dev.45.1"), true);
+  assert.equal(newerBuild("0.2.0-dev.9.1", "0.2.0-dev.10.1"), false);
+  assert.equal(newerBuild("0.2.0-dev.45.1", "0.2.0-dev.45.1"), false);
+  assert.equal(newerBuild("0.2.0-dev.1.1", "garbage"), true);
 });

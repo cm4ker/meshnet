@@ -47,6 +47,21 @@ function releaseByTag(repo, tag, run = gh) {
   }
 }
 
+function feedVersion(repo, run) {
+  try { return JSON.parse(run("release", "download", "dev", "--repo", repo, "--pattern", "latest.json", "--output", "-")).version ?? null; }
+  catch { return null; }
+}
+
+const devBuild = (version) => version.match(/-dev\.(\d+)\.(\d+)$/)?.slice(1).map(Number) ?? null;
+
+/** Whether dev build `version` came after `than`, by run number and then attempt; a feed it cannot read loses. */
+export function newerBuild(version, than) {
+  const [mine, theirs] = [devBuild(version), devBuild(than)];
+  if (!mine) return false;
+  if (!theirs) return true;
+  return mine[0] !== theirs[0] ? mine[0] > theirs[0] : mine[1] > theirs[1];
+}
+
 // Every feed points to immutable files. A published tag is never rebuilt in place.
 export function publish(info, directory, env, run = gh) {
   const repo = env.GITHUB_REPOSITORY;
@@ -60,9 +75,13 @@ export function publish(info, directory, env, run = gh) {
   run("release", "edit", info.tag, "--repo", repo, "--draft=false", ...(info.channel === "stable" ? ["--latest"] : ["--latest=false"]));
   if (info.channel !== "dev") return;
 
-  // A slow older build must not move the rolling feed back after a newer commit.
-  if (run("api", `repos/${repo}/commits/master`, "--jq", ".sha") !== env.GITHUB_SHA) {
-    console.log("Kept the current dev feed: master has advanced.");
+  // A slow older build must not move the rolling feed back past a newer one.
+  // Publishing runs one at a time, so the feed read here is still the feed when
+  // it is replaced below. It is not enough that master moved on: pushes closer
+  // together than a build would then never reach the feed at all.
+  const current = feedVersion(repo, run);
+  if (current && !newerBuild(info.version, current)) {
+    console.log(`Kept the current dev feed: ${current} is not older than ${info.version}.`);
     return;
   }
   const channelRelease = releaseByTag(repo, "dev", run);
