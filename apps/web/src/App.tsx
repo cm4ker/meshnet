@@ -9,6 +9,7 @@ import { ALL_CHATS, createAnnouncer } from "./lib/announce.js";
 import { getNoticePrefs, messageWanted, nodeWanted } from "./lib/noticePrefs.js";
 import { askPermissionOnce, notify, onNotificationClick, pageOnScreen, tellWatch, withdraw } from "./lib/notify.js";
 import { session, useSelector } from "./lib/session.js";
+import { startTray } from "./lib/tray.js";
 import { startTidyRule } from "./lib/cleanUp.js";
 import { isWide, subscribeWide } from "./lib/layout.js";
 import { getNav, openConversation, openProfile, shownConversation, subscribeNav } from "./lib/nav.js";
@@ -79,6 +80,9 @@ export function App() {
       window.removeEventListener("focus", front);
     };
   }, []);
+
+  // The desktop's tray icon shows whether anything is unread, and from whom.
+  useEffect(() => startTray(() => session.getState(), (listener) => session.subscribe(listener)), []);
 
   // A node the radio hears for the first time.
   useEffect(

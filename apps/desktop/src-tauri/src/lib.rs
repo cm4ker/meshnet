@@ -6,6 +6,7 @@
 mod announce;
 mod secrets;
 mod tcp;
+mod tray;
 mod updates;
 #[cfg(windows)]
 mod winble;
@@ -20,18 +21,28 @@ pub fn run() {
     // `RUST_LOG=debug` from a terminal shows what the plugins do with the link.
     let _ = env_logger::try_init();
     let builder = tauri::Builder::default()
+        // The app lives in the tray with its window closed, so starting it
+        // again, from the Start menu say, brings that window back rather
+        // than a second app fighting the first for the radio. Registered first, as the plugin asks.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::bring_back(app)))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![MINIMIZED]),
         ))
         .setup(|app| {
+            tray::install(app);
             if std::env::args().any(|arg| arg == MINIMIZED) {
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.minimize();
+                    if tray::available() {
+                        tray::stow(&window);
+                    } else {
+                        let _ = window.minimize();
+                    }
                 }
             }
             Ok(())
         })
+        .on_window_event(tray::on_window_event)
         .plugin(tauri_plugin_blec::init())
         .plugin(tauri_plugin_serialplugin::init())
         .plugin(tauri_plugin_opener::init())
@@ -54,6 +65,7 @@ pub fn run() {
         tcp::tcp_close,
         announce::announce,
         announce::withdraw,
+        tray::tray_unread,
         secrets::secret_get,
         secrets::secret_set,
         secrets::secret_delete,
@@ -67,6 +79,7 @@ pub fn run() {
         tcp::tcp_close,
         announce::announce,
         announce::withdraw,
+        tray::tray_unread,
         secrets::secret_get,
         secrets::secret_set,
         secrets::secret_delete,

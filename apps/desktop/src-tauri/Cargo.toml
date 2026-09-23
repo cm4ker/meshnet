@@ -13,7 +13,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# The icon by the clock, drawn from the bundled PNG with a dot for what is unread; see `tray.rs`.
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 # The two links a desktop has to a radio. WebView2 and WebKit have neither
 # Web Bluetooth nor Web Serial, so the shell carries them: btleplug for BLE,
 # serialport for the cable. The client calls them through the plugins' JS.
@@ -42,6 +43,8 @@ tauri-plugin-updater = "2"
 # Starting with the computer, switched from the client's Connection page: a
 # Run key on Windows, a launch agent on macOS, an autostart entry on Linux.
 tauri-plugin-autostart = "2"
+# One app at a time: a second start brings the first one's window back.
+tauri-plugin-single-instance = "2"
 
 # On Windows the BLE link is the platform's own GATT API, not btleplug: the
 # firmware's UART characteristics demand an encrypted link, and btleplug's
