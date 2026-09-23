@@ -8,6 +8,7 @@ import type { RadioPage } from "../lib/nav.js";
 import { setNoticePrefs, useNoticePrefs, type NoticePrefs } from "../lib/noticePrefs.js";
 import { askPermission, hasNoticeSettings, openNoticeSettings } from "../lib/notify.js";
 import { nativePlatform, shell } from "../lib/platform.js";
+import { relayAvailable, relayWanted, setRelayWanted, useRelay } from "../lib/relay.js";
 import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
 import { session, storage, useSession } from "../lib/session.js";
 import { act, toast } from "../lib/toast.js";
@@ -555,6 +556,8 @@ function AboutPage() {
 function ConnectionPage() {
   const state = useSession();
   const [auto, setAuto] = useState(autoConnectWanted);
+  const [lend, setLend] = useState(relayWanted);
+  const relay = useRelay();
   // Asked of the shell, since the entry can be removed outside the app; null until it answers.
   const [atLogin, setAtLogin] = useState<boolean | null>(null);
   useEffect(() => {
@@ -589,6 +592,23 @@ function ConnectionPage() {
           />
         ) : null}
       </Group>
+      {relayAvailable() && state.link?.kind === "ble" ? (
+        <Group note="A computer nearby connects to this phone over Bluetooth, as if it were the radio, and uses the radio through it, with the phone locked too. The phone lets go of the radio while the computer has it.">
+          <SwitchRow
+            label="Share with a computer"
+            hint={!relay.on ? undefined : relay.computer ? "A computer has the radio" : "Waiting for a computer"}
+            checked={lend}
+            onChange={async (v) => {
+              setLend(v);
+              try {
+                await setRelayWanted(v);
+              } catch (err) {
+                toast(`Could not change it: ${(err as Error).message ?? err}`, "error");
+              }
+            }}
+          />
+        </Group>
+      ) : null}
       <Group note="Both lead to the connect screen, where another radio can be picked.">
         <ActionRow label="Disconnect" onClick={() => void disconnect()} />
       </Group>

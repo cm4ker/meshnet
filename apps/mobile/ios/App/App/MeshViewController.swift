@@ -7,6 +7,7 @@ class MeshViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
         bridge?.registerPluginInstance(MeshTcpPlugin())
         bridge?.registerPluginInstance(MeshWatchPlugin())
+        bridge?.registerPluginInstance(MeshRelayPlugin())
         MeshWatch.shared.start()
     }
 }

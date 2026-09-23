@@ -522,6 +522,15 @@ textarea.input {
   font-size: var(--text-xl);
   font-weight: 600;
 }
+.connect-lent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+.connect-lent p {
+  margin: 0;
+}
 .connect-status {
   display: flex;
   align-items: center;

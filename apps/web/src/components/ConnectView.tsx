@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CONNECT_TRIES, connectWith, useLink } from "../lib/link.js";
 import { shell } from "../lib/platform.js";
+import { takeBack, useRelay } from "../lib/relay.js";
 import { addressDevice, autoConnectWanted, connectors, lastLink, needsPairing, setAutoConnect, type Connector, type FoundDevice } from "../transports/index.js";
 import { Button } from "../ui/Button.js";
 import { Prompt } from "../ui/Dialog.js";
@@ -17,6 +18,7 @@ export function ConnectView() {
   );
   const link = useLink();
   const [auto, setAuto] = useState(autoConnectWanted);
+  const relay = useRelay();
 
   return (
     <div className="connect">
@@ -29,7 +31,14 @@ export function ConnectView() {
           </div>
         </header>
 
-        {list.length === 0 ? (
+        {relay.computer ? (
+          <div className="connect-lent">
+            <p>A computer is using the radio through this phone.</p>
+            <Button variant="primary" onClick={() => void takeBack()}>
+              Take it back
+            </Button>
+          </div>
+        ) : list.length === 0 ? (
           <NoLink />
         ) : (
           <>
