@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { AdvertLocPolicy, TelemMode, type SessionState } from "@meshnet/meshcore";
+import { autostartEnabled, autostartLabel, hasAutostart, setAutostart } from "../lib/autostart.js";
 import { bandwidth, frequency } from "../lib/format.js";
 import { disconnect } from "../lib/link.js";
 import { setLookalikePrefs, useLookalikePrefs } from "../lib/lookalikes.js";
@@ -540,6 +541,12 @@ function AboutPage() {
 function ConnectionPage() {
   const state = useSession();
   const [auto, setAuto] = useState(autoConnectWanted);
+  // Asked of the shell, since the entry can be removed outside the app; null until it answers.
+  const [atLogin, setAtLogin] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!hasAutostart()) return;
+    autostartEnabled().then(setAtLogin, () => setAtLogin(null));
+  }, []);
   return (
     <>
       <Group>
@@ -552,6 +559,21 @@ function ConnectionPage() {
             setAutoConnect(v);
           }}
         />
+        {atLogin !== null ? (
+          <SwitchRow
+            label={autostartLabel()}
+            hint={auto ? "Opens minimised and connects to the radio." : "Opens minimised."}
+            checked={atLogin}
+            onChange={async (v) => {
+              try {
+                await setAutostart(v);
+                setAtLogin(v);
+              } catch (err) {
+                toast(`Could not change it: ${(err as Error).message ?? err}`, "error");
+              }
+            }}
+          />
+        ) : null}
       </Group>
       <Group note="Both lead to the connect screen, where another radio can be picked.">
         <ActionRow label="Disconnect" onClick={() => void disconnect()} />

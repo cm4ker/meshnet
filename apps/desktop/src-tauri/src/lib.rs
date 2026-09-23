@@ -10,11 +10,28 @@ mod updates;
 #[cfg(windows)]
 mod winble;
 
+use tauri::Manager;
+
+/// What the system passes when it starts the app at login: the window opens minimised.
+const MINIMIZED: &str = "--minimized";
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // `RUST_LOG=debug` from a terminal shows what the plugins do with the link.
     let _ = env_logger::try_init();
     let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![MINIMIZED]),
+        ))
+        .setup(|app| {
+            if std::env::args().any(|arg| arg == MINIMIZED) {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.minimize();
+                }
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_blec::init())
         .plugin(tauri_plugin_serialplugin::init())
         .plugin(tauri_plugin_opener::init())
