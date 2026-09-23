@@ -5,7 +5,6 @@ import { goBack } from "./lib/back.js";
 import { followKeyboard } from "./lib/keyboard.js";
 import { autoConnect, connectWith, disconnect, getLink } from "./lib/link.js";
 import { isCapacitor, nativePlatform } from "./lib/platform.js";
-import { startRelay } from "./lib/relay.js";
 import { session } from "./lib/session.js";
 import { connectors } from "./transports/index.js";
 import { initTheme } from "./theme/store.js";
@@ -55,6 +54,3 @@ createRoot(root).render(
 // The last radio, if it can be reached without a chooser. Not awaited: the
 // connect screen shows the attempt.
 void autoConnect();
-
-// On an iPhone, lending the radio to a computer nearby, when the switch is on.
-void startRelay().catch((error) => console.warn("Could not start the relay", error));

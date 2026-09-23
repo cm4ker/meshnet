@@ -1,26 +1,23 @@
 /**
- * Lending the radio to a computer, from an iPhone (`MeshRelay.swift`). The
+ * Sharing the radio with a computer, from an iPhone (`MeshRelay.swift`). The
  * phone serves the radio's own Bluetooth service, so a computer nearby
- * connects to the phone as if it were the radio and the phone passes the
- * bytes on, in the background too.
+ * connects to the phone as if it were the radio, and uses it through the
+ * phone, in the background too.
  *
- * The firmware answers one command at a time and does not say whose it was,
- * so the radio has one master: while a computer has it, the page lets go of
- * the radio (the relay keeps the link up), and it takes the radio back when
- * the computer leaves.
+ * Both use the radio at once: while sharing is on, the page's frames go
+ * through the relay as well, and the relay takes turns between the two and
+ * keeps each a copy of every message (see `MeshRelayMux.swift`). The BLE
+ * transport opens the relay (`openRelay`) when the switch is on.
  */
 
 import { useSyncExternalStore } from "react";
 import type { PluginListenerHandle } from "@capacitor/core";
-import { connectorById, lastLink, type FoundDevice } from "../transports/index.js";
-import { connectWith, disconnect } from "./link.js";
 import { nativePlatform, shell } from "./platform.js";
-import { session } from "./session.js";
 import { readSetting, writeSetting } from "./storage.js";
 
 interface RelayState {
   on: boolean;
-  /** A computer has the radio. */
+  /** A computer is connected to the phone. */
   computer: boolean;
 }
 
@@ -28,7 +25,11 @@ interface MeshRelayPlugin {
   start(options: { deviceId: string; name: string }): Promise<RelayState>;
   stop(): Promise<RelayState>;
   state(): Promise<RelayState>;
+  attach(): Promise<void>;
+  detach(): Promise<void>;
+  send(options: { data: string }): Promise<void>;
   addListener(event: "state", listener: (state: RelayState) => void): Promise<PluginListenerHandle>;
+  addListener(event: "frame", listener: (event: { data: string }) => void): Promise<PluginListenerHandle>;
 }
 
 const WANTED_KEY = "meshnet.relay.on";
@@ -36,15 +37,18 @@ const WANTED_KEY = "meshnet.relay.on";
 let plugin: MeshRelayPlugin | null = null;
 let state: RelayState = { on: false, computer: false };
 const listeners = new Set<() => void>();
-/** The radio the page let go of for the computer, to connect to again when it leaves. */
-let lent: FoundDevice | null = null;
 
 export function relayAvailable(): boolean {
   return shell() === "capacitor" && nativePlatform() === "ios";
 }
 
+/** Whether the page should reach its BLE radio through the relay. */
 export function relayWanted(): boolean {
-  return readSetting<boolean>(WANTED_KEY, false);
+  return relayAvailable() && readSetting<boolean>(WANTED_KEY, false);
+}
+
+export function setRelayWanted(on: boolean): void {
+  writeSetting(WANTED_KEY, on);
 }
 
 function set(next: RelayState): void {
@@ -74,65 +78,67 @@ async function withRelay<T>(use: (api: MeshRelayPlugin) => Promise<T>): Promise<
   return use(plugin);
 }
 
-/** The phone's BLE radio the page is connected to, by the plugin's id. */
-function bleRadio(): FoundDevice | null {
-  const link = session.getState().link;
-  const last = lastLink();
-  if (link?.kind !== "ble" || last?.connectorId !== "cap-ble" || !last.device.id) return null;
-  return last.device;
+function toBase64(bytes: Uint8Array): string {
+  let text = "";
+  for (const byte of bytes) text += String.fromCharCode(byte);
+  return btoa(text);
 }
 
-async function startFor(device: FoundDevice): Promise<void> {
-  set(await withRelay((api) => api.start({ deviceId: device.id, name: session.getState().self?.name ?? device.name })));
+function fromBase64(data: string): Uint8Array {
+  const text = atob(data);
+  const bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i);
+  return bytes;
 }
 
-export async function setRelayWanted(on: boolean): Promise<void> {
-  writeSetting(WANTED_KEY, on);
-  if (on) {
-    const device = bleRadio();
-    if (device) await startFor(device);
-  } else {
-    await takeBack();
-  }
+/** The page's link through the relay, while one is open. */
+export interface RelayLink {
+  send(frame: Uint8Array): Promise<void>;
+  close(): Promise<void>;
 }
 
-/** Stops lending: the relay stops, and the page connects to the radio again. */
-export async function takeBack(): Promise<void> {
-  set(await withRelay((api) => api.stop()));
-  await reclaim();
+interface Route {
+  onFrame: (frame: Uint8Array) => void;
+  /** Sharing was turned off: the link through it is gone. */
+  onStopped: () => void;
 }
 
-async function reclaim(): Promise<void> {
-  const device = lent;
-  lent = null;
-  const connector = connectorById("cap-ble");
-  if (device && connector) await connectWith(connector, device).catch(() => undefined);
+let route: Route | null = null;
+let listening: Promise<unknown> | null = null;
+
+function listen(): Promise<unknown> {
+  listening ??= Promise.all([
+    withRelay((api) => api.addListener("frame", (event) => route?.onFrame(fromBase64(event.data)))),
+    withRelay((api) =>
+      api.addListener("state", (next) => {
+        set(next);
+        if (!next.on) route?.onStopped();
+      }),
+    ),
+  ]);
+  return listening;
 }
 
-async function onState(next: RelayState): Promise<void> {
-  const had = state.computer;
-  set(next);
-  if (next.computer && !had && !lent) {
-    const device = bleRadio();
-    if (!device) return;
-    lent = device;
-    await disconnect();
-  } else if (!next.computer && had && lent) {
-    await reclaim();
-  }
+/** Starts sharing the radio the page has just connected to, and talks to it through the relay. */
+export async function openRelay(deviceId: string, name: string, onFrame: Route["onFrame"], onStopped: Route["onStopped"]): Promise<RelayLink> {
+  await listen();
+  set(await withRelay((api) => api.start({ deviceId, name: name.replace(/^MeshCore-/, "") })));
+  const mine: Route = { onFrame, onStopped };
+  route = mine;
+  await withRelay((api) => api.attach());
+  return {
+    send: (frame) => withRelay((api) => api.send({ data: toBase64(frame) })),
+    async close() {
+      if (route !== mine) return;
+      route = null;
+      await withRelay((api) => api.detach()).catch(() => undefined);
+    },
+  };
 }
 
-/** At launch: follows the page's radio while the switch is on. */
-export async function startRelay(): Promise<void> {
+/** Stops sharing. The page's link through the relay reports a drop, and is reconnected directly. */
+export async function stopRelay(): Promise<void> {
   if (!relayAvailable()) return;
-  await withRelay((api) => api.addListener("state", (next) => void onState(next)));
-  set(await withRelay((api) => api.state()));
-  let started: string | null = null;
-  session.subscribe(() => {
-    if (!relayWanted() || session.getState().status !== "ready") return;
-    const device = bleRadio();
-    if (!device || device.id === started) return;
-    started = device.id;
-    void startFor(device).catch((error) => console.warn("Could not start the relay", error));
-  });
+  set(await withRelay((api) => api.stop()));
+  route?.onStopped();
 }

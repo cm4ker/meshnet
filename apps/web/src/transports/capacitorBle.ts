@@ -8,6 +8,7 @@ import { BaseTransport, BLE } from "@meshnet/meshcore";
 import type { Connector, FoundDevice } from "./types.js";
 import { unwatchRadio, watchRadio } from "../lib/notify.js";
 import { nativePlatform } from "../lib/platform.js";
+import { openRelay, relayWanted, type RelayLink } from "../lib/relay.js";
 import { readSetting, writeSetting } from "../lib/storage.js";
 
 type BleModule = typeof import("@capacitor-community/bluetooth-le");
@@ -27,6 +28,12 @@ async function ble(): Promise<BleModule["BleClient"]> {
 
 class CapacitorBleTransport extends BaseTransport {
   readonly kind = "ble" as const;
+  /**
+   * While the radio is shared with a computer, the page's frames go through
+   * the relay, which takes turns with the computer (see lib/relay.ts). The
+   * plugin's link stays, for the pairing and to hear of a drop.
+   */
+  private relay: RelayLink | null = null;
 
   constructor(
     private readonly client: BleModule["BleClient"],
@@ -36,7 +43,17 @@ class CapacitorBleTransport extends BaseTransport {
     super();
   }
 
+  async useRelay(name: string): Promise<void> {
+    this.relay = await openRelay(
+      this.deviceId,
+      name,
+      (frame) => this.emitFrame(frame),
+      () => this.emitClose(new Error("sharing with a computer was turned off")),
+    );
+  }
+
   async send(frame: Uint8Array): Promise<void> {
+    if (this.relay) return this.relay.send(frame);
     const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
     // With response: the characteristic demands an encrypted link, and an
     // acknowledged write is what makes the phone start the PIN pairing on an
@@ -45,7 +62,7 @@ class CapacitorBleTransport extends BaseTransport {
   }
 
   receive(value: DataView): void {
-    if (value.byteLength === 0) return;
+    if (value.byteLength === 0 || this.relay) return;
     this.emitFrame(new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength)));
   }
 
@@ -55,6 +72,7 @@ class CapacitorBleTransport extends BaseTransport {
 
   protected async shutdown(): Promise<void> {
     void unwatchRadio(this.deviceId);
+    await this.relay?.close();
     try {
       await this.client.stopNotifications(this.deviceId, BLE.service, BLE.tx);
     } catch {
@@ -145,6 +163,14 @@ export const capacitorBleConnector: Connector = {
       // down or left to time out) stays taken, and its prompt can come back.
       await client.disconnect(device.id).catch(() => undefined);
       throw error;
+    }
+    if (relayWanted()) {
+      try {
+        await transport.useRelay(device.name);
+      } catch (error) {
+        await transport.close().catch(() => undefined);
+        throw error;
+      }
     }
     remember(device);
     void watchRadio(device.id);

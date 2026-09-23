@@ -20,6 +20,7 @@
 		7E5A1C012F9A00000000A003 /* MeshViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5A1C012F9A00000000A004 /* MeshViewController.swift */; };
 		7E5A1C012F9A00000000A005 /* MeshWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5A1C012F9A00000000A006 /* MeshWatch.swift */; };
 		7E5A1C012F9A00000000A007 /* MeshRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5A1C012F9A00000000A008 /* MeshRelay.swift */; };
+		7E5A1C012F9A00000000A009 /* MeshRelayMux.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5A1C012F9A00000000A00A /* MeshRelayMux.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,6 +38,7 @@
 		7E5A1C012F9A00000000A004 /* MeshViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshViewController.swift; sourceTree = "<group>"; };
 		7E5A1C012F9A00000000A006 /* MeshWatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshWatch.swift; sourceTree = "<group>"; };
 		7E5A1C012F9A00000000A008 /* MeshRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshRelay.swift; sourceTree = "<group>"; };
+		7E5A1C012F9A00000000A00A /* MeshRelayMux.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshRelayMux.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -79,6 +81,7 @@
 				7E5A1C012F9A00000000A002 /* MeshTcpPlugin.swift */,
 				7E5A1C012F9A00000000A006 /* MeshWatch.swift */,
 				7E5A1C012F9A00000000A008 /* MeshRelay.swift */,
+				7E5A1C012F9A00000000A00A /* MeshRelayMux.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
@@ -176,6 +179,7 @@
 				7E5A1C012F9A00000000A003 /* MeshViewController.swift in Sources */,
 				7E5A1C012F9A00000000A005 /* MeshWatch.swift in Sources */,
 				7E5A1C012F9A00000000A007 /* MeshRelay.swift in Sources */,
+				7E5A1C012F9A00000000A009 /* MeshRelayMux.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

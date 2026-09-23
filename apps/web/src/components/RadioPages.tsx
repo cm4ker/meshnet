@@ -2,13 +2,13 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { AdvertLocPolicy, TelemMode, type SessionState } from "@meshnet/meshcore";
 import { autostartEnabled, autostartLabel, hasAutostart, setAutostart } from "../lib/autostart.js";
 import { bandwidth, frequency } from "../lib/format.js";
-import { disconnect } from "../lib/link.js";
+import { disconnect, pauseForUpdate } from "../lib/link.js";
 import { setLookalikePrefs, useLookalikePrefs } from "../lib/lookalikes.js";
 import type { RadioPage } from "../lib/nav.js";
 import { setNoticePrefs, useNoticePrefs, type NoticePrefs } from "../lib/noticePrefs.js";
 import { askPermission, hasNoticeSettings, openNoticeSettings } from "../lib/notify.js";
 import { nativePlatform, shell } from "../lib/platform.js";
-import { relayAvailable, relayWanted, setRelayWanted, useRelay } from "../lib/relay.js";
+import { relayAvailable, relayWanted, setRelayWanted, stopRelay, useRelay } from "../lib/relay.js";
 import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
 import { session, storage, useSession } from "../lib/session.js";
 import { act, toast } from "../lib/toast.js";
@@ -593,15 +593,27 @@ function ConnectionPage() {
         ) : null}
       </Group>
       {relayAvailable() && state.link?.kind === "ble" ? (
-        <Group note="A computer nearby connects to this phone over Bluetooth, as if it were the radio, and uses the radio through it, with the phone locked too. The phone lets go of the radio while the computer has it.">
+        <Group note="A computer nearby connects to this phone over Bluetooth, as if it were the radio, and uses the radio through it, with the phone locked too. Both can use the radio at once, and each gets every message.">
           <SwitchRow
             label="Share with a computer"
-            hint={!relay.on ? undefined : relay.computer ? "A computer has the radio" : "Waiting for a computer"}
+            hint={!lend ? undefined : relay.computer ? "A computer is connected" : "Waiting for a computer"}
             checked={lend}
+            disabled={state.status !== "ready"}
             onChange={async (v) => {
               setLend(v);
+              setRelayWanted(v);
               try {
-                await setRelayWanted(v);
+                if (v) {
+                  // The page goes through the relay from its next connection on. The
+                  // old link is closed first: closing it after would drop the new one,
+                  // since both are the plugin's link to the same radio.
+                  const resume = await pauseForUpdate();
+                  await resume();
+                } else {
+                  // What the relay kept for the page first; the link then drops and comes back direct.
+                  await session.syncMessages().catch(() => undefined);
+                  await stopRelay();
+                }
               } catch (err) {
                 toast(`Could not change it: ${(err as Error).message ?? err}`, "error");
               }

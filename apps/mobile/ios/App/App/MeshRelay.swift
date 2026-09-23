@@ -2,14 +2,14 @@ import Capacitor
 import CoreBluetooth
 import Foundation
 
-/// Lends the radio to a computer nearby, through the phone.
+/// Shares the radio with a computer nearby, through the phone.
 ///
 /// The phone serves the same UART service the radio does (Nordic UART,
 /// `6E400001…`), so a computer connects to the phone as if it were the radio,
-/// with the client it already has. What the computer writes to RX goes to the
-/// radio's RX; what the radio notifies on TX goes to the computer's TX. The
-/// framing is BLE's own, one frame per write or notification, so nothing here
-/// reads the frames.
+/// with the client it already has. The page talks to the radio through here
+/// too, and `RelayMux` decides whose command goes to the radio when and whose
+/// an answer is, so both use the radio at once. The framing is BLE's own, one
+/// frame per write or notification.
 ///
 /// It is native because the page sleeps in the background while this has to
 /// keep moving bytes: the app has the `bluetooth-central` and
@@ -17,9 +17,8 @@ import Foundation
 /// phone locked.
 ///
 /// The radio is held by this object's own central manager, on the link the
-/// BLE plugin already made. So the page can let go of the radio while the
-/// computer has it (the firmware answers one command at a time and does not
-/// say whose it was) and the link stays up.
+/// BLE plugin already made. The page's plugin stays connected (it is how the
+/// page learns of a drop) but the page's frames come and go through here.
 ///
 /// Both characteristics demand an encrypted link, so a computer has to be
 /// paired with the phone first: iOS asks on its own screen.
@@ -29,9 +28,14 @@ final class MeshRelay: NSObject {
     private static let service = CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
     private static let rx = CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
     private static let tx = CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
+    private static let inboxesKey = "meshnet.relay.inboxes"
 
     /// Told of every change: `{ on, computer }`.
     var onChange: (([String: Any]) -> Void)?
+    /// Frames for the page.
+    var onPageFrame: ((Data) -> Void)?
+
+    private let mux: RelayMux
 
     private var server: CBPeripheralManager?
     private var central: CBCentralManager?
@@ -46,10 +50,34 @@ final class MeshRelay: NSObject {
     private var computer: CBCentral?
     /// Notifications iOS had no room for; sent when it says it is ready again.
     private var backlog: [Data] = []
-    /// Frames from the computer that came before the radio's RX was found.
-    private var waiting: [Data] = []
 
     var isOn: Bool { radioId != nil }
+
+    override init() {
+        // The inboxes outlive the app: the radio's copy of a message is gone once the relay has read it.
+        let saved = UserDefaults.standard.dictionary(forKey: MeshRelay.inboxesKey) as? [String: [Data]] ?? [:]
+        var inboxes: [RelayClient: [Data]] = [:]
+        for (name, frames) in saved {
+            if let client = RelayClient(rawValue: name) { inboxes[client] = frames }
+        }
+        mux = RelayMux(inboxes: inboxes)
+        super.init()
+        mux.toRadio = { [weak self] frame in self?.writeRadio(frame) }
+        mux.toClient = { [weak self] client, frame in
+            switch client {
+            case .computer: self?.toComputer(frame)
+            case .page: self?.onPageFrame?(frame)
+            }
+        }
+        mux.after = { delay, block in DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: block) }
+        mux.inboxesChanged = { [weak self] in self?.saveInboxes() }
+    }
+
+    private func saveInboxes() {
+        var saved: [String: [Data]] = [:]
+        for (client, frames) in mux.inboxes { saved[client.rawValue] = frames }
+        UserDefaults.standard.set(saved, forKey: MeshRelay.inboxesKey)
+    }
 
     /// Starts serving, for the radio the page is connected to (the BLE plugin's id).
     func start(radio id: UUID, name: String) {
@@ -79,7 +107,8 @@ final class MeshRelay: NSObject {
         served = nil
         computer = nil
         backlog = []
-        waiting = []
+        mux.detach(.computer)
+        mux.detach(.page)
         releaseRadio()
         changed()
     }
@@ -90,6 +119,25 @@ final class MeshRelay: NSObject {
 
     private func changed() {
         onChange?(state)
+    }
+
+    // MARK: the page
+
+    func attachPage() {
+        mux.attach(.page)
+    }
+
+    func detachPage() {
+        mux.detach(.page)
+    }
+
+    /// `dispatched` is called once the frame has gone to the radio, or been answered here.
+    func fromPage(_ frame: Data, dispatched: @escaping () -> Void) {
+        guard isOn else {
+            dispatched()
+            return
+        }
+        mux.fromClient(.page, frame, dispatched: dispatched)
     }
 
     // MARK: the computer's side
@@ -109,7 +157,7 @@ final class MeshRelay: NSObject {
         server.add(service)
     }
 
-    /// Only while no computer has the radio: the firmware takes one client, and so does this.
+    /// Only while no computer is connected: this serves one, as the firmware does.
     private func advertise() {
         guard let server, server.state == .poweredOn, isOn, computer == nil, !server.isAdvertising else { return }
         server.startAdvertising([
@@ -156,16 +204,17 @@ final class MeshRelay: NSObject {
     }
 
     private func releaseRadio() {
+        mux.radioDown()
         guard let radio else { return }
         self.radio = nil
         radioRx = nil
         central?.cancelPeripheralConnection(radio)
     }
 
-    private func toRadio(_ frame: Data) {
+    /// Only called while the radio is up: the mux holds commands until then.
+    private func writeRadio(_ frame: Data) {
         guard let radio, let radioRx, radio.state == .connected else {
-            waiting.append(frame)
-            attachRadio()
+            NSLog("MeshRelay: a frame for the radio with no radio")
             return
         }
         // With response, as the page writes: the characteristic demands encryption.
@@ -184,6 +233,7 @@ extension MeshRelay: CBPeripheralManagerDelegate {
             if computer != nil {
                 computer = nil
                 backlog = []
+                mux.detach(.computer)
                 changed()
             }
         }
@@ -204,6 +254,7 @@ extension MeshRelay: CBPeripheralManagerDelegate {
         backlog = []
         peripheral.stopAdvertising()
         peripheral.setDesiredConnectionLatency(.low, for: central)
+        mux.attach(.computer)
         attachRadio()
         changed()
     }
@@ -212,7 +263,7 @@ extension MeshRelay: CBPeripheralManagerDelegate {
         guard characteristic.uuid == MeshRelay.tx, central.identifier == computer?.identifier else { return }
         computer = nil
         backlog = []
-        waiting = []
+        mux.detach(.computer)
         advertise()
         changed()
     }
@@ -224,7 +275,7 @@ extension MeshRelay: CBPeripheralManagerDelegate {
             if let value = request.value { frame.append(value) }
         }
         if let first = requests.first { peripheral.respond(to: first, withResult: .success) }
-        if !frame.isEmpty { toRadio(frame) }
+        if !frame.isEmpty, computer != nil { mux.fromClient(.computer, frame) }
     }
 
     func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
@@ -249,11 +300,13 @@ extension MeshRelay: CBCentralManagerDelegate {
         guard peripheral == radio else { return }
         radio = nil
         radioRx = nil
+        mux.radioDown()
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         guard peripheral == radio else { return }
         radioRx = nil
+        mux.radioDown()
         // Asked again: iOS keeps the request and connects when the radio is back.
         if isOn { central.connect(peripheral, options: nil) }
     }
@@ -274,14 +327,21 @@ extension MeshRelay: CBPeripheralDelegate {
                 peripheral.setNotifyValue(true, for: characteristic)
             }
         }
-        let queued = waiting
-        waiting = []
-        for frame in queued { toRadio(frame) }
+    }
+
+    /// The radio is up once its TX notifies here: then the waiting commands go.
+    func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
+        guard peripheral == radio, characteristic.uuid == MeshRelay.tx else { return }
+        if let error {
+            NSLog("MeshRelay: the radio's TX did not subscribe: %@", error.localizedDescription)
+            return
+        }
+        if characteristic.isNotifying, radioRx != nil { mux.radioUp() }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard error == nil, characteristic.uuid == MeshRelay.tx, let value = characteristic.value, !value.isEmpty else { return }
-        toComputer(value)
+        mux.fromRadio(value)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
@@ -289,9 +349,11 @@ extension MeshRelay: CBPeripheralDelegate {
     }
 }
 
-/// The page's switch for the relay: `start({ deviceId, name })` with the radio
+/// The page's side of the relay: `start({ deviceId, name })` with the radio
 /// the page is connected to, `stop()`, `state()`, and a `state` event
-/// `{ on, computer }` whenever a computer takes the radio or lets it go.
+/// `{ on, computer }` whenever a computer comes or goes. While `attach()`ed,
+/// the page talks to the radio through here: `send({ data })` (base64),
+/// answered once the frame has gone to the radio, and `frame` events `{ data }`.
 @objc(MeshRelayPlugin)
 final class MeshRelayPlugin: CAPPlugin, CAPBridgedPlugin {
     let identifier = "MeshRelayPlugin"
@@ -300,11 +362,17 @@ final class MeshRelayPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "start", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "state", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "attach", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "detach", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "send", returnType: CAPPluginReturnPromise),
     ]
 
     override func load() {
         MeshRelay.shared.onChange = { [weak self] state in
-            self?.notifyListeners("state", data: state, retainUntilConsumed: true)
+            self?.notifyListeners("state", data: state)
+        }
+        MeshRelay.shared.onPageFrame = { [weak self] frame in
+            self?.notifyListeners("frame", data: ["data": frame.base64EncodedString()])
         }
     }
 
@@ -330,6 +398,30 @@ final class MeshRelayPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func state(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
             call.resolve(MeshRelay.shared.state)
+        }
+    }
+
+    @objc func attach(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            MeshRelay.shared.attachPage()
+            call.resolve()
+        }
+    }
+
+    @objc func detach(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            MeshRelay.shared.detachPage()
+            call.resolve()
+        }
+    }
+
+    @objc func send(_ call: CAPPluginCall) {
+        guard let data = call.getString("data").flatMap({ Data(base64Encoded: $0) }) else {
+            call.reject("send needs base64 data")
+            return
+        }
+        DispatchQueue.main.async {
+            MeshRelay.shared.fromPage(data) { call.resolve() }
         }
     }
 }
