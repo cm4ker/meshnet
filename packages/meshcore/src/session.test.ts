@@ -441,6 +441,8 @@ test("a direct message the other app sent through the relay is kept as ours, and
   assert.equal(all.length, 1);
   assert.equal(all[0]?.attempt, 1);
   assert.equal(all[0]?.ackTag, 0x12121212);
+  assert.equal(all[0]?.timestamp, 1_700_000_100);
+  assert.equal(all[0]?.sentAt, 1_700_000_100);
   await session.disconnect();
 });
 
@@ -456,6 +458,14 @@ test("a channel message the other app sent through the relay is kept as ours", a
   assert.equal(kept?.conversation, channelConversation(0));
   assert.equal(kept?.status, "sent");
   assert.equal(kept?.sender, "Me");
+  // Unheard, the other app sends it again with a new stamp: the same message, moved to when it went.
+  const retry = new ByteWriter().u8(Cmd.SendChannelTxtMsg).u8(TxtType.Plain).u8(0).u32(1_700_000_260).string("hello from the phone").toBytes();
+  radio.push(mirrorFrame(retry, new Uint8Array([Resp.Ok])));
+  await tick();
+  const all = session.getState().messages.filter((m) => m.text === "hello from the phone");
+  assert.equal(all.length, 1);
+  assert.equal(all[0]?.timestamp, 1_700_000_260);
+  assert.equal(all[0]?.sentAt, 1_700_000_260);
   // A CLI command to a repeater is not a message in a chat.
   const cli = new ByteWriter().u8(Cmd.SendTxtMsg).u8(TxtType.CliData).u8(0).u32(1_700_000_300).bytes(BOB.subarray(0, 6)).string("ver").toBytes();
   radio.push(mirrorFrame(cli, new ByteWriter().u8(Resp.Sent).u8(0).u32(0).u32(2000).toBytes()));
@@ -1323,7 +1333,7 @@ test("a direct message that went unacknowledged along a route is retried as a fl
   saved.messages[0]!.status = "unconfirmed";
 
   const radio = routed();
-  const session = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  const session = new MeshSession({ storage, now: () => 1_700_000_600_000 });
   await session.connect(radio);
   const message = session.getState().messages[0]!;
   assert.equal(session.retryFloods(message), true);
@@ -1331,6 +1341,9 @@ test("a direct message that went unacknowledged along a route is retried as a fl
   const codes = radio.sent.map((f) => f[0]);
   assert.ok(codes.indexOf(Cmd.ResetPath) >= 0 && codes.indexOf(Cmd.ResetPath) < codes.indexOf(Cmd.SendTxtMsg));
   assert.equal(session.getState().messages[0]?.attempt, 1);
+  // The stamp stays, being the same message; the chat files it by when it went.
+  assert.equal(session.getState().messages[0]?.timestamp, 1_700_000_000);
+  assert.equal(session.getState().messages[0]?.sentAt, 1_700_000_600);
   await session.disconnect();
 });
 

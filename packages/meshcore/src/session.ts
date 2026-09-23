@@ -150,6 +150,12 @@ export interface MessageRecord {
   route: string[] | null;
   /** What was typed, when the text sent was reworked to fit (lookalike letters packed). */
   original?: string;
+  /**
+   * Our message sent again: when the last send went, unix seconds. A direct
+   * message keeps its stamp on a retry, but the chat shows and files it by
+   * this, the moment it went.
+   */
+  sentAt?: number;
   /** Set while the message is being sent again and again; null when nothing is being tried. */
   retryPlan: RetryPlan | null;
 }
@@ -1818,7 +1824,7 @@ export class MeshSession {
         const keep = next.attempt > 0 && parseConversation(next.conversation).kind !== "channel";
         const timestamp = keep ? next.timestamp : Math.max(Math.floor(this.now() / 1000), last + 1, next.timestamp + (next.attempt > 0 ? 1 : 0));
         last = timestamp;
-        this.patchMessage(next.id, { status: "sending", timestamp });
+        this.patchMessage(next.id, { status: "sending", timestamp, ...(next.attempt > 0 ? { sentAt: Math.max(Math.floor(this.now() / 1000), timestamp) } : {}) });
         try {
           await this.transmit(client, { ...next, timestamp }, parseConversation(next.conversation), next.flood === true ? "flood asked for" : false);
         } catch {
@@ -1858,7 +1864,8 @@ export class MeshSession {
     // before: sent again to the byte, the copy would be thrown away by every
     // repeater that did hear the first one.
     const timestamp = target.kind === "channel" ? Math.max(Math.floor(this.now() / 1000), message.timestamp + 1) : message.timestamp;
-    this.patchMessage(id, { status: "sending", error: null, attempt, timestamp, ackTag: null, roundTripMs: null, route: null });
+    const sentAt = Math.max(Math.floor(this.now() / 1000), timestamp);
+    this.patchMessage(id, { status: "sending", error: null, attempt, timestamp, sentAt, ackTag: null, roundTripMs: null, route: null });
     await this.transmit(client, { ...message, attempt, timestamp }, target, flood ? "no acknowledgement" : false);
   }
 
@@ -2108,13 +2115,31 @@ export class MeshSession {
     }
   }
 
+  /**
+   * `fresh` says the packet is new to us: a message we did not have, or a
+   * channel retry, which goes with a new stamp and so is a different packet.
+   */
   private keepMirrored(conversation: string, timestamp: number, text: string, attempt: number, sent: (id: string, fresh: boolean) => void): void {
-    const known = this.state.messages.find(
-      (m) => m.direction === "out" && m.conversation === conversation && m.text === text && Math.abs(m.timestamp - timestamp) <= 2,
-    );
+    const same = (m: MessageRecord) => m.direction === "out" && m.conversation === conversation && m.text === text;
+    // A direct retry keeps its stamp. A channel retry carries a new one and
+    // no attempt count, so it is known by being the same text as ours that
+    // nobody was heard sending on: the one the other app was offered to send again.
+    const known =
+      this.state.messages.find((m) => same(m) && Math.abs(m.timestamp - timestamp) <= 2) ??
+      this.state.messages.findLast(
+        (m) => same(m) && m.timestamp < timestamp && m.echoes.length === 0 && m.status !== "delivered" && m.status !== "sending",
+      );
     if (known) {
-      this.patchMessage(known.id, { timestamp, attempt: Math.max(known.attempt, attempt), error: null, ackTag: null, roundTripMs: null });
-      sent(known.id, false);
+      const again = known.timestamp !== timestamp || attempt > known.attempt;
+      this.patchMessage(known.id, {
+        timestamp,
+        attempt: Math.max(known.attempt, attempt),
+        error: null,
+        ackTag: null,
+        roundTripMs: null,
+        ...(again ? { sentAt: Math.max(Math.floor(this.now() / 1000), timestamp) } : {}),
+      });
+      sent(known.id, known.timestamp !== timestamp);
       return;
     }
     const now = this.now();

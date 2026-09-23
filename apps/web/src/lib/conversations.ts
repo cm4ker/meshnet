@@ -113,7 +113,12 @@ export function summarize(state: SessionState): ConversationSummary[] {
 export function messagesIn(state: SessionState, conversation: string): MessageRecord[] {
   return state.messages
     .filter((m) => m.conversation === conversation)
-    .sort((a, b) => a.timestamp - b.timestamp || a.receivedAt - b.receivedAt);
+    .sort((a, b) => shownAt(a) - shownAt(b) || a.receivedAt - b.receivedAt);
+}
+
+/** When a message stands in its chat, unix seconds: ours sent again goes down to the moment it went. */
+export function shownAt(m: MessageRecord): number {
+  return m.sentAt ?? m.timestamp;
 }
 
 export function titleOf(state: SessionState, conversation: string): string {

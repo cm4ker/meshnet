@@ -1,7 +1,7 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AdvType, isConversationType, parseConversation, type MessageRecord, type SessionState } from "@meshnet/meshcore";
 import { GEO, MENTION } from "../lib/composer.js";
-import { messagesIn, titleOf } from "../lib/conversations.js";
+import { messagesIn, shownAt, titleOf } from "../lib/conversations.js";
 import { nameOfHash, relaysOf } from "../lib/echoes.js";
 import { dayLabel, timeOfDay } from "../lib/format.js";
 import { openChannel, openMessage, openProfile, openRoute } from "../lib/nav.js";
@@ -121,11 +121,11 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
           {messages.length === 0 ? <div className="empty muted">{target.kind === "channel" ? "Write first: everyone on the channel hears it." : "Nothing here yet."}</div> : null}
           {messages.map((m, i) => {
             const prev = messages[i - 1];
-            const newDay = !prev || dayLabel(prev.timestamp) !== dayLabel(m.timestamp);
-            const sameSender = prev && !newDay && prev.direction === m.direction && prev.sender === m.sender && m.timestamp - prev.timestamp < 300;
+            const newDay = !prev || dayLabel(shownAt(prev)) !== dayLabel(shownAt(m));
+            const sameSender = prev && !newDay && prev.direction === m.direction && prev.sender === m.sender && shownAt(m) - shownAt(prev) < 300;
             return (
               <div key={m.id}>
-                {newDay ? <div className="day">{dayLabel(m.timestamp)}</div> : null}
+                {newDay ? <div className="day">{dayLabel(shownAt(m))}</div> : null}
                 <Message
                   message={m}
                   showSender={many && m.direction === "in" && !sameSender}
@@ -298,7 +298,7 @@ const Message = memo(function Message({ message, showSender, me, onReply: replyT
           <span className="msg-text">{richText(message.text, me)}</span>
           <span className="msg-meta">
             {tech ? <span className="msg-tech">{tech} ·</span> : null}
-            <span>{timeOfDay(message.timestamp)}</span>
+            <span>{timeOfDay(shownAt(message))}</span>
             {/* A red bubble carries its state in the strip below; a tick beside it would say the opposite. */}
             {out && !bad ? <Status message={message} /> : null}
           </span>
