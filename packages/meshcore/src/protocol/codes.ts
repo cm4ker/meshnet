@@ -136,6 +136,12 @@ export const Push = {
   ControlData: 0x8e,
   ContactDeleted: 0x8f,
   ContactsFull: 0x90,
+  /**
+   * Not the firmware's: the phone's relay (`MeshRelayMux.swift`) sends it when
+   * the other app sharing the radio sent a text. The command as written, then
+   * the radio's answer: `0xf0`, the command's length, the command, the answer.
+   */
+  Mirror: 0xf0,
 } as const;
 
 export function isPushCode(code: number): boolean {

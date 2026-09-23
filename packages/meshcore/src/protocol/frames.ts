@@ -242,7 +242,9 @@ export type PushFrame =
     }
   | { kind: "controlData"; snr: number; rssi: number; pathLen: number; payload: Uint8Array }
   | { kind: "contactDeleted"; publicKey: Uint8Array }
-  | { kind: "contactsFull" };
+  | { kind: "contactsFull" }
+  /** A text the other app sharing the radio sent: its command and the radio's answer (see `Push.Mirror`). */
+  | { kind: "mirror"; command: Uint8Array; answer: Uint8Array };
 
 export type Frame = ResponseFrame | PushFrame | { kind: "unknown"; code: number; raw: Uint8Array };
 
@@ -266,6 +268,7 @@ export const PUSH_KINDS: ReadonlySet<FrameKind> = new Set<FrameKind>([
   "controlData",
   "contactDeleted",
   "contactsFull",
+  "mirror",
 ]);
 
 export function isPushFrame(frame: Frame): frame is PushFrame {
@@ -678,6 +681,10 @@ function decodePush(code: number, r: ByteReader): PushFrame | null {
       return { kind: "sendConfirmed", ackTag: r.u32(), roundTripMs: r.u32() };
     case Push.MsgWaiting:
       return { kind: "msgWaiting" };
+    case Push.Mirror: {
+      const length = r.u8();
+      return { kind: "mirror", command: r.take(length), answer: r.rest() };
+    }
     case Push.RawData: {
       const snrValue = snr(r.i8());
       const rssi = r.i8();

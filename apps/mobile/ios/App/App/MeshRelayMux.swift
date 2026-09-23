@@ -22,20 +22,32 @@ enum RelayClient: String, CaseIterable {
 /// is answered from its inbox without asking the radio, and a client whose
 /// inbox fills is told a message is waiting, as the radio would tell it.
 ///
+/// What one sends, the other should show too, and the radio tells nobody but
+/// the sender. So a text the radio took from one is passed to the other as a
+/// `mirror` push the app reads (`Push.Mirror` in the client): the command and
+/// the radio's answer. One for a client that is away waits in its inbox, and
+/// goes out as a push ahead of the next message it reads.
+///
 /// No Bluetooth here: the owner moves the bytes (`toRadio`, `toClient`) and
 /// runs the timers (`after`), so this can be tested without a radio.
 final class RelayMux {
     // Command, answer and push codes, as the companion firmware numbers them.
+    static let cmdSendTxtMsg: UInt8 = 2
+    static let cmdSendChannelTxtMsg: UInt8 = 3
     static let cmdGetContacts: UInt8 = 4
     static let cmdSyncNextMessage: UInt8 = 10
     static let cmdReboot: UInt8 = 19
     static let cmdSendTelemetryReq: UInt8 = 39
     static let cmdFactoryReset: UInt8 = 51
+    static let respOk: UInt8 = 0
     static let respErr: UInt8 = 1
+    static let respSent: UInt8 = 6
     static let respEndOfContacts: UInt8 = 4
     static let respNoMoreMessages: UInt8 = 10
     static let messageCodes: Set<UInt8> = [7, 8, 16, 17, 27]
     static let pushMsgWaiting: UInt8 = 0x83
+    /// The app's own, not the firmware's: what the other client sent.
+    static let pushMirror: UInt8 = 0xF0
 
     /// Messages kept per client at most; the oldest go first.
     static let inboxLimit = 500
@@ -106,16 +118,26 @@ final class RelayMux {
         pump()
     }
 
+    /// Mirrors kept for it go out as pushes first; then the next message is the answer.
     private func answerFromInbox(_ client: RelayClient) {
         var inbox = inboxes[client] ?? []
-        if inbox.isEmpty {
-            toClient(client, Data([RelayMux.respNoMoreMessages]))
-            return
+        var answer = Data([RelayMux.respNoMoreMessages])
+        var pushes: [Data] = []
+        while !inbox.isEmpty {
+            let frame = inbox.removeFirst()
+            if frame.first == RelayMux.pushMirror {
+                pushes.append(frame)
+            } else {
+                answer = frame
+                break
+            }
         }
-        let message = inbox.removeFirst()
-        inboxes[client] = inbox
-        inboxesChanged()
-        toClient(client, message)
+        if inbox.count != (inboxes[client]?.count ?? 0) {
+            inboxes[client] = inbox
+            inboxesChanged()
+        }
+        for push in pushes { toClient(client, push) }
+        toClient(client, answer)
     }
 
     // MARK: the radio
@@ -149,6 +171,7 @@ final class RelayMux {
         switch command.source {
         case .client(let client):
             if attached.contains(client) { toClient(client, frame) }
+            mirror(command.frame, answer: frame, from: client)
         case .relay:
             if RelayMux.messageCodes.contains(code) {
                 keep(frame)
@@ -182,13 +205,41 @@ final class RelayMux {
 
     private func keep(_ message: Data) {
         for client in RelayClient.allCases {
-            var inbox = inboxes[client] ?? []
-            inbox.append(message)
-            if inbox.count > RelayMux.inboxLimit { inbox.removeFirst(inbox.count - RelayMux.inboxLimit) }
-            inboxes[client] = inbox
+            add(message, to: client)
             if attached.contains(client) { toClient(client, Data([RelayMux.pushMsgWaiting])) }
         }
         inboxesChanged()
+    }
+
+    /// A text the radio took from one client, told to the other.
+    private func mirror(_ command: Data, answer: Data, from sender: RelayClient) {
+        let taken: Bool
+        switch command.first {
+        case RelayMux.cmdSendTxtMsg: taken = answer.first == RelayMux.respSent
+        case RelayMux.cmdSendChannelTxtMsg: taken = answer.first == RelayMux.respOk
+        default: taken = false
+        }
+        guard taken, command.count < 256 else { return }
+        var frame = Data([RelayMux.pushMirror, UInt8(command.count)])
+        frame.append(command)
+        frame.append(answer)
+        var kept = false
+        for client in RelayClient.allCases where client != sender {
+            if attached.contains(client) {
+                toClient(client, frame)
+            } else {
+                add(frame, to: client)
+                kept = true
+            }
+        }
+        if kept { inboxesChanged() }
+    }
+
+    private func add(_ frame: Data, to client: RelayClient) {
+        var inbox = inboxes[client] ?? []
+        inbox.append(frame)
+        if inbox.count > RelayMux.inboxLimit { inbox.removeFirst(inbox.count - RelayMux.inboxLimit) }
+        inboxes[client] = inbox
     }
 
     private func pump() {

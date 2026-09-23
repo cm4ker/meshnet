@@ -410,6 +410,60 @@ test("a channel message goes out with the sender's name accounted for, and is 's
   assert.equal(frame[2], 0);
 });
 
+/** What the phone's relay says the other app sent: the command, then the radio's answer. */
+function mirrorFrame(command: Uint8Array, answer: Uint8Array): Uint8Array {
+  return new ByteWriter().u8(Push.Mirror).u8(command.length).bytes(command).bytes(answer).toBytes();
+}
+
+test("a direct message the other app sent through the relay is kept as ours, and delivered on its ack", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  const command = new ByteWriter().u8(Cmd.SendTxtMsg).u8(TxtType.Plain).u8(0).u32(1_700_000_100).bytes(BOB.subarray(0, 6)).string("from the laptop").toBytes();
+  const answer = new ByteWriter().u8(Resp.Sent).u8(0).u32(0x99887766).u32(2000).toBytes();
+  radio.push(mirrorFrame(command, answer));
+  await tick();
+  const kept = session.getState().messages.find((m) => m.text === "from the laptop");
+  assert.equal(kept?.direction, "out");
+  assert.equal(kept?.conversation, contactConversation(bobKey()));
+  assert.equal(kept?.timestamp, 1_700_000_100);
+  assert.equal(kept?.status, "sent");
+  assert.equal(kept?.ackTag, 0x99887766);
+  assert.deepEqual(session.getState().unread, {});
+  radio.push(new ByteWriter().u8(Push.SendConfirmed).u32(0x99887766).u32(900).toBytes());
+  await tick();
+  assert.equal(session.getState().messages.find((m) => m.id === kept!.id)?.status, "delivered");
+  // A retry from the other app is the same message, not a second one.
+  const retry = new ByteWriter().u8(Cmd.SendTxtMsg).u8(TxtType.Plain).u8(1).u32(1_700_000_100).bytes(BOB.subarray(0, 6)).string("from the laptop").toBytes();
+  radio.push(mirrorFrame(retry, new ByteWriter().u8(Resp.Sent).u8(1).u32(0x12121212).u32(2000).toBytes()));
+  await tick();
+  const all = session.getState().messages.filter((m) => m.text === "from the laptop");
+  assert.equal(all.length, 1);
+  assert.equal(all[0]?.attempt, 1);
+  assert.equal(all[0]?.ackTag, 0x12121212);
+  await session.disconnect();
+});
+
+test("a channel message the other app sent through the relay is kept as ours", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  const command = new ByteWriter().u8(Cmd.SendChannelTxtMsg).u8(TxtType.Plain).u8(0).u32(1_700_000_200).string("hello from the phone").toBytes();
+  radio.push(mirrorFrame(command, new Uint8Array([Resp.Ok])));
+  await tick();
+  const kept = session.getState().messages.find((m) => m.text === "hello from the phone");
+  assert.equal(kept?.direction, "out");
+  assert.equal(kept?.conversation, channelConversation(0));
+  assert.equal(kept?.status, "sent");
+  assert.equal(kept?.sender, "Me");
+  // A CLI command to a repeater is not a message in a chat.
+  const cli = new ByteWriter().u8(Cmd.SendTxtMsg).u8(TxtType.CliData).u8(0).u32(1_700_000_300).bytes(BOB.subarray(0, 6)).string("ver").toBytes();
+  radio.push(mirrorFrame(cli, new ByteWriter().u8(Resp.Sent).u8(0).u32(0).u32(2000).toBytes()));
+  await tick();
+  assert.equal(session.getState().messages.some((m) => m.text === "ver"), false);
+  await session.disconnect();
+});
+
 test("what was heard survives a reconnect through the storage, keyed by the radio", async () => {
   const storage = new MemoryStorage();
   const radio = new ScriptedRadio();

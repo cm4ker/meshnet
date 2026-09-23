@@ -10,10 +10,10 @@
  */
 
 import { MeshCoreClient, MeshCoreError, TimeoutError, type TextSendResult } from "./client.js";
-import { bytesEqual, fromHex, pathByteLength, toHex, unixNow } from "./protocol/bytes.js";
+import { ByteReader, bytesEqual, fromHex, pathByteLength, toHex, unixNow } from "./protocol/bytes.js";
 import { groupTextPayload, heardGroupTextPayload } from "./protocol/group.js";
 import { PayloadType, parseRawPacket, type RawPacket } from "./protocol/packet.js";
-import { AclRole, AdvType, ContactFlag, ControlType, ErrCode, MAX_TEXT_LEN, PUB_KEY_PREFIX_SIZE, StatsType, TxtType } from "./protocol/codes.js";
+import { AclRole, AdvType, Cmd, ContactFlag, ControlType, ErrCode, MAX_TEXT_LEN, PUB_KEY_PREFIX_SIZE, StatsType, TxtType } from "./protocol/codes.js";
 import {
   accessListRequest,
   avgMinMaxRequest,
@@ -24,6 +24,7 @@ import {
   type RadioParams,
 } from "./protocol/commands.js";
 import {
+  decodeFrame,
   readAccessList,
   readAvgMinMax,
   readNeighbours,
@@ -2060,6 +2061,89 @@ export class MeshSession {
     this.ackTimers.set(id, timer);
   }
 
+  /**
+   * A text the other app sharing the radio sent (the phone's relay tells the
+   * one what the other sent): kept as ours, as if sent from here, so both show
+   * the whole conversation. Its acknowledgement reaches both, so a direct
+   * message is marked delivered here too. The same text again, a retry, is
+   * the same message.
+   */
+  private mirrored(command: Uint8Array, answer: Uint8Array): void {
+    try {
+      const r = new ByteReader(command);
+      const code = r.u8();
+      if (code !== Cmd.SendTxtMsg && code !== Cmd.SendChannelTxtMsg) return;
+      if (r.u8() !== TxtType.Plain) return;
+      let conversation: string;
+      let contact: ContactRecord | undefined;
+      let attempt = 0;
+      if (code === Cmd.SendTxtMsg) {
+        attempt = r.u8();
+        const timestamp = r.u32();
+        const prefix = toHex(r.take(PUB_KEY_PREFIX_SIZE));
+        contact = Object.values(this.state.contacts).find((c) => c.prefix === prefix);
+        if (!contact) return;
+        conversation = contactConversation(contact.key);
+        this.keepMirrored(conversation, timestamp, r.restString(), attempt, (id) => {
+          const sent = decodeFrame(answer);
+          if (sent.kind === "sent") this.armAck(id, sent, sent.flood ? null : contactRoute(contact!));
+          else this.patchMessage(id, { status: "sent" });
+        });
+      } else {
+        const index = r.u8();
+        const timestamp = r.u32();
+        conversation = channelConversation(index);
+        const text = r.restString();
+        this.keepMirrored(conversation, timestamp, text, attempt, (id, fresh) => {
+          this.patchMessage(id, { status: "sent" });
+          if (fresh) {
+            const message = this.state.messages.find((m) => m.id === id);
+            if (message) void this.watchEchoes(message, index);
+          }
+          this.armSilence(id);
+        });
+      }
+    } catch (error) {
+      this.log("error", `could not read what the other app sent: ${(error as Error).message}`);
+    }
+  }
+
+  private keepMirrored(conversation: string, timestamp: number, text: string, attempt: number, sent: (id: string, fresh: boolean) => void): void {
+    const known = this.state.messages.find(
+      (m) => m.direction === "out" && m.conversation === conversation && m.text === text && Math.abs(m.timestamp - timestamp) <= 2,
+    );
+    if (known) {
+      this.patchMessage(known.id, { timestamp, attempt: Math.max(known.attempt, attempt), error: null, ackTag: null, roundTripMs: null });
+      sent(known.id, false);
+      return;
+    }
+    const now = this.now();
+    const message: MessageRecord = {
+      id: newId(now),
+      conversation,
+      direction: "out",
+      text,
+      sender: this.state.self?.name ?? null,
+      senderPrefix: this.state.self?.prefix ?? null,
+      timestamp,
+      receivedAt: now,
+      snr: null,
+      hops: null,
+      txtType: TxtType.Plain,
+      status: "sending",
+      ackTag: null,
+      roundTripMs: null,
+      flood: null,
+      attempt,
+      error: null,
+      echoes: [],
+      route: null,
+      retryPlan: null,
+    };
+    this.set({ messages: [...this.state.messages, message] });
+    sent(message.id, true);
+  }
+
   /** How many bytes of text a message to this conversation may carry. */
   textBudget(conversation: string): number {
     const target = parseConversation(conversation);
@@ -2684,6 +2768,9 @@ export class MeshSession {
     switch (frame.kind) {
       case "msgWaiting":
         if (this.isReady) this.syncMessages().catch((e: Error) => this.log("error", e.message));
+        return;
+      case "mirror":
+        this.mirrored(frame.command, frame.answer);
         return;
       case "sendConfirmed": {
         const message = this.state.messages.find((m) => m.ackTag === frame.ackTag && m.direction === "out");

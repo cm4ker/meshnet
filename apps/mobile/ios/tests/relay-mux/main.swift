@@ -237,6 +237,70 @@ do {
     check(rig.radio == [bytes(5), bytes(22)], "the computer's command never goes")
 }
 
+// A text one sends is told to the other, with the radio's answer.
+do {
+    let rig = Rig()
+    rig.mux.attach(.page)
+    rig.mux.attach(.computer)
+    rig.mux.radioUp()
+    rig.mux.fromRadio(noMore)
+    rig.clear()
+    let dm = bytes(2, 0, 0, 1, 2, 3, 4, 9, 9, 9, 9, 9, 9, 104, 105)
+    let sent = bytes(6, 0, 7, 7, 7, 7, 0xd0, 7, 0, 0)
+    rig.mux.fromClient(.page, dm)
+    rig.mux.fromRadio(sent)
+    check(rig.got[.page] == [sent], "the sender gets the answer")
+    var mirror = bytes(0xF0, UInt8(dm.count))
+    mirror.append(dm)
+    mirror.append(sent)
+    check(rig.got[.computer] == [mirror], "the other gets the command and the answer")
+    rig.clear()
+    let channel = bytes(3, 0, 1, 1, 2, 3, 4, 104, 105)
+    rig.mux.fromClient(.computer, channel)
+    rig.mux.fromRadio(ok)
+    check(rig.got[.page]!.first == 0xF0, "a channel text too, on OK")
+    rig.clear()
+    rig.mux.fromClient(.computer, channel)
+    rig.mux.fromRadio(bytes(1, 2))
+    check(rig.got[.page]!.isEmpty, "not one the radio refused")
+    rig.mux.fromClient(.computer, bytes(5))
+    rig.mux.fromRadio(bytes(9, 0, 0, 0, 0))
+    check(rig.got[.page]!.isEmpty, "nor any other command")
+}
+
+// One for a client that is away waits, and goes ahead of its next message.
+do {
+    let rig = Rig()
+    rig.mux.attach(.page)
+    rig.mux.radioUp()
+    rig.mux.fromRadio(noMore)
+    rig.mux.fromClient(.page, bytes(3, 0, 0, 1, 2, 3, 4, 104))
+    rig.mux.fromRadio(ok)
+    rig.mux.fromRadio(bytes(0x83))
+    rig.mux.fromRadio(message)
+    rig.mux.fromRadio(noMore)
+    rig.mux.attach(.computer)
+    check(rig.got[.computer] == [bytes(0x83)], "the computer is told something waits")
+    rig.mux.fromClient(.computer, sync)
+    check(rig.got[.computer]!.count == 3 && rig.got[.computer]![1].first == 0xF0 && rig.got[.computer]![2] == message, "the mirror as a push, then the message")
+    rig.mux.fromClient(.computer, sync)
+    check(rig.got[.computer]!.last == noMore, "then nothing more")
+}
+
+// Only mirrors waiting: pushed, and the answer is "no more".
+do {
+    let rig = Rig()
+    rig.mux.attach(.page)
+    rig.mux.radioUp()
+    rig.mux.fromRadio(noMore)
+    rig.mux.fromClient(.page, bytes(3, 0, 0, 1, 2, 3, 4, 104))
+    rig.mux.fromRadio(ok)
+    rig.mux.attach(.computer)
+    rig.clear()
+    rig.mux.fromClient(.computer, sync)
+    check(rig.got[.computer]!.count == 2 && rig.got[.computer]![0].first == 0xF0 && rig.got[.computer]![1] == noMore, "a mirror, then no more")
+}
+
 // Self telemetry is answered by a push only.
 do {
     check(RelayMux.patience(bytes(39, 0, 0, 0)).1, "self telemetry expects no answer")
