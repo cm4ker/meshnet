@@ -24,6 +24,10 @@ const config: CapacitorConfig = {
     allowMixedContent: false,
   },
   plugins: {
+    LocalNotifications: {
+      smallIcon: "ic_stat_meshnet",
+      iconColor: "#74ade8",
+    },
     // iOS: the page makes room for the keyboard itself, rising with it (apps/web/src/lib/keyboard.ts).
     // "native" would shrink the web view instead, but only once the keyboard is up, plus a fifth of
     // a second, in one step, so the keyboard first slid over the conversation and then the

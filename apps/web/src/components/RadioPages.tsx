@@ -542,7 +542,7 @@ function AboutPage() {
   const info = useDesktopUpdateInfo();
   return <>
     <Group note="A companion for MeshCore radios. Messages stay on this device; the radio keeps only what has not been read yet.">
-      <InfoRow label="Meshnet">{info.version}</InfoRow>
+      <InfoRow label="Meshnet" icon={<img src="./icon.svg" alt="" width={24} height={24} />}>{info.version}</InfoRow>
       <InfoRow label="Running in">{shell() === "tauri" ? "the desktop shell" : shell() === "capacitor" ? "the phone shell" : "a browser"}</InfoRow>
     </Group>
     <UpdateButton />

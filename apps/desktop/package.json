@@ -9,7 +9,7 @@
     "desktop:bundle": "tauri build",
     "//windows": "An x64 build for the machines that are x64; `tauri build` alone builds for the host, which on an ARM laptop is ARM64.",
     "desktop:bundle:x64": "tauri build --target x86_64-pc-windows-msvc",
-    "desktop:icon": "tauri icon ../web/public/icon.svg",
+    "desktop:icon": "node ../../scripts/icons.mjs",
     "desktop:check": "cargo check --manifest-path src-tauri/Cargo.toml"
   },
   "devDependencies": {

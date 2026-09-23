@@ -238,7 +238,7 @@ export async function notify(title: string, body: string, tag: string, kind: Not
     default:
       if (!("Notification" in window) || Notification.permission !== "granted") return;
       try {
-        const notice = new Notification(title, { body, tag });
+        const notice = new Notification(title, { body, tag, icon: "./icon-192.png", badge: "./notification-badge.png" });
         notice.onclick = () => {
           window.focus();
           clicked?.(tag);

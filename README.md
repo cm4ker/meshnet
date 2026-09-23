@@ -163,6 +163,8 @@ docs/screenshots   Demo captures used by both README translations
 
 The client selects its transport at runtime. Desktop and mobile shells bundle the same web client and provide native connections, notifications and credential storage.
 
+App artwork has one source: `apps/web/public/icon.svg`. After changing it, run `pnpm icons` to regenerate the browser, desktop and mobile icons, notification marks and launch images. The interface uses the same SVG directly.
+
 ### Keyboard shortcuts
 
 | Shortcut | Action |
