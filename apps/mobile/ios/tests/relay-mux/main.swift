@@ -258,7 +258,7 @@ do {
     let channel = bytes(3, 0, 1, 1, 2, 3, 4, 104, 105)
     rig.mux.fromClient(.computer, channel)
     rig.mux.fromRadio(ok)
-    check(rig.got[.page]!.first == 0xF0, "a channel text too, on OK")
+    check(rig.got[.page]!.first?.first == 0xF0, "a channel text too, on OK")
     rig.clear()
     rig.mux.fromClient(.computer, channel)
     rig.mux.fromRadio(bytes(1, 2))
