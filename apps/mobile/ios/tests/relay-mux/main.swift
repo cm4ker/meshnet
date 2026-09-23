@@ -215,6 +215,7 @@ do {
     check(rig.radio == [bytes(5), sync], "then the relay reads the queue")
     rig.mux.fromRadio(noMore)
     rig.mux.fromClient(.computer, bytes(20))
+    rig.clear()
     rig.mux.radioDown()
     rig.mux.fromRadio(bytes(9, 0, 0, 0, 0))
     check(rig.got[.computer]!.isEmpty, "an answer after the drop belongs to nothing")
