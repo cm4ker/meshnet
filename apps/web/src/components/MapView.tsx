@@ -14,7 +14,7 @@ import * as L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AdvType, type ContactRecord } from "@meshnet/meshcore";
-import { clusterPoints, type Placed } from "../lib/cluster.js";
+import { clusterPoints, type Group, type Placed } from "../lib/cluster.js";
 import { darkenPixels } from "../lib/darkTile.js";
 import { ago, hue } from "../lib/format.js";
 import { freshness, hasPosition } from "../lib/geo.js";
@@ -97,18 +97,44 @@ function glyph(contact: ContactRecord): string {
 }
 
 /** What a node's marker shows, as a string: a marker is redrawn only when this changes. `number` is its place in a route being changed. */
-function nodeLook(contact: ContactRecord, nowSec: number, selected: boolean, number?: number): { look: string; make: () => L.DivIcon } {
+function nodeLook(contact: ContactRecord, nowSec: number, selected: boolean, number?: number, hush = false): { look: string; make: () => L.DivIcon } {
   const age = contact.lastAdvert > 0 ? nowSec - contact.lastAdvert : Number.POSITIVE_INFINITY;
   const state = freshness(contact.type, age);
   const name = escapeHtml(contact.name || contact.prefix);
   const stale = state === "stale" && Number.isFinite(age) ? ` · ${ago(contact.lastAdvert * 1000)}` : "";
-  const className = ["map-node", `t-${contact.type}`, state, selected ? "sel" : "", number ? "numbered" : ""].join(" ");
+  const className = ["map-node", `t-${contact.type}`, state, selected ? "sel" : "", number ? "numbered" : "", hush ? "hush" : ""].join(" ");
   const badge = number ? `<span class="map-num">${number}</span>` : "";
   const html = `<span class="map-pin" style="--hue:${hue(contact.name || contact.prefix)}">${glyph(contact)}</span>${badge}<span class="map-name">${name}${stale}</span>`;
   return {
     look: className + html,
     make: () => L.divIcon({ className, html, iconSize: [22, 22], iconAnchor: [11, 11] }),
   };
+}
+
+type Box = { x0: number; y0: number; x1: number; y1: number };
+
+/**
+ * The nodes whose names would run over a group's circle, another pin or a name
+ * already placed: those keep their pin and lose the name until a zoom makes room.
+ * The picked node always keeps its own.
+ */
+function crowdedNames(groups: Group<ContactRecord>[], selected: string | null, self: L.Point | null): Set<string> {
+  const around = (x: number, y: number, r: number): Box => ({ x0: x - r, y0: y - r, x1: x + r, y1: y + r });
+  const taken: Box[] = groups.map((g) => around(g.x, g.y, g.members.length === 1 ? 11 : g.members.length < 10 ? 16 : 22));
+  if (self) taken.push(around(self.x, self.y, 11));
+  const hits = (b: Box) => taken.some((t) => b.x0 < t.x1 && b.x1 > t.x0 && b.y0 < t.y1 && b.y1 > t.y0);
+  const singles = groups.filter((g) => g.members.length === 1);
+  // The pick first, so it is the one others give way to.
+  singles.sort((a, b) => Number(b.members[0]!.key === selected) - Number(a.members[0]!.key === selected));
+  const hushed = new Set<string>();
+  for (const g of singles) {
+    const c = g.members[0]!;
+    // Where .map-name draws: 15 px right of the pin's centre, 16 px tall, about 6 px a letter.
+    const name = { x0: g.x + 15, y0: g.y - 8, x1: g.x + 15 + (c.name || c.prefix).length * 6.2, y1: g.y + 8 };
+    if (c.key !== selected && hits(name)) hushed.add(c.key);
+    else taken.push(name);
+  }
+  return hushed;
 }
 
 function groupLook(members: ContactRecord[], selected: boolean): { look: string; make: () => L.DivIcon } {
@@ -273,10 +299,12 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
       return { item: c, x: p.x, y: p.y };
     });
     const wanted = new Map<string, { at: L.LatLng; look: string; make: () => L.DivIcon; members: ContactRecord[] }>();
-    for (const g of clusterPoints(points, CLUSTER_RADIUS)) {
+    const groups = clusterPoints(points, CLUSTER_RADIUS);
+    const hushed = crowdedNames(groups, selected, self ? m.project([self.lat, self.lon], z) : null);
+    for (const g of groups) {
       if (g.members.length === 1) {
         const c = g.members[0]!;
-        wanted.set(c.key, { at: L.latLng(c.lat, c.lon), ...nodeLook(c, nowSec, c.key === selected, numbers[c.key]), members: g.members });
+        wanted.set(c.key, { at: L.latLng(c.lat, c.lon), ...nodeLook(c, nowSec, c.key === selected, numbers[c.key], hushed.has(c.key)), members: g.members });
       } else {
         const id = `g:${g.members.map((c) => c.key.slice(0, 16)).join(",")}`;
         const holdsPick = g.members.some((c) => c.key === selected);
@@ -317,7 +345,7 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
       current.set(id, entry);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown, selected, zoom, numbers]);
+  }, [shown, selected, zoom, numbers, self]);
 
   // This radio, kept as one marker so its pulse is not restarted by every change.
   useEffect(() => {

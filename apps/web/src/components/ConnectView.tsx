@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { connectWith, useLink } from "../lib/link.js";
+import { CONNECT_TRIES, connectWith, useLink } from "../lib/link.js";
 import { shell } from "../lib/platform.js";
 import { addressDevice, autoConnectWanted, connectors, lastLink, needsPairing, setAutoConnect, type Connector, type FoundDevice } from "../transports/index.js";
 import { Button } from "../ui/Button.js";
@@ -55,7 +55,7 @@ export function ConnectView() {
 
         {link.phase === "connecting" ? (
           <p className="connect-status">
-            <span className="spinner" /> {link.retrying ? `Reconnecting (attempt ${link.attempt})…` : "Connecting…"}
+            <span className="spinner" /> {link.retrying ? `Reconnecting · attempt ${link.attempt}` : link.attempt > 1 ? `Connecting · attempt ${link.attempt} of ${CONNECT_TRIES}` : "Connecting…"}
           </p>
         ) : null}
         {link.error && link.phase === "failed" ? <p className="connect-error">{link.error}</p> : null}
@@ -101,6 +101,18 @@ function AddressForm({ busy, onConnect }: { busy: boolean; onConnect: (device: F
         Connect
       </Button>
     </form>
+  );
+}
+
+/** Four bars for how well the radio is heard; the figure itself is in the tooltip. */
+function SignalBars({ rssi }: { rssi: number }) {
+  const lit = rssi >= -60 ? 4 : rssi >= -75 ? 3 : rssi >= -90 ? 2 : 1;
+  return (
+    <span className="signal-bars" title={`${rssi} dBm`} aria-label={`Signal ${lit} of 4`}>
+      {[1, 2, 3, 4].map((n) => (
+        <i key={n} className={n <= lit ? "on" : ""} style={{ height: `${n * 25}%` }} />
+      ))}
+    </span>
   );
 }
 
@@ -191,11 +203,11 @@ function ConnectorPanel({ connector, lastDevice }: { connector: Connector; lastD
           {devices.map((d) => (
             <li key={d.id}>
               <button type="button" className="device" disabled={busy} onClick={() => connect(d)}>
-                <span className="device-name">{d.name}</span>
-                <span className="device-detail">
-                  {d.id === lastDevice?.id ? "last used" : d.detail}
-                  {d.rssi !== null ? ` · ${d.rssi} dBm` : ""}
+                <span className="device-text">
+                  <span className="device-name">{d.name}</span>
+                  <span className="device-detail">{d.id === lastDevice?.id ? "last used" : d.detail}</span>
                 </span>
+                {d.rssi !== null ? <SignalBars rssi={d.rssi} /> : null}
               </button>
             </li>
           ))}

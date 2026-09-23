@@ -8,13 +8,14 @@
 import { useSyncExternalStore } from "react";
 import { session } from "./session.js";
 import type { Transport } from "@meshnet/meshcore";
-import { autoConnectWanted, connectorById, lastLink, rememberLink, type Connector, type FoundDevice } from "../transports/index.js";
+import { autoConnectWanted, connectorById, lastLink, needsPairing, rememberLink, type Connector, type FoundDevice } from "../transports/index.js";
 
 export interface LinkState {
   phase: "idle" | "connecting" | "connected" | "failed";
   error: string | null;
   /** Set while a dropped link is being retried. */
   retrying: boolean;
+  /** Which try this is, while a link is being retried or a picked radio tried again; 0 otherwise. */
   attempt: number;
 }
 
@@ -82,24 +83,33 @@ async function open(connector: Connector, device: FoundDevice | null, gen: numbe
   return null;
 }
 
+/** How many times a radio picked by hand is tried before the failure is shown: a weak one often times out once. */
+export const CONNECT_TRIES = 3;
+
 export async function connectWith(connector: Connector, device: FoundDevice | null): Promise<void> {
   cancelRetry();
   const gen = ++generation;
   wantedLink = { connector, device };
-  set({ phase: "connecting", error: null });
-  try {
-    const transport = await open(connector, device, gen);
-    if (!transport) return;
-    await session.connect(transport);
-    if (gen !== generation) return;
-    rememberLink({ connectorId: connector.id, device: device ?? { id: "", name: transport.label, detail: null, rssi: null } });
-    set({ phase: "connected", error: null, retrying: false, attempt: 0 });
-  } catch (error) {
-    // Given up for another radio or a disconnect: its failure is no news.
-    if (gen !== generation) return;
-    const message = error instanceof Error ? error.message : String(error);
-    set({ phase: "failed", error: message });
-    throw error;
+  // A chooser cannot be reopened without a click, and a radio that wants a PIN will not stop wanting it.
+  const tries = device && connector.mode !== "picker" ? CONNECT_TRIES : 1;
+  for (let attempt = 1; ; attempt++) {
+    set({ phase: "connecting", error: null, retrying: false, attempt: tries > 1 ? attempt : 0 });
+    try {
+      const transport = await open(connector, device, gen);
+      if (!transport) return;
+      await session.connect(transport);
+      if (gen !== generation) return;
+      rememberLink({ connectorId: connector.id, device: device ?? { id: "", name: transport.label, detail: null, rssi: null } });
+      set({ phase: "connected", error: null, retrying: false, attempt: 0 });
+      return;
+    } catch (error) {
+      // Given up for another radio or a disconnect: its failure is no news.
+      if (gen !== generation) return;
+      if (attempt < tries && !needsPairing(error)) continue;
+      const message = error instanceof Error ? error.message : String(error);
+      set({ phase: "failed", error: message, attempt: 0 });
+      throw error;
+    }
   }
 }
 

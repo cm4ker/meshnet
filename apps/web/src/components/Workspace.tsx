@@ -10,6 +10,7 @@ import { isTauri } from "../lib/platform.js";
 import { useSelector, useSession } from "../lib/session.js";
 import { closeTool } from "../lib/toolActions.js";
 import { MenuHost, ToastHost } from "../ui/Menu.js";
+import { ScreenBoundary } from "../ui/ErrorBoundary.js";
 import { Sheet } from "../ui/Sheet.js";
 import { ChannelView } from "./ChannelView.js";
 import { ChatList, NEW_CHAT_EVENT } from "./ChatList.js";
@@ -99,14 +100,30 @@ function Phone() {
   const top = stack.at(-1) ?? null;
   // How a message travelled is a sheet over its conversation, not a screen of its own.
   const sheet = top?.kind === "message" ? top : null;
-  const shown = sheet ? (stack.at(-2) ?? null) : top;
+  const screens = sheet ? stack.slice(0, -1) : stack;
+  const shown = screens.at(-1) ?? null;
   const content = useRef<HTMLElement>(null);
-  useEdgeSwipe(content, stack.length > 0 && !sheet);
+  const goBack = useEdgeSwipe(content, screens.length > 0 && !sheet);
 
-  let screen: ReactNode = null;
-  if (shown) screen = <ScreenView key={JSON.stringify(shown)} screen={shown} chrome={{ onBack: back }} wide={false} />;
-  else if (nav.section === "chats") screen = <ChatList selected={null} />;
-  else if (nav.section === "radio") screen = <RadioHome selected={null} />;
+  const [meshOpened, setMeshOpened] = useState(nav.section === "mesh");
+  if (nav.section === "mesh" && !meshOpened) setMeshOpened(true);
+
+  // A screen pushed within a section slides in over the one it covers; one from another section just appears.
+  const last = useRef({ section: nav.section, depth: screens.length });
+  const slide = last.current.section === nav.section && screens.length > last.current.depth;
+  useEffect(() => {
+    last.current = { section: nav.section, depth: screens.length };
+  });
+
+  // The root of a section, then its stack: the top one on screen, the one under it kept mounted for Back.
+  const layers: { key: string; node: ReactNode }[] = [];
+  if (nav.section === "chats") layers.push({ key: "root", node: <ChatList selected={null} /> });
+  else if (nav.section === "radio") layers.push({ key: "root", node: <RadioHome selected={null} /> });
+  screens.forEach((s, i) => {
+    const key = `${i}:${JSON.stringify(s)}`;
+    layers.push({ key, node: <ScreenView screen={s} chrome={{ onBack: goBack }} wide={false} /> });
+  });
+  const kept = layers.slice(-2);
 
   // The conversation takes the whole height: its composer sits where the tabs were.
   const tabs = shown?.kind !== "chat";
@@ -114,9 +131,20 @@ function Phone() {
     <div className={["app", "narrow", tabs ? "" : "detail"].join(" ")}>
       <main className="content" ref={content}>
         <Offline />
-        {/* The map stays under a node's profile, so Back finds it as it was left: same place, same list, no tiles to fetch again. */}
-        {nav.section === "mesh" ? <MeshPhone hidden={shown !== null} /> : null}
-        {screen}
+        {/* The map stays under a node's profile, and behind the other tabs once opened, so it comes back as it was left: same place, same list, no tiles to fetch again, no 86 rows to mount. */}
+        {meshOpened ? (
+          <ScreenBoundary>
+            <MeshPhone hidden={nav.section !== "mesh" || shown !== null} />
+          </ScreenBoundary>
+        ) : null}
+        {kept.map((l, i) => {
+          const onTop = i === kept.length - 1;
+          return (
+            <div key={l.key} className={["layer", slide ? (onTop ? "enter" : "leave") : ""].join(" ")} data-layer={onTop ? "top" : "under"}>
+              <ScreenBoundary onBack={l.key === "root" ? undefined : goBack}>{l.node}</ScreenBoundary>
+            </div>
+          );
+        })}
       </main>
       {tabs ? (
         <nav className="tabbar" aria-label="Sections">
@@ -143,26 +171,74 @@ function Badge({ section, badges }: { section: Section; badges: ReturnType<typeo
   return null;
 }
 
+const SLIDE_MS = 180;
+
 /**
  * A swipe from the left edge goes back, as on iOS; Android's own back
  * gesture comes through the shell (see back.ts). The screen follows the
- * finger, and goes if let go past a third of the way.
+ * finger over the one below, and goes if let go past a third of the way.
+ * Returns a Back for the header's button that slides the same way.
  */
-function useEdgeSwipe(ref: React.RefObject<HTMLElement | null>, enabled: boolean) {
+function useEdgeSwipe(ref: React.RefObject<HTMLElement | null>, enabled: boolean): () => void {
+  const slideOut = useRef<() => void>(back);
   useEffect(() => {
     const el = ref.current;
     if (!el || !enabled) return;
     let start: { x: number; y: number } | null = null;
     let active = false;
-    const screen = () => el.querySelector<HTMLElement>(":scope > .screen");
+    let leaving = false;
+    const top = () => el.querySelector<HTMLElement>(":scope > .layer[data-layer=top]");
+    // Under the first screen in Mesh lies the map, kept mounted and hidden.
+    const under = () => el.querySelector<HTMLElement>(":scope > .layer[data-layer=under]") ?? el.querySelector<HTMLElement>(":scope > .mesh-phone[hidden]");
+    const place = (t: HTMLElement, u: HTMLElement | null, dx: number) => {
+      t.style.transform = `translateX(${dx}px)`;
+      u?.style.setProperty("--p", String(Math.min(1, dx / el.clientWidth)));
+    };
+    const lift = (t: HTMLElement, u: HTMLElement | null) => {
+      // Their own layers while they move: a whole screen repainted on every touch move drops frames.
+      t.classList.add("moving");
+      t.style.transition = "none";
+      if (u) {
+        u.classList.add("peek");
+        u.style.transition = "none";
+      }
+    };
+    const finish = (t: HTMLElement, u: HTMLElement | null, go: boolean) => {
+      t.style.transition = `transform ${SLIDE_MS}ms ease-out`;
+      if (u) u.style.transition = `transform ${SLIDE_MS}ms ease-out`;
+      place(t, u, go ? el.clientWidth : 0);
+      leaving = go;
+      setTimeout(() => {
+        t.classList.remove("moving");
+        t.style.transform = t.style.transition = "";
+        if (u) {
+          u.classList.remove("peek");
+          u.style.transition = "";
+          u.style.removeProperty("--p");
+        }
+        leaving = false;
+        // In the same task as the clean-up, so no frame shows the old screen back in place.
+        if (go) back();
+      }, SLIDE_MS);
+    };
+    slideOut.current = () => {
+      const t = top();
+      if (!t || leaving || matchMedia("(prefers-reduced-motion: reduce)").matches) return back();
+      const u = under();
+      lift(t, u);
+      place(t, u, 0);
+      // One frame at the start, so the slide has somewhere to slide from.
+      requestAnimationFrame(() => finish(t, u, true));
+    };
     const down = (e: TouchEvent) => {
       const t = e.touches[0];
-      start = t && t.clientX < 24 && e.touches.length === 1 ? { x: t.clientX, y: t.clientY } : null;
+      start = !leaving && t && t.clientX < 24 && e.touches.length === 1 ? { x: t.clientX, y: t.clientY } : null;
       active = false;
     };
     const move = (e: TouchEvent) => {
       const t = e.touches[0];
-      if (!start || !t) return;
+      const layer = top();
+      if (!start || !t || !layer) return;
       const dx = t.clientX - start.x;
       const dy = t.clientY - start.y;
       if (!active) {
@@ -172,15 +248,10 @@ function useEdgeSwipe(ref: React.RefObject<HTMLElement | null>, enabled: boolean
           return;
         }
         active = true;
+        lift(layer, under());
       }
       e.preventDefault();
-      const s = screen();
-      if (s) {
-        s.style.transition = "none";
-        // Its own layer while it moves: a whole screen repainted on every touch move drops frames.
-        s.style.willChange = "transform";
-        s.style.transform = `translateX(${Math.max(0, dx)}px)`;
-      }
+      place(layer, under(), Math.max(0, dx));
     };
     const up = (e: TouchEvent) => {
       if (!active || !start) {
@@ -189,30 +260,24 @@ function useEdgeSwipe(ref: React.RefObject<HTMLElement | null>, enabled: boolean
       }
       const t = e.changedTouches[0];
       const dx = t ? t.clientX - start.x : 0;
-      const s = screen();
       start = null;
       active = false;
-      if (!s) return;
-      s.style.transition = "transform 0.18s ease-out";
-      if (dx > el.clientWidth / 3) {
-        s.style.transform = "translateX(100%)";
-        setTimeout(back, 170);
-      } else {
-        s.style.transform = "";
-        setTimeout(() => (s.style.willChange = ""), 200);
-      }
+      const layer = top();
+      if (layer) finish(layer, under(), dx > el.clientWidth / 3);
     };
     el.addEventListener("touchstart", down, { passive: true });
     el.addEventListener("touchmove", move, { passive: false });
     el.addEventListener("touchend", up);
     el.addEventListener("touchcancel", up);
     return () => {
+      slideOut.current = back;
       el.removeEventListener("touchstart", down);
       el.removeEventListener("touchmove", move);
       el.removeEventListener("touchend", up);
       el.removeEventListener("touchcancel", up);
     };
   }, [ref, enabled]);
+  return useRef(() => slideOut.current()).current;
 }
 
 // ---- the desktop: the list, what was picked in it, and a panel of details ----
@@ -325,7 +390,7 @@ function Desktop() {
       <aside className="pane">{list}</aside>
       <main className="content">
         <Offline />
-        {main}
+        <ScreenBoundary key={`${nav.section}:${JSON.stringify(full ?? chat)}`}>{main}</ScreenBoundary>
       </main>
       {toolPanel ? (
         <aside className="panel">
@@ -335,7 +400,9 @@ function Desktop() {
         </aside>
       ) : panel && !full ? (
         <aside className="panel">
-          <ScreenView key={JSON.stringify(panel)} screen={panel} chrome={panelChrome} wide />
+          <ScreenBoundary key={JSON.stringify(panel)} onBack={closePanel}>
+            <ScreenView screen={panel} chrome={panelChrome} wide />
+          </ScreenBoundary>
         </aside>
       ) : (
         groupPanel

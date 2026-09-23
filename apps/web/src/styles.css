@@ -476,8 +476,10 @@ textarea.input {
 .connect {
   min-height: 100%;
   display: grid;
-  place-items: center;
-  padding: max(var(--space-4), var(--safe-top)) var(--space-4) max(var(--space-4), var(--safe-bottom));
+  /* Pinned near the top rather than centred: a card that grows as radios turn up would jump at every one. */
+  justify-items: center;
+  align-content: start;
+  padding: max(12vh, var(--safe-top)) var(--space-4) max(var(--space-4), var(--safe-bottom));
 }
 .connect-card {
   width: min(420px, 100%);
@@ -525,9 +527,8 @@ textarea.input {
 .device {
   width: 100%;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  align-items: center;
+  gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border: 0;
   background: var(--bg);
@@ -544,8 +545,31 @@ textarea.input {
 .device:disabled {
   opacity: 0.6;
 }
+.device-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
 .device-name {
   font-weight: 500;
+}
+.signal-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+  flex: none;
+}
+.signal-bars i {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--border-strong);
+}
+.signal-bars i.on {
+  background: var(--success);
 }
 .device-detail {
   font-size: var(--text-sm);
@@ -733,6 +757,75 @@ textarea.input {
   background: var(--bg);
   overflow: hidden;
 }
+/* The phone's screens: the top one on screen, the one under it kept mounted for Back and shown only while the top one slides. */
+.layer {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg);
+}
+.layer[data-layer="under"] {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  visibility: hidden;
+}
+.layer.moving {
+  will-change: transform;
+  box-shadow: -8px 0 24px rgb(0 0 0 / 0.25);
+}
+/* Under the one leaving: a third to the left and dimmed, coming into place as the finger moves. */
+.layer.peek,
+.mesh-phone.peek[hidden] {
+  --p: 0;
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  visibility: visible;
+  will-change: transform;
+  transform: translateX(calc(-30% * (1 - var(--p))));
+}
+.layer.peek {
+  display: flex;
+}
+.layer.peek::after,
+.mesh-phone.peek[hidden]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2000;
+  background: rgb(0 0 0 / calc(0.3 * (1 - var(--p))));
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .layer.enter {
+    animation: layer-enter 0.22s ease-out;
+  }
+  .layer.leave {
+    animation: layer-leave 0.22s ease-out;
+  }
+}
+@keyframes layer-enter {
+  from {
+    transform: translateX(100%);
+    box-shadow: -8px 0 24px rgb(0 0 0 / 0.25);
+  }
+}
+@keyframes layer-leave {
+  from,
+  to {
+    visibility: visible;
+  }
+  to {
+    transform: translateX(-30%);
+    filter: brightness(0.7);
+  }
+}
 .app.narrow .content {
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
@@ -772,8 +865,8 @@ textarea.input {
 .app.narrow .offline {
   padding-top: calc(6px + var(--safe-top));
 }
-.app.narrow .offline ~ .screen > .screen-head,
-.app.narrow .offline ~ .list-pane > .list-head {
+.app.narrow .offline ~ .layer > .screen > .screen-head,
+.app.narrow .offline ~ .layer > .list-pane > .list-head {
   padding-top: 0;
   min-height: 48px;
 }
@@ -795,6 +888,10 @@ textarea.input {
   min-height: 0;
   min-width: 0;
   background: var(--bg);
+}
+.screen-failed {
+  gap: var(--space-3);
+  padding: calc(var(--space-5) + var(--safe-top)) var(--space-4) var(--space-4);
 }
 .screen-head {
   flex: none;
@@ -989,6 +1086,9 @@ textarea.input {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.row-sub .route-known {
+  color: var(--accent);
 }
 .row-draft {
   color: var(--danger);
@@ -1639,10 +1739,20 @@ details.more .kv-grid {
   font-size: var(--text-xs);
 }
 .radio-card-freq {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
-  border-top: 1px solid var(--border);
-  color: var(--text-muted);
+  margin-bottom: var(--space-3);
+  border: 0;
+  border-block: 1px solid var(--border);
+  background: none;
+  color: var(--text);
+  font: inherit;
   font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
 }
 .radio-card-actions {
   display: flex;
@@ -1781,9 +1891,9 @@ details.more .kv-grid {
 .msg.out .msg-col {
   align-items: flex-end;
 }
+/* A block, not a flex column: the time floats into the end of the text's last line, as in Telegram, and gets a line of its own only where it does not fit. */
 .bubble {
-  display: flex;
-  flex-direction: column;
+  display: flow-root;
   max-width: 100%;
   padding: 7px 11px 5px;
   border-radius: 16px;
@@ -1807,6 +1917,8 @@ details.more .kv-grid {
 }
 /* The strip inside a red bubble: runs edge to edge under the text, its own tap target. */
 .msg-strip {
+  clear: both;
+  width: calc(100% + 22px);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1843,6 +1955,7 @@ details.more .kv-grid {
   outline: 2px solid var(--accent);
 }
 .msg-sender {
+  display: block;
   font-size: var(--text-xs);
   font-weight: 600;
   color: var(--accent);
@@ -1850,10 +1963,11 @@ details.more .kv-grid {
 }
 .msg-meta {
   display: flex;
-  align-self: flex-end;
+  float: right;
   align-items: center;
   gap: 4px;
-  margin-top: 1px;
+  /* Down onto the text's baseline; the negative bottom keeps a meta on its own line from adding height. */
+  margin: 5px 0 -3px 10px;
   font-size: var(--text-xs);
   color: var(--text-faint);
   white-space: nowrap;
@@ -3494,6 +3608,10 @@ button.hop {
   color: var(--text);
   text-shadow: 0 0 2px var(--bg), 0 0 2px var(--bg), 0 0 3px var(--bg);
   pointer-events: none;
+}
+/* A name that would run over a cluster or another name: the pin stays, the name comes back with room. */
+.map-node.hush .map-name {
+  display: none;
 }
 .map-node.stale .map-name {
   color: var(--text-muted);

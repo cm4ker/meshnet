@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { battery, batteryPercent, bandwidth, frequency, plural } from "../lib/format.js";
+import { battery, batteryPercent, plural } from "../lib/format.js";
 import { disconnect } from "../lib/link.js";
 import { useLookalikePrefs } from "../lib/lookalikes.js";
 import { openRadioPage, type RadioPage } from "../lib/nav.js";
@@ -52,7 +52,8 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
       <div className="screen-scroll">
         <div className="radio-card">
           <div className="radio-card-head">
-            <Avatar name={self?.name ?? "Radio"} size={44} />
+            {/* A glyph, not initials: "Node-21" would read "NO". */}
+            <Avatar name={self?.name ?? "Radio"} size={44} icon={<RadioIcon size={22} />} />
             <span className="row-main">
               <span className="row-title">{self?.name ?? "Radio"}</span>
               <span className={["row-sub", online ? "muted" : "danger"].join(" ")}>
@@ -71,10 +72,11 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
             </button>
           </div>
           {self ? (
-            <div className="radio-card-freq mono">
-              {/* A narrow phone breaks the line between values, never inside one. */}
-              {[frequency(self.frequencyKhz), bandwidth(self.bandwidthHz), `SF${self.spreadingFactor}`, `CR 4/${self.codingRate}`, `${self.txPower} dBm`].map((part) => part.replaceAll(" ", " ")).join(" · ")}
-            </div>
+            // The preset and the power; frequency, bandwidth, SF and CR are on the page this opens.
+            <button type="button" className="radio-card-freq" onClick={() => openRadioPage("frequency")}>
+              <span>{presetName(self)}</span>
+              <span className="muted">{self.txPower} dBm</span>
+            </button>
           ) : null}
           <div className="radio-card-actions">
             <Button variant="primary" size="lg" disabled={!online} onClick={(e) => advertise(e.detail === 0 ? null : { x: e.clientX, y: e.clientY })}>

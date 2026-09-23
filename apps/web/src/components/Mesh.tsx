@@ -249,9 +249,11 @@ interface NodeRowProps {
  */
 const NodeRow = memo(function NodeRow({ contact: c, selected, yours, onOpen, login, last, self }: NodeRowProps) {
   const low = !!last && last.batteryMv > 0 && last.batteryMv < LOW_BATTERY_MV;
+  // Most nodes have no route and flood, and many no position: said on every row it says nothing, so the profile says it.
+  const route = yours ? null : routeWords(c);
   const bits = yours
     ? [kindLabel(c.type), login?.ok ? "signed in" : "not signed in", last ? `${(last.batteryMv / 1000).toFixed(2)} V` : null]
-    : [kindLabel(c.type), routeWords(c).text, whereFrom(self, c) ?? (hasPosition(c.lat, c.lon) ? null : "no position")];
+    : [kindLabel(c.type), whereFrom(self, c)];
   return (
     <li>
       <button type="button" className={["row", selected ? "selected" : ""].join(" ")} onClick={() => onOpen(c.key)}>
@@ -265,7 +267,10 @@ const NodeRow = memo(function NodeRow({ contact: c, selected, yours, onOpen, log
             <span className="row-when muted">{ago(heard(c) || null)}</span>
           </span>
           <span className="row-bottom">
-            <span className="row-sub muted">{bits.filter(Boolean).join(" · ")}</span>
+            <span className="row-sub muted">
+              {bits.filter(Boolean).join(" · ")}
+              {route && route.tone !== "none" ? <span className={route.tone === "pinned" ? "" : "route-known"}> · {route.text}</span> : null}
+            </span>
             {yours ? <span className={["dot", low ? "warn" : last ? "on" : "stale"].join(" ")} title={low ? "Battery low" : last ? "Healthy at the last status" : "No status yet"} /> : null}
           </span>
         </span>
