@@ -32,6 +32,8 @@
 	<string>Ommesh talks to your MeshCore radio over Bluetooth.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Ommesh talks to a MeshCore radio on your Wi-Fi network.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Ommesh sets your radio's position from this phone's location when you ask it to.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
