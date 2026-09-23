@@ -385,8 +385,14 @@ fn open_link(app: AppHandle, mac: u64, address: &str, on_frame: Channel<Vec<u8>>
         device.ConnectionStatus().map(|s| s.0).unwrap_or(-1)
     );
 
-    let service = find_service(&device)?;
-    let (rx, tx) = find_characteristics(&service)?;
+    // A radio with no bond here can fail in more ways than the ATT codes
+    // `wait` knows — a refused discovery, or no answer at all — and the way
+    // out of each is the same: pair.
+    let paired = device.DeviceInformation().and_then(|i| i.Pairing()).and_then(|p| p.IsPaired()).unwrap_or(true);
+    let unpaired = |e: String| if paired || e.contains("NEEDS_PAIRING") { e } else { format!("{e}. NEEDS_PAIRING") };
+
+    let service = find_service(&device).map_err(unpaired)?;
+    let (rx, tx) = find_characteristics(&service).map_err(unpaired)?;
     log::debug!("winble: characteristics found");
 
     let sink = on_frame;
@@ -410,7 +416,8 @@ fn open_link(app: AppHandle, mac: u64, address: &str, on_frame: Channel<Vec<u8>>
         tx.WriteClientCharacteristicConfigurationDescriptorAsync(GattClientCharacteristicConfigurationDescriptorValue::Notify)
             .map_err(|e| err("subscribe", e))?,
         "subscribe",
-    )?;
+    )
+    .map_err(unpaired)?;
     if status != GattCommunicationStatus::Success {
         let _ = tx.RemoveValueChanged(value_token);
         // `ProtocolError` here is the radio refusing an unencrypted link: it
