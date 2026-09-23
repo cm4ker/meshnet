@@ -3445,6 +3445,10 @@ button.hop {
   color: var(--text);
   box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
 }
+/* Grouping of close nodes, while it is on. */
+.map-controls .icon-button.on {
+  color: var(--accent);
+}
 
 /* The phone's Mesh: the map under a sheet that holds the list. The map runs up under the notch;
    what sits on it keeps below. Under the offline line the notch is already cleared. */
@@ -3570,58 +3574,9 @@ button.hop {
   font-size: var(--text-sm);
 }
 
-/* Markers: a person is a circle, a repeater a mast's diamond, a room a square, a sensor a hexagon. */
-.map-node,
+/* This radio on the map. The other nodes are painted on a canvas (lib/nodeCanvas.ts). */
 .map-self {
   overflow: visible;
-}
-.map-pin {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border: 2px solid var(--bg);
-  border-radius: 50%;
-  background: oklch(var(--avatar-l) var(--avatar-c) var(--hue));
-  color: oklch(20% 0.03 var(--hue));
-  font: 600 10px/1 var(--font-ui);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
-}
-.map-node.t-2 .map-pin {
-  width: 18px;
-  height: 18px;
-  margin: 2px;
-  border-radius: 3px;
-  transform: rotate(45deg);
-  background: var(--text);
-}
-.map-node.t-2 .map-pin::after {
-  content: "";
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--bg);
-}
-.map-node.t-3 .map-pin {
-  border-radius: 6px;
-}
-.map-node.t-4 .map-pin {
-  border: 0;
-  clip-path: polygon(50% 0, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
-}
-.map-node.aging .map-pin {
-  opacity: 0.6;
-}
-.map-node.stale .map-pin {
-  background: var(--bg);
-  border-color: currentColor;
-  color: oklch(var(--avatar-l) var(--avatar-c) var(--hue));
-}
-.map-node.t-2.stale .map-pin {
-  color: var(--text);
-}
-.map-node.sel .map-pin {
-  box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent);
 }
 .map-name {
   position: absolute;
@@ -3632,13 +3587,6 @@ button.hop {
   color: var(--text);
   text-shadow: 0 0 2px var(--bg), 0 0 2px var(--bg), 0 0 3px var(--bg);
   pointer-events: none;
-}
-/* A name that would run over a cluster or another name: the pin stays, the name comes back with room. */
-.map-node.hush .map-name {
-  display: none;
-}
-.map-node.stale .map-name {
-  color: var(--text-muted);
 }
 .map-self-dot {
   position: absolute;
@@ -3671,23 +3619,6 @@ button.hop {
 }
 .map-route {
   stroke: var(--accent);
-}
-
-/* Nodes too close to tell apart at this zoom, as one circle with their count. */
-/* Leaflet gives every marker `display: block`; the class pair outranks it. */
-.leaflet-marker-icon.map-group {
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: color-mix(in oklab, var(--accent) 88%, var(--bg));
-  color: var(--accent-contrast);
-  border: 2px solid var(--bg);
-  box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 28%, transparent), 0 1px 3px rgb(0 0 0 / 0.35);
-  font: 600 12px/1 var(--font-ui);
-  font-variant-numeric: tabular-nums;
-}
-.leaflet-marker-icon.map-group.sel {
-  box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent);
 }
 
 /* ---- small adjustments ---- */
@@ -4357,9 +4288,6 @@ button.hop {
   color: var(--accent-contrast);
   font: 600 10px/12px var(--font-ui);
   text-align: center;
-}
-.map-node.numbered .map-name {
-  left: 30px;
 }
 
 /* Points of a route that drag onto another repeater: a ring round a relay, a dot in a leg's middle. */

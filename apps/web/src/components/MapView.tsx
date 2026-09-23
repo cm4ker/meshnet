@@ -1,9 +1,11 @@
 /**
  * The nodes on a map: every contact whose last advert carried a position, and
  * this radio. Tiles are OpenStreetMap's, kept on the device as they are seen
- * (lib/tiles.ts). Nodes that would overlap at the current zoom are gathered
- * into one circle with their count (lib/cluster.ts); tapping it zooms in on
- * them, or hands them up as a group when they share a spot. The picked node,
+ * (lib/tiles.ts). The nodes are painted on one canvas (lib/nodeCanvas.ts),
+ * which keeps a pan and a pinch smooth with hundreds of them. Nodes that
+ * would overlap at the current zoom are gathered into one circle with their
+ * count unless grouping is turned off; tapping it zooms in on them, or hands
+ * them up as a group when they share a spot. The picked node,
  * and the lines over the nodes (lib/mapOverlay.ts: a route coloured by a
  * ping, a line of sight), are the caller's: the map draws them and reports
  * taps, on a node, on a line, and a long press anywhere, and a point of a
@@ -14,16 +16,15 @@ import * as L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AdvType, type ContactRecord } from "@meshnet/meshcore";
-import { clusterPoints, type Group, type Placed } from "../lib/cluster.js";
 import { darkenPixels } from "../lib/darkTile.js";
-import { ago, hue } from "../lib/format.js";
-import { freshness, hasPosition } from "../lib/geo.js";
+import { hasPosition } from "../lib/geo.js";
 import { EMPTY_OVERLAY, type MapHandle, type MapOverlay } from "../lib/mapOverlay.js";
 import type { LosEnd } from "../lib/meshTool.js";
+import { NodeCanvas } from "../lib/nodeCanvas.js";
 import { useSession } from "../lib/session.js";
 import { TILE_ATTRIBUTION, TILE_URL, tileBlob } from "../lib/tiles.js";
 import { IconButton } from "../ui/Button.js";
-import { FitIcon, LocateIcon, MinusIcon, PlusIcon } from "./Icons.js";
+import { FitIcon, GroupIcon, LocateIcon, MinusIcon, PlusIcon } from "./Icons.js";
 
 function darkTheme(): boolean {
   return document.documentElement.dataset["appearance"] === "dark";
@@ -79,72 +80,11 @@ class CachedTileLayer extends L.TileLayer {
 }
 
 
-/** How close, in screen pixels, two markers may come before they are gathered: a marker and its name. */
-const CLUSTER_RADIUS = 44;
-
 /** A group spread less than this, in metres, is the same spot at any zoom, and is listed rather than zoomed into. */
 const SAME_SPOT_M = 25;
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-}
-
-function glyph(contact: ContactRecord): string {
-  if (contact.type === AdvType.Repeater) return "";
-  if (contact.type === AdvType.Room) return "#";
-  if (contact.type === AdvType.Sensor) return "";
-  return escapeHtml((contact.name || contact.prefix).slice(0, 1).toUpperCase());
-}
-
-/** What a node's marker shows, as a string: a marker is redrawn only when this changes. `number` is its place in a route being changed. */
-function nodeLook(contact: ContactRecord, nowSec: number, selected: boolean, number?: number, hush = false): { look: string; make: () => L.DivIcon } {
-  const age = contact.lastAdvert > 0 ? nowSec - contact.lastAdvert : Number.POSITIVE_INFINITY;
-  const state = freshness(contact.type, age);
-  const name = escapeHtml(contact.name || contact.prefix);
-  const stale = state === "stale" && Number.isFinite(age) ? ` · ${ago(contact.lastAdvert * 1000)}` : "";
-  const className = ["map-node", `t-${contact.type}`, state, selected ? "sel" : "", number ? "numbered" : "", hush ? "hush" : ""].join(" ");
-  const badge = number ? `<span class="map-num">${number}</span>` : "";
-  const html = `<span class="map-pin" style="--hue:${hue(contact.name || contact.prefix)}">${glyph(contact)}</span>${badge}<span class="map-name">${name}${stale}</span>`;
-  return {
-    look: className + html,
-    make: () => L.divIcon({ className, html, iconSize: [22, 22], iconAnchor: [11, 11] }),
-  };
-}
-
-type Box = { x0: number; y0: number; x1: number; y1: number };
-
-/**
- * The nodes whose names would run over a group's circle, another pin or a name
- * already placed: those keep their pin and lose the name until a zoom makes room.
- * The picked node always keeps its own.
- */
-function crowdedNames(groups: Group<ContactRecord>[], selected: string | null, self: L.Point | null): Set<string> {
-  const around = (x: number, y: number, r: number): Box => ({ x0: x - r, y0: y - r, x1: x + r, y1: y + r });
-  const taken: Box[] = groups.map((g) => around(g.x, g.y, g.members.length === 1 ? 11 : g.members.length < 10 ? 16 : 22));
-  if (self) taken.push(around(self.x, self.y, 11));
-  const hits = (b: Box) => taken.some((t) => b.x0 < t.x1 && b.x1 > t.x0 && b.y0 < t.y1 && b.y1 > t.y0);
-  const singles = groups.filter((g) => g.members.length === 1);
-  // The pick first, so it is the one others give way to.
-  singles.sort((a, b) => Number(b.members[0]!.key === selected) - Number(a.members[0]!.key === selected));
-  const hushed = new Set<string>();
-  for (const g of singles) {
-    const c = g.members[0]!;
-    // Where .map-name draws: 15 px right of the pin's centre, 16 px tall, about 6 px a letter.
-    const name = { x0: g.x + 15, y0: g.y - 8, x1: g.x + 15 + (c.name || c.prefix).length * 6.2, y1: g.y + 8 };
-    if (c.key !== selected && hits(name)) hushed.add(c.key);
-    else taken.push(name);
-  }
-  return hushed;
-}
-
-function groupLook(members: ContactRecord[], selected: boolean): { look: string; make: () => L.DivIcon } {
-  const n = members.length;
-  const size = n < 10 ? 32 : n < 100 ? 38 : 44;
-  const className = ["map-group", selected ? "sel" : ""].join(" ");
-  return {
-    look: `${className}|${n}`,
-    make: () => L.divIcon({ className, html: `<span class="map-group-count">${n}</span>`, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
-  };
 }
 
 function selfIcon(name: string): L.DivIcon {
@@ -154,13 +94,6 @@ function selfIcon(name: string): L.DivIcon {
     iconSize: [22, 22],
     iconAnchor: [11, 11],
   });
-}
-
-interface Shown {
-  marker: L.Marker;
-  look: string;
-  /** A group's members; the click handler reads them from here, so it never holds a stale list. */
-  members: ContactRecord[];
 }
 
 
@@ -191,6 +124,17 @@ export interface MapProps {
 /** How near a node, in pixels, a dragged point lets go onto it. */
 const SNAP_PX = 36;
 
+const GROUPING_KEY = "meshnet.map.grouping";
+
+/** Whether nodes close together are gathered into one circle; on unless turned off. */
+function groupingWanted(): boolean {
+  try {
+    return localStorage.getItem(GROUPING_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
 /** Where the map was left, so coming back to it, from a profile or another section, finds it there. */
 let lastView: { center: L.LatLng; zoom: number } | null = null;
 
@@ -198,12 +142,11 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
   const state = useSession();
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
-  const nodesLayer = useRef<L.LayerGroup | null>(null);
+  const nodes = useRef<NodeCanvas | null>(null);
   const routeLayer = useRef<L.LayerGroup | null>(null);
   const selfMarker = useRef<L.Marker | null>(null);
-  const markers = useRef(new Map<string, Shown>());
   const fitted = useRef(false);
-  const [zoom, setZoom] = useState(2);
+  const [grouping, setGrouping] = useState(groupingWanted);
   // The handlers Leaflet holds are set once; they read the latest callbacks from here.
   const calls = useRef({ onSelect, onGroup, onLeg, onHold, onHandleDrop });
   calls.current = { onSelect, onGroup, onLeg, onHold, onHandleDrop };
@@ -242,11 +185,13 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
     L.control.attribution({ prefix: false, position: "topleft" }).addTo(m);
     const tiles = new CachedTileLayer(TILE_URL, { maxZoom: 19, attribution: TILE_ATTRIBUTION }).addTo(m);
     routeLayer.current = L.layerGroup().addTo(m);
-    nodesLayer.current = L.layerGroup().addTo(m);
+    // Over the lines, under the markers left: this radio, a route's handles, the labels of legs.
+    m.createPane("nodes").style.zIndex = "450";
+    const nodeCanvas = new NodeCanvas({ pane: "nodes" }).addTo(m);
+    nodes.current = nodeCanvas;
     if (lastView) {
       m.setView(lastView.center, lastView.zoom, { animate: false });
       fitted.current = true;
-      setZoom(lastView.zoom);
     } else {
       m.setView([20, 0], 2);
     }
@@ -257,11 +202,27 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
       heldAt = Date.now();
       calls.current.onHold(e.latlng.lat, e.latlng.lng);
     });
-    m.on("click", () => {
+    // The canvas takes no pointer events: a tap lands on the map, and is looked up among the nodes drawn.
+    m.on("click", (e: L.LeafletMouseEvent) => {
       if (Date.now() - heldAt < 500) return;
-      calls.current.onSelect(null);
+      const mouse = (e.originalEvent as PointerEvent).pointerType === "mouse";
+      const members = nodeCanvas.hit(e.layerPoint, mouse ? 3 : 10);
+      if (!members) return calls.current.onSelect(null);
+      if (members.length === 1) return calls.current.onSelect(members[0]!.key);
+      const bounds = L.latLngBounds(members.map((c) => [c.lat, c.lon] as L.LatLngTuple));
+      const spread = bounds.getNorthEast().distanceTo(bounds.getSouthWest());
+      if (spread < SAME_SPOT_M || m.getZoom() >= m.getMaxZoom()) calls.current.onGroup(members.map((c) => c.key));
+      else m.fitBounds(bounds, { ...padding(), maxZoom: m.getMaxZoom() });
     });
-    m.on("zoomend", () => setZoom(m.getZoom()));
+    // A pointer over a node shows it can be clicked; looked up once a frame at most.
+    let hoverFrame = 0;
+    m.on("mousemove", (e: L.LeafletMouseEvent) => {
+      if (hoverFrame) return;
+      hoverFrame = requestAnimationFrame(() => {
+        hoverFrame = 0;
+        m.getContainer().style.cursor = nodeCanvas.hit(e.layerPoint, 3) ? "pointer" : "";
+      });
+    });
     // Not while hidden under a profile: a map with no size has no middle to remember.
     m.on("moveend", () => {
       if (m.getSize().y > 0) lastView = { center: m.getCenter(), zoom: m.getZoom() };
@@ -270,82 +231,36 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
     // The pane is sized by the layout, which changes when a phone turns or a desktop window is resized.
     const resize = new ResizeObserver(() => m.invalidateSize());
     resize.observe(box.current);
-    // Tiles are coloured when drawn, so a change of theme draws them again.
-    const theme = new MutationObserver(() => tiles.redraw());
+    // Tiles and nodes are coloured when drawn, so a change of theme draws them again.
+    const theme = new MutationObserver(() => {
+      tiles.redraw();
+      nodeCanvas.redraw();
+    });
     theme.observe(document.documentElement, { attributes: true, attributeFilter: ["data-appearance"] });
-    const shownMarkers = markers.current;
+    // The names are measured in the app's font, which may arrive after the first paint.
+    void document.fonts?.ready.then(() => nodeCanvas.redraw());
+    // "4 min" beside a name turns into "5 min".
+    const minute = window.setInterval(() => {
+      if (m.getSize().y > 0) nodeCanvas.redraw();
+    }, 30_000);
     return () => {
+      window.clearInterval(minute);
+      cancelAnimationFrame(hoverFrame);
       theme.disconnect();
       resize.disconnect();
       m.remove();
       map.current = null;
-      nodesLayer.current = null;
+      nodes.current = null;
       routeLayer.current = null;
       selfMarker.current = null;
-      shownMarkers.clear();
       fitted.current = false;
     };
   }, []);
 
-  // The markers: gathered for the zoom, then only what changed is touched.
+  // The nodes: handed to the canvas, which groups them for the zoom and paints them.
   useEffect(() => {
-    const m = map.current;
-    const layer = nodesLayer.current;
-    if (!m || !layer) return;
-    const nowSec = Date.now() / 1000;
-    const z = m.getZoom();
-    const points: Placed<ContactRecord>[] = shown.map((c) => {
-      const p = m.project([c.lat, c.lon], z);
-      return { item: c, x: p.x, y: p.y };
-    });
-    const wanted = new Map<string, { at: L.LatLng; look: string; make: () => L.DivIcon; members: ContactRecord[] }>();
-    const groups = clusterPoints(points, CLUSTER_RADIUS);
-    const hushed = crowdedNames(groups, selected, self ? m.project([self.lat, self.lon], z) : null);
-    for (const g of groups) {
-      if (g.members.length === 1) {
-        const c = g.members[0]!;
-        wanted.set(c.key, { at: L.latLng(c.lat, c.lon), ...nodeLook(c, nowSec, c.key === selected, numbers[c.key], hushed.has(c.key)), members: g.members });
-      } else {
-        const id = `g:${g.members.map((c) => c.key.slice(0, 16)).join(",")}`;
-        const holdsPick = g.members.some((c) => c.key === selected);
-        wanted.set(id, { at: m.unproject([g.x, g.y], z), ...groupLook(g.members, holdsPick), members: g.members });
-      }
-    }
-
-    const current = markers.current;
-    for (const [id, shownMarker] of current) {
-      if (wanted.has(id)) continue;
-      layer.removeLayer(shownMarker.marker);
-      current.delete(id);
-    }
-    for (const [id, want] of wanted) {
-      const existing = current.get(id);
-      if (existing) {
-        if (!existing.marker.getLatLng().equals(want.at)) existing.marker.setLatLng(want.at);
-        if (existing.look !== want.look) {
-          existing.marker.setIcon(want.make());
-          existing.look = want.look;
-        }
-        existing.members = want.members;
-        continue;
-      }
-      const entry: Shown = { marker: L.marker(want.at, { icon: want.make(), keyboard: true }), look: want.look, members: want.members };
-      entry.marker.on("click", (e) => {
-        L.DomEvent.stopPropagation(e);
-        if (entry.members.length === 1) {
-          calls.current.onSelect(entry.members[0]!.key);
-          return;
-        }
-        const bounds = L.latLngBounds(entry.members.map((c) => [c.lat, c.lon] as L.LatLngTuple));
-        const spread = bounds.getNorthEast().distanceTo(bounds.getSouthWest());
-        if (spread < SAME_SPOT_M || m.getZoom() >= m.getMaxZoom()) calls.current.onGroup(entry.members.map((c) => c.key));
-        else m.fitBounds(bounds, { ...padding(), maxZoom: m.getMaxZoom() });
-      });
-      entry.marker.addTo(layer);
-      current.set(id, entry);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown, selected, zoom, numbers, self]);
+    nodes.current?.setData({ nodes: shown, selected, numbers, grouping, self: self ? L.latLng(self.lat, self.lon) : null });
+  }, [shown, selected, numbers, grouping, self]);
 
   // This radio, kept as one marker so its pulse is not restarted by every change.
   useEffect(() => {
@@ -395,7 +310,7 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
     for (const handle of overlay.handles) dragHandle(layer, handle, handle.key ? overlay.numbers[handle.key] : undefined);
     if (overlay.pulse) {
       // A flood going out: rings spreading from this radio, under the nodes.
-      L.marker([overlay.pulse.lat, overlay.pulse.lon], { interactive: false, keyboard: false, zIndexOffset: -1000, icon: L.divIcon({ className: "map-flood", html: "<i></i><i></i><i></i>", iconSize: [260, 260], iconAnchor: [130, 130] }) }).addTo(layer);
+      L.marker([overlay.pulse.lat, overlay.pulse.lon], { pane: "overlayPane", interactive: false, keyboard: false, icon: L.divIcon({ className: "map-flood", html: "<i></i><i></i><i></i>", iconSize: [260, 260], iconAnchor: [130, 130] }) }).addTo(layer);
     }
   }, [overlay]);
 
@@ -414,9 +329,9 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
       }
     }
     // Nodes gathered into a circle are let go onto through it: a repeater among them, the nearest first.
-    for (const entry of markers.current.values()) {
+    for (const entry of nodes.current?.groups() ?? []) {
       if (entry.members.length < 2) continue;
-      const at = entry.marker.getLatLng();
+      const at = entry.at;
       const d = p.distanceTo(m.latLngToContainerPoint(at));
       if (d >= reach) continue;
       const near = (c: ContactRecord) => p.distanceTo(m.latLngToContainerPoint([c.lat, c.lon]));
@@ -521,10 +436,7 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
     if (self) points.push([self.lat, self.lon]);
     if (points.length === 1) centerOn(points[0]!, 13);
     else if (points.length > 1) m.fitBounds(L.latLngBounds(points), { ...padding(), maxZoom: 14 });
-    if (points.length > 0) {
-      fitted.current = true;
-      setZoom(m.getZoom());
-    }
+    if (points.length > 0) fitted.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placed, self]);
 
@@ -549,6 +461,22 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
             </IconButton>
           </>
         ) : null}
+        <IconButton
+          label={grouping ? "Show every node apart" : "Group close nodes"}
+          className={grouping ? "on" : ""}
+          aria-pressed={grouping}
+          onClick={() => {
+            const next = !grouping;
+            setGrouping(next);
+            try {
+              localStorage.setItem(GROUPING_KEY, next ? "on" : "off");
+            } catch {
+              // Kept for this visit only.
+            }
+          }}
+        >
+          <GroupIcon size={18} />
+        </IconButton>
         <IconButton label="Show all" onClick={fitAll}>
           <FitIcon size={18} />
         </IconButton>

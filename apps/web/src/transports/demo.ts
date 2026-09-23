@@ -21,6 +21,8 @@ interface Person {
   hops: number;
   lat: number;
   lon: number;
+  /** Seconds since its last advert; ten minutes when not said. */
+  ago?: number;
 }
 
 const PEOPLE: Person[] = [
@@ -32,7 +34,39 @@ const PEOPLE: Person[] = [
   { key: seeded(7), name: "Tower Repeater", type: 2, hops: 1, lat: 55.09, lon: 73.31 },
   // Signs paths with the same first byte as Hill Repeater, as one-byte hashes on a busy mesh do.
   { key: startingWith(0x6f, 6), name: "Ridge Repeater", type: 2, hops: 2, lat: 55.12, lon: 73.5 },
+  // A name ending in an emoji, which goes on the node's circle.
+  { key: seeded(8), name: "Kolya ⛺", type: 1, hops: 1, lat: 55.075, lon: 73.43, ago: 3 * 86400 },
 ];
+
+/**
+ * `?demo&crowd=400`: that many more nodes scattered round the town, heard
+ * from a minute to a few days ago, to see how the map and the lists hold up.
+ */
+const CROWD = (() => {
+  try {
+    return Math.min(3000, Math.max(0, Number(new URLSearchParams(globalThis.location?.search ?? "").get("crowd")) || 0));
+  } catch {
+    return 0;
+  }
+})();
+{
+  let seed = 0x2545f491;
+  const rand = () => {
+    seed ^= seed << 13;
+    seed ^= seed >>> 17;
+    seed ^= seed << 5;
+    return (seed >>> 0) / 4294967296;
+  };
+  const tails = ["", "", "", "", " 🦊", " 🚲", " 🏔️", " 📡"];
+  for (let i = 0; i < CROWD; i++) {
+    const key = new Uint8Array(32);
+    for (let b = 0; b < 32; b++) key[b] = Math.floor(rand() * 256);
+    const roll = rand();
+    const type = roll < 0.8 ? 1 : roll < 0.95 ? 2 : 3;
+    const name = type === 2 ? `Rpt-${i}` : type === 3 ? `Room ${i}` : `Node-${i}${tails[Math.floor(rand() * tails.length)]}`;
+    PEOPLE.push({ key, name, type, hops: 1 + Math.floor(rand() * 3), lat: 55.05 + (rand() - 0.5) * 0.5, lon: 73.4 + (rand() - 0.5) * 0.9, ago: Math.floor(60 + rand() * rand() * 4 * 86400) });
+  }
+}
 
 function seeded(n: number): Uint8Array {
   const key = new Uint8Array(32);
@@ -62,7 +96,7 @@ function contactFrame(code: number, p: Person, lastMod: number, hops = p.hops, r
     .u8(hops)
     .bytes(path)
     .fixedString(p.name, 32)
-    .u32(Math.floor(Date.now() / 1000) - 600)
+    .u32(Math.floor(Date.now() / 1000) - (p.ago ?? 600))
     .i32(Math.round(p.lat * 1e6))
     .i32(Math.round(p.lon * 1e6))
     .u32(lastMod)
