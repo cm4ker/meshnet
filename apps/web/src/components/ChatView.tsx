@@ -188,18 +188,15 @@ function richText(text: string, me: string | null): ReactNode {
   return out.map((part, i) => <Fragment key={i}>{part}</Fragment>);
 }
 
-/** Signal and hops, which the bubble keeps out of sight until asked. */
-function techOf(message: MessageRecord, relays: number): string {
+/** Signal and hops of a message heard; of ours, whether it went by flood. How many copies came back rides on the tick. */
+function techOf(message: MessageRecord): string {
   if (message.direction === "in") {
     const bits = [];
     if (message.snr !== null) bits.push(`${message.snr > 0 ? "+" : ""}${message.snr.toFixed(1)} dB`);
     if (message.hops !== null) bits.push(message.hops === 0 ? "direct" : `${message.hops} hop${message.hops === 1 ? "" : "s"}`);
     return bits.join(" · ");
   }
-  const bits = [];
-  if (message.flood) bits.push("flood");
-  if (relays > 0) bits.push(`relayed · ${relays}`);
-  return bits.join(" · ");
+  return message.flood ? "flood" : "";
 }
 
 interface MessageProps {
@@ -220,7 +217,7 @@ const Message = memo(function Message({ message, showSender, me, onReply: replyT
   const [busy, setBusy] = useState(false);
   const onReply = replyTo ? () => replyTo(message) : undefined;
   const relays = out && contacts ? relaysOf(message.echoes, contacts) : [];
-  const tech = techOf(message, relays.length);
+  const tech = techOf(message);
   const plan = out ? message.retryPlan : null;
   const looping = plan !== null && plan.made < plan.total;
   // Nobody has been heard sending it on, or a loop is still trying: the whole bubble says so.
@@ -405,6 +402,16 @@ function Status({ message }: { message: MessageRecord }) {
       );
     case "sent":
     case "unconfirmed":
+      // A channel message has no acknowledgement: each copy heard sent on by a repeater stands for one.
+      if (message.echoes.length > 0) {
+        const n = message.echoes.length;
+        return (
+          <span className="ok heard" title={`Heard sent on ${n} time${n === 1 ? "" : "s"}`}>
+            <DoubleCheckIcon size={14} />
+            {n}
+          </span>
+        );
+      }
       return (
         <span title={message.ackTag ? "Sent; waiting for the acknowledgement" : "Sent"}>
           <CheckIcon size={13} />

@@ -1991,6 +1991,14 @@ details.more .kv-grid {
 .msg-meta .ok {
   color: var(--accent);
 }
+/* Copies of a channel message heard sent on, counted beside the double tick. */
+.msg-meta .heard {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 /* Signal and hops: on a desktop they come with the pointer, on a phone with a pull of the list to the left. */
 .msg-tech {
   display: none;
