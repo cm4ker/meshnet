@@ -24,6 +24,7 @@ function message(conversation: string, text: string, receivedAt: number, directi
     error: null,
     echoes: [],
     route: null,
+    retryPlan: null,
   };
 }
 

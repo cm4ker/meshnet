@@ -30,6 +30,7 @@ function message(conversation: string, text: string, sender: string | null = nul
     error: null,
     echoes: [],
     route: null,
+    retryPlan: null,
   };
 }
 

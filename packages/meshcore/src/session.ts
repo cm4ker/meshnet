@@ -71,7 +71,20 @@ export interface ChannelRecord {
 }
 
 /** `queued`: written while the radio was away; it goes out, in order, once the radio is back. */
-export type MessageStatus = "queued" | "sending" | "sent" | "delivered" | "unconfirmed" | "failed";
+export type MessageStatus = "queued" | "sending" | "sent" | "delivered" | "unheard" | "unconfirmed" | "failed";
+
+/**
+ * A message being sent again on its own until a repeater is heard sending it
+ * on. It lives on the message, so it outlives a dropped link and a restart.
+ */
+export interface RetryPlan {
+  /** Sends made under the plan, the one that started it included. */
+  made: number;
+  /** How many sends the plan makes at most. */
+  total: number;
+  /** Local ms of the next send; null while the radio is away, and once the last send is made. */
+  nextAt: number | null;
+}
 
 /**
  * A copy of a message the radio heard: for one of ours on a channel, a repeater
@@ -119,6 +132,8 @@ export interface MessageRecord {
   route: string[] | null;
   /** What was typed, when the text sent was reworked to fit (lookalike letters packed). */
   original?: string;
+  /** Set while the message is being sent again and again; null when nothing is being tried. */
+  retryPlan: RetryPlan | null;
 }
 
 /** How direct messages to one contact are routed; unset fields follow the defaults. */
@@ -604,6 +619,25 @@ const EMPTY: SessionState = {
 /** How long after sending a channel message its echoes are still looked for. */
 const ECHO_WINDOW_MS = 15 * 60 * 1000;
 
+/**
+ * How long a channel message waits for a repeater to send it on before it is
+ * called unheard. A repeater holds a packet for a random moment before it
+ * goes on, so the first echo is usually back within a few seconds; this leaves
+ * room for that wait plus the airtime of a couple of hops.
+ */
+const SILENCE_MS = 20 * 1000;
+
+/**
+ * The gaps before each send of a retry loop. The first goes at once, and the
+ * gaps grow: the air is shared, and a repeater that is down stays down for a
+ * while. Each is jittered, so two radios with the same trouble do not fall
+ * into step.
+ */
+const RETRY_LADDER_MS = [0, 45_000, 120_000, 300_000, 720_000];
+
+/** How often messages with a retry plan are checked against their next send. */
+const RETRY_SWEEP_MS = 5 * 1000;
+
 /** How often learned routes are checked against their time limit while connected. */
 const ROUTE_SWEEP_MS = 30 * 1000;
 
@@ -677,6 +711,10 @@ export class MeshSession {
   private contactsRefreshQueued = false;
   private focused: string | null = null;
   private ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Channel messages waiting to hear a repeater send them on, by message id. */
+  private silenceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Drives the retry loops while the radio is here. */
+  private retryTimer: ReturnType<typeof setInterval> | null = null;
   /** The queue of messages written while the radio was away is being sent. */
   private flushing = false;
   /**
@@ -856,8 +894,15 @@ export class MeshSession {
       this.client = null;
       for (const timer of this.ackTimers.values()) clearTimeout(timer);
       this.ackTimers.clear();
+      // A message whose window was still running is left as it was: with the
+      // radio gone the app heard nothing, which says nothing about the air.
+      for (const timer of this.silenceTimers.values()) clearTimeout(timer);
+      this.silenceTimers.clear();
       if (this.routeTimer) clearInterval(this.routeTimer);
       this.routeTimer = null;
+      if (this.retryTimer) clearInterval(this.retryTimer);
+      this.retryTimer = null;
+      this.holdRetryPlans();
       this.dropRemoteJobs(reason ? `link dropped: ${reason.message}` : "disconnected");
       this.set({ status: "closed", syncing: false, error: reason ? reason.message : this.state.error });
       this.log("link", reason ? `link dropped: ${reason.message}` : "disconnected");
@@ -888,7 +933,13 @@ export class MeshSession {
         // History saved before the hop count was masked holds the raw path_len
         // byte (the low six bits are the hops either way), and history saved
         // before echoes were kept has none.
-        messages: (persisted?.messages ?? []).map((m) => ({ ...m, hops: m.hops === null ? null : m.hops & 63, echoes: m.echoes ?? [], route: m.route ?? null })),
+        messages: (persisted?.messages ?? []).map((m) => ({
+          ...m,
+          hops: m.hops === null ? null : m.hops & 63,
+          echoes: m.echoes ?? [],
+          route: m.route ?? null,
+          retryPlan: m.retryPlan ?? null,
+        })),
         unread: persisted?.unread ?? {},
         logins: persisted?.logins ?? {},
         statusHistory: persisted?.statusHistory ?? {},
@@ -903,6 +954,9 @@ export class MeshSession {
       this.routeTimer = setInterval(() => void this.sweepRoutes(), ROUTE_SWEEP_MS);
       // Node keeps a process alive for an interval; a browser has no such notion.
       (this.routeTimer as { unref?: () => void }).unref?.();
+      this.retryTimer = setInterval(() => void this.sweepRetries(), RETRY_SWEEP_MS);
+      (this.retryTimer as { unref?: () => void }).unref?.();
+      this.resumeRetryPlans();
       await this.syncMessages();
       void this.flushQueue();
       void this.refreshBattery();
@@ -1368,6 +1422,7 @@ export class MeshSession {
         error: null,
         echoes: [],
         route: null,
+        retryPlan: null,
       };
     } else if (frame.kind === "channelMessage") {
       const { sender, text } = splitChannelText(frame.text);
@@ -1391,6 +1446,7 @@ export class MeshSession {
         error: null,
         echoes: [],
         route: null,
+        retryPlan: null,
       };
     } else {
       this.log("channelData", `channel ${frame.channelIndex} type ${frame.dataType}: ${toHex(frame.data)}`);
@@ -1476,7 +1532,17 @@ export class MeshSession {
     if (!message) return;
     const key = path.join(",");
     if (message.echoes.some((e) => e.path.join(",") === key)) return;
-    this.patchMessage(id, { echoes: [...message.echoes, { path, snr }] });
+    const patch: Partial<MessageRecord> = { echoes: [...message.echoes, { path, snr }] };
+    if (message.direction === "out") {
+      // Someone sent it on after all: the window is over, an alarm already
+      // raised is taken back, and a loop has nothing left to try for.
+      const timer = this.silenceTimers.get(id);
+      if (timer) clearTimeout(timer);
+      this.silenceTimers.delete(id);
+      if (message.status === "unheard") patch.status = "sent";
+      if (message.retryPlan) patch.retryPlan = null;
+    }
+    this.patchMessage(id, patch);
   }
 
   private patchMessage(id: string, patch: Partial<MessageRecord>): void {
@@ -1516,6 +1582,7 @@ export class MeshSession {
       error: null,
       echoes: [],
       route: null,
+      retryPlan: null,
       ...(options.original !== undefined && options.original !== text ? { original: options.original } : {}),
     };
     this.set({ messages: [...this.state.messages, message] });
@@ -1539,7 +1606,9 @@ export class MeshSession {
         const client = this.isReady ? this.client : null;
         const next = this.state.messages.find((m) => m.status === "queued");
         if (!client || !next) return;
-        const timestamp = next.attempt > 0 ? next.timestamp : Math.max(Math.floor(this.now() / 1000), last + 1);
+        // A retry keeps its stamp, except on a channel, where the same stamp is the same packet (see `retry`).
+        const keep = next.attempt > 0 && parseConversation(next.conversation).kind !== "channel";
+        const timestamp = keep ? next.timestamp : Math.max(Math.floor(this.now() / 1000), last + 1, next.timestamp + (next.attempt > 0 ? 1 : 0));
         last = timestamp;
         this.patchMessage(next.id, { status: "sending", timestamp });
         try {
@@ -1560,7 +1629,7 @@ export class MeshSession {
   }
 
   /**
-   * Sends an unconfirmed or failed message again, one attempt up. A direct
+   * Sends an unheard, unconfirmed or failed message again, one attempt up. A direct
    * message that went unacknowledged along a learned route floods this time:
    * the route is the likeliest thing to have broken.
    */
@@ -1575,8 +1644,14 @@ export class MeshSession {
       return;
     }
     const client = this.need();
-    this.patchMessage(id, { status: "sending", error: null, attempt, ackTag: null, roundTripMs: null, route: null });
-    await this.transmit(client, { ...message, attempt }, parseConversation(message.conversation), flood ? "no acknowledgement" : false);
+    const target = parseConversation(message.conversation);
+    // A channel message goes out with a fresh stamp. Its packet is the text,
+    // the sender and the stamp, and a repeater drops a packet it has carried
+    // before: sent again to the byte, the copy would be thrown away by every
+    // repeater that did hear the first one.
+    const timestamp = target.kind === "channel" ? Math.max(Math.floor(this.now() / 1000), message.timestamp + 1) : message.timestamp;
+    this.patchMessage(id, { status: "sending", error: null, attempt, timestamp, ackTag: null, roundTripMs: null, route: null });
+    await this.transmit(client, { ...message, attempt, timestamp }, target, flood ? "no acknowledgement" : false);
   }
 
   /** Whether a retry of this message will drop the route and flood. */
@@ -1599,6 +1674,7 @@ export class MeshSession {
           ...(this.state.self ? { senderName: this.state.self.name } : {}),
         });
         this.patchMessage(message.id, { status: "sent" });
+        this.armSilence(message.id);
         return;
       }
       if (target.kind !== "contact") throw new Error("unreachable");
@@ -1666,6 +1742,97 @@ export class MeshSession {
     // Ours is never heard from us: a copy with no relays in it is not an echo.
     if (!watch.incoming && packet.path.length === 0) return;
     this.addEcho(watch.id, packet.path, snr);
+  }
+
+  /**
+   * A channel message has no acknowledgement, so the only word that it went
+   * anywhere is a repeater sending it on. Nothing heard within the window and
+   * the message is called unheard: not proof it was missed, since a neighbour
+   * in direct range answers nothing, but the only sign the radio can give.
+   */
+  private armSilence(id: string): void {
+    const previous = this.silenceTimers.get(id);
+    if (previous) clearTimeout(previous);
+    const timer = setTimeout(() => {
+      this.silenceTimers.delete(id);
+      const current = this.state.messages.find((m) => m.id === id);
+      if (current?.status !== "sent" || current.echoes.length > 0) return;
+      this.patchMessage(id, { status: "unheard" });
+    }, SILENCE_MS);
+    (timer as { unref?: () => void }).unref?.();
+    this.silenceTimers.set(id, timer);
+  }
+
+  /**
+   * Sends a message again and again until a repeater is heard sending it on.
+   * The first send goes at once; the rest follow the ladder. One loop runs per
+   * conversation: a second would only double what the air carries.
+   */
+  async keepTrying(id: string): Promise<void> {
+    const message = this.state.messages.find((m) => m.id === id);
+    if (!message || message.direction !== "out") throw new Error("not an outgoing message");
+    for (const other of this.state.messages) {
+      if (other.id !== id && other.retryPlan && other.conversation === message.conversation) this.patchMessage(other.id, { retryPlan: null });
+    }
+    this.patchMessage(id, { retryPlan: { made: 0, total: RETRY_LADDER_MS.length, nextAt: this.now() } });
+    await this.sendUnderPlan(id);
+  }
+
+  /** Stops a loop; what it has already sent stays as it is. */
+  stopTrying(id: string): void {
+    const message = this.state.messages.find((m) => m.id === id);
+    if (message?.retryPlan) this.patchMessage(id, { retryPlan: null });
+  }
+
+  /** How many sends a loop makes, so the app can say so before one is started. */
+  get retryLadder(): readonly number[] {
+    return RETRY_LADDER_MS;
+  }
+
+  /** One send of a loop, counted and dated before it goes. */
+  private async sendUnderPlan(id: string): Promise<void> {
+    const message = this.state.messages.find((m) => m.id === id);
+    const plan = message?.retryPlan;
+    if (!message || !plan || plan.made >= plan.total) return;
+    if (!this.isReady) {
+      // The radio is away: the attempt is not spent, and the loop goes on once it is back.
+      if (plan.nextAt !== null) this.patchMessage(id, { retryPlan: { ...plan, nextAt: null } });
+      return;
+    }
+    const made = plan.made + 1;
+    const gap = RETRY_LADDER_MS[made] ?? null;
+    const jittered = gap === null ? null : this.now() + Math.round(gap * (0.8 + Math.random() * 0.4));
+    this.patchMessage(id, { retryPlan: { ...plan, made, nextAt: made >= plan.total ? null : jittered } });
+    try {
+      await this.retry(id);
+    } catch (error) {
+      this.log("retry", `send ${made} of ${plan.total} failed: ${(error as Error).message}`);
+    }
+  }
+
+  /** Sends whatever loop is due; run from the sweep while the radio is here. */
+  private async sweepRetries(): Promise<void> {
+    if (!this.isReady) return;
+    const now = this.now();
+    const due = this.state.messages.filter(
+      (m) => m.retryPlan && m.retryPlan.nextAt !== null && m.retryPlan.nextAt <= now && m.retryPlan.made < m.retryPlan.total && m.status !== "sending" && m.status !== "queued",
+    );
+    for (const message of due) await this.sendUnderPlan(message.id);
+  }
+
+  /** The link dropped: the loops stop counting down until it is back. */
+  private holdRetryPlans(): void {
+    const messages = this.state.messages.map((m) => (m.retryPlan && m.retryPlan.nextAt !== null ? { ...m, retryPlan: { ...m.retryPlan, nextAt: null } } : m));
+    if (messages.some((m, i) => m !== this.state.messages[i])) this.set({ messages });
+  }
+
+  /** The radio is back: a loop with sends left goes on from where it stopped. */
+  private resumeRetryPlans(): void {
+    const now = this.now();
+    const messages = this.state.messages.map((m) =>
+      m.retryPlan && m.retryPlan.nextAt === null && m.retryPlan.made < m.retryPlan.total ? { ...m, retryPlan: { ...m.retryPlan, nextAt: now } } : m,
+    );
+    if (messages.some((m, i) => m !== this.state.messages[i])) this.set({ messages });
   }
 
   /** `route` is the path a direct message was sent along; a flood learns its own from the ack. */
@@ -2317,7 +2484,7 @@ export class MeshSession {
           const timer = this.ackTimers.get(message.id);
           if (timer) clearTimeout(timer);
           this.ackTimers.delete(message.id);
-          this.patchMessage(message.id, { status: "delivered", roundTripMs: frame.roundTripMs });
+          this.patchMessage(message.id, { status: "delivered", roundTripMs: frame.roundTripMs, retryPlan: null });
           // A flood's ack comes back inside the path the message took, and the
           // radio says it learned that path just before it says the ack came.
           const update = this.lastPathUpdate;

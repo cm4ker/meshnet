@@ -137,6 +137,11 @@ class ScriptedRadio extends BaseTransport {
     this.emitFrame(frame);
   }
 
+  /** The link going away under the session, as a radio out of range does. */
+  drop(): void {
+    this.emitClose(new Error("gone"));
+  }
+
   /** The contact whose key the command carries after its code. */
   private contactOf(frame: Uint8Array): Uint8Array | undefined {
     return this.contacts.find((c) => c.subarray(1, 33).every((b, i) => b === frame[1 + i]));
@@ -512,6 +517,192 @@ test("a channel message heard back from repeaters is an echo, one per distinct p
     { path: ["7932"], snr: 2 },
     { path: ["7932", "ce5b"], snr: 2 },
   ]);
+});
+
+/** Lets the replies and pushes queued as microtasks run, with the timers held by the mock. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 20; i++) await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+/**
+ * Waits a turn of the event loop at a time until `done`. A channel send works
+ * out its packet with WebCrypto first, which answers from a worker thread, so
+ * no fixed number of turns is sure to cover it on a busy machine.
+ */
+async function until(done: () => boolean): Promise<void> {
+  for (let i = 0; i < 5_000 && !done(); i++) await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+/** A flood GRP_TXT packet as a repeater sends ours on, for the text as it went out. */
+async function echoOf(session: MeshSession, text: string, timestamp: number, hashes: string[]): Promise<Uint8Array> {
+  const state = session.getState();
+  const payload = await groupTextPayload(fromHex(state.channels[0]!.secret), timestamp, state.self!.name, text);
+  return new ByteWriter().u8(Push.LogRxData).i8(8).i8(-90).u8(0x15).u8(0x40 | hashes.length).bytes(fromHex(hashes.join(""))).bytes(payload).toBytes();
+}
+
+test("a channel message nobody sends on is unheard after the window, and an echo takes that back", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  const connecting = session.connect(radio);
+  await settle();
+  await connecting;
+  const sent = await session.sendText("ch:0", "anyone?");
+  const status = () => session.getState().messages.find((m) => m.id === sent.id)!.status;
+  assert.equal(status(), "sent");
+
+  t.mock.timers.tick(19_000);
+  assert.equal(status(), "sent");
+  t.mock.timers.tick(1_000);
+  assert.equal(status(), "unheard");
+
+  // A repeater that was slow, or asleep, sends it on after all.
+  radio.push(await echoOf(session, "anyone?", sent.timestamp, ["7932"]));
+  await settle();
+  assert.equal(status(), "sent");
+});
+
+test("an echo inside the window keeps a channel message sent", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  const connecting = session.connect(radio);
+  await settle();
+  await connecting;
+  const sent = await session.sendText("ch:0", "quick one");
+  radio.push(await echoOf(session, "quick one", sent.timestamp, ["7932"]));
+  await settle();
+  t.mock.timers.tick(20_000);
+  assert.equal(session.getState().messages.find((m) => m.id === sent.id)!.status, "sent");
+});
+
+test("a link that drops inside the window leaves the message sent, not unheard", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  const connecting = session.connect(radio);
+  await settle();
+  await connecting;
+  const sent = await session.sendText("ch:0", "into the void");
+  radio.drop();
+  await settle();
+  t.mock.timers.tick(20_000);
+  assert.equal(session.getState().messages.find((m) => m.id === sent.id)!.status, "sent");
+});
+
+test("a channel message sent again goes out with a fresh stamp, and the new packet's echo counts", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  let clock = 1_700_000_000_000;
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => clock });
+  const connecting = session.connect(radio);
+  await settle();
+  await connecting;
+  const sent = await session.sendText("ch:0", "again");
+  t.mock.timers.tick(20_000);
+  clock += 30_000;
+
+  await session.retry(sent.id);
+  const again = session.getState().messages.find((m) => m.id === sent.id)!;
+  assert.equal(again.attempt, 1);
+  assert.ok(again.timestamp > sent.timestamp, "the stamp moves on, so repeaters see a new packet");
+  assert.equal(again.status, "sent");
+
+  // The first packet's echo is late news; the new one's is what takes the alarm down.
+  radio.push(await echoOf(session, "again", again.timestamp, ["ce5b"]));
+  await settle();
+  const now = session.getState().messages.find((m) => m.id === sent.id)!;
+  assert.deepEqual(now.echoes, [{ path: ["ce5b"], snr: 2 }]);
+  t.mock.timers.tick(20_000);
+  assert.equal(session.getState().messages.find((m) => m.id === sent.id)!.status, "sent");
+});
+
+test("keep trying sends at once, then along the ladder, and stops at the first echo", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  t.mock.method(Math, "random", () => 0.5); // no jitter
+  let clock = 1_700_000_000_000;
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => clock });
+  const connecting = session.connect(radio);
+  await settle();
+  await connecting;
+  const sent = await session.sendText("ch:0", "hello?");
+  t.mock.timers.tick(20_000);
+  const channelSends = () => radio.sent.filter((f) => f[0] === Cmd.SendChannelTxtMsg).length;
+  const message = () => session.getState().messages.find((m) => m.id === sent.id)!;
+  assert.equal(channelSends(), 1);
+
+  await session.keepTrying(sent.id);
+  assert.equal(channelSends(), 2);
+  assert.deepEqual(message().retryPlan, { made: 1, total: 5, nextAt: clock + 45_000 });
+
+  // Not due yet.
+  clock += 40_000;
+  t.mock.timers.tick(5_000);
+  await settle();
+  assert.equal(channelSends(), 2);
+
+  clock += 5_000;
+  t.mock.timers.tick(5_000);
+  await until(() => channelSends() === 3);
+  assert.equal(channelSends(), 3);
+  assert.equal(message().retryPlan?.made, 2);
+
+  radio.push(await echoOf(session, "hello?", message().timestamp, ["7932"]));
+  await settle();
+  assert.equal(message().retryPlan, null);
+  assert.equal(message().status, "sent");
+
+  clock += 600_000;
+  t.mock.timers.tick(5_000);
+  await settle();
+  assert.equal(channelSends(), 3, "a loop that got its echo sends nothing more");
+});
+
+test("a loop spends no sends while the radio is away, and goes on once it is back", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  t.mock.method(Math, "random", () => 0.5);
+  let clock = 1_700_000_000_000;
+  const storage = new MemoryStorage();
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ storage, now: () => clock });
+  let connecting = session.connect(radio);
+  await settle();
+  await connecting;
+  const sent = await session.sendText("ch:0", "still there?");
+  await session.keepTrying(sent.id);
+  radio.drop();
+  await settle();
+  const message = () => session.getState().messages.find((m) => m.id === sent.id)!;
+  assert.deepEqual(message().retryPlan, { made: 1, total: 5, nextAt: null });
+
+  clock += 3_600_000;
+  const back = new ScriptedRadio();
+  connecting = session.connect(back);
+  await settle();
+  await connecting;
+  t.mock.timers.tick(5_000);
+  await until(() => back.sent.some((f) => f[0] === Cmd.SendChannelTxtMsg));
+  assert.equal(back.sent.filter((f) => f[0] === Cmd.SendChannelTxtMsg).length, 1);
+  assert.equal(message().retryPlan?.made, 2);
+});
+
+test("starting a loop stops the other one in the same chat", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  const connecting = session.connect(radio);
+  await settle();
+  await connecting;
+  const first = await session.sendText("ch:0", "one");
+  const second = await session.sendText("ch:0", "two");
+  await session.keepTrying(first.id);
+  await session.keepTrying(second.id);
+  const plan = (id: string) => session.getState().messages.find((m) => m.id === id)!.retryPlan;
+  assert.equal(plan(first.id), null);
+  assert.equal(plan(second.id)?.made, 1);
+  session.stopTrying(second.id);
+  assert.equal(plan(second.id), null);
 });
 
 test("a message from a sender not yet in the contacts is filed under its prefix, then moved", async () => {

@@ -31,7 +31,7 @@ export function MessageDetails({ message, peer }: { message: MessageRecord; peer
           <Copies echoes={message.echoes} contacts={contacts} />
         </>
       ) : (
-        <span>No repeater has been heard sending it on.</span>
+        <Unheard message={message} />
       );
   } else if (out) {
     if (message.flood) {
@@ -136,6 +136,34 @@ export function MessageDetails({ message, peer }: { message: MessageRecord; peer
       </dl>
     </div>
   );
+}
+
+/**
+ * Ours on a channel with no echo yet. Worded around the repeaters only: a node
+ * in direct range hears the message and sends nothing back, so silence is not
+ * a miss.
+ */
+function Unheard({ message }: { message: MessageRecord }) {
+  const plan = message.retryPlan;
+  if (plan && plan.made < plan.total) {
+    return (
+      <>
+        <span className="details-lead">
+          Trying again: {plan.made} of {plan.total} sent.
+        </span>
+        <span>{plan.nextAt === null ? "Waiting for the radio; no try is spent while it is away." : "It stops at the first repeater heard sending it on."}</span>
+      </>
+    );
+  }
+  if (message.status === "unheard") {
+    return (
+      <>
+        <span className="details-lead">{plan ? `${plan.total} tries, none relayed.` : "No repeater sent it on in the first 20 s."}</span>
+        <span>A node in direct range may still have it. Repeaters out of range, asleep or busy stay quiet the same way.</span>
+      </>
+    );
+  }
+  return <span>No repeater has been heard sending it on.</span>;
 }
 
 function clock(ms: number): string {

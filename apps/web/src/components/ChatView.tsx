@@ -13,7 +13,24 @@ import { IconButton } from "../ui/Button.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
 import { Composer, type Reply } from "./Composer.js";
-import { AlertIcon, CheckIcon, ChevronRightIcon, ClockIcon, CopyIcon, DoubleCheckIcon, InfoIcon, LocationIcon, LockIcon, NodesIcon, ReplyIcon, TrashIcon, WavesIcon } from "./Icons.js";
+import {
+  AlertIcon,
+  CheckIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  CopyIcon,
+  DoubleCheckIcon,
+  InfoIcon,
+  LinkOffIcon,
+  LocationIcon,
+  LockIcon,
+  NodesIcon,
+  RefreshIcon,
+  ReplyIcon,
+  StopIcon,
+  TrashIcon,
+  WavesIcon,
+} from "./Icons.js";
 import { ScreenHead, type Chrome } from "./ScreenHead.js";
 
 export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversation: string; chrome: Chrome; infoOpen?: boolean | undefined; onInfo?: () => void }) {
@@ -204,7 +221,11 @@ const Message = memo(function Message({ message, showSender, me, onReply: replyT
   const onReply = replyTo ? () => replyTo(message) : undefined;
   const relays = out && contacts ? relaysOf(message.echoes, contacts) : [];
   const tech = techOf(message, relays.length);
-  const retryable = out && (message.status === "unconfirmed" || message.status === "failed");
+  const plan = out ? message.retryPlan : null;
+  const looping = plan !== null && plan.made < plan.total;
+  // Nobody has been heard sending it on, or a loop is still trying: the whole bubble says so.
+  const bad = out && (message.status === "unheard" || looping);
+  const retryable = out && (message.status === "unheard" || message.status === "unconfirmed" || message.status === "failed");
   const flood = retryable && session.retryFloods(message);
 
   const retry = async () => {
@@ -218,11 +239,23 @@ const Message = memo(function Message({ message, showSender, me, onReply: replyT
     }
   };
 
+  const keepTrying = async () => {
+    try {
+      await session.keepTrying(message.id);
+    } catch {
+      // The row shows the status.
+    }
+  };
+
   const press = usePress((at) => {
     const items: (MenuItem | null)[] = [
       onReply ? { label: "Reply", icon: <ReplyIcon size={17} />, onSelect: onReply } : null,
       { label: "Copy the text", icon: <CopyIcon size={17} />, onSelect: () => void navigator.clipboard?.writeText(message.text).then(() => toast("Copied")) },
-      retryable ? { label: flood ? "Send again by flood" : "Send again", icon: <AlertIcon size={17} />, air: true, onSelect: () => void retry() } : null,
+      retryable && !looping ? { label: flood ? "Send again by flood" : "Send again", icon: <AlertIcon size={17} />, air: true, onSelect: () => void retry() } : null,
+      (message.status === "unheard" || message.status === "unconfirmed") && !looping
+        ? { label: "Keep trying", hint: LOOP_HINT, icon: <RefreshIcon size={17} />, air: true, onSelect: () => void keepTrying() }
+        : null,
+      looping ? { label: "Stop trying", icon: <StopIcon size={17} />, onSelect: () => session.stopTrying(message.id) } : null,
       message.status === "queued" ? { label: "Don't send", icon: <TrashIcon size={17} />, danger: true, onSelect: () => session.discardQueued(message.id) } : null,
       { label: "How it travelled", icon: <NodesIcon size={17} />, onSelect: () => openMessage(message.conversation, message.id) },
     ];
@@ -244,7 +277,7 @@ const Message = memo(function Message({ message, showSender, me, onReply: replyT
         <div
           role="button"
           tabIndex={0}
-          className="bubble"
+          className={["bubble", bad ? "bad" : ""].join(" ")}
           onClick={() => {
             // A click that ends a text selection is not a tap.
             if (String(window.getSelection?.() ?? "").length > 0) return;
@@ -264,10 +297,12 @@ const Message = memo(function Message({ message, showSender, me, onReply: replyT
           <span className="msg-meta">
             {tech ? <span className="msg-tech">{tech} ·</span> : null}
             <span>{timeOfDay(message.timestamp)}</span>
-            {out ? <Status message={message} /> : null}
+            {/* A red bubble carries its state in the strip below; a tick beside it would say the opposite. */}
+            {out && !bad ? <Status message={message} /> : null}
           </span>
+          {bad ? <Unrelayed message={message} busy={busy} onRetry={() => void retry()} /> : null}
         </div>
-        {retryable ? (
+        {retryable && !bad ? (
           <button type="button" className={["msg-retry", message.status === "failed" ? "danger" : "warn"].join(" ")} disabled={busy} onClick={() => void retry()} title={message.error ?? undefined}>
             <AlertIcon size={12} /> {message.status === "failed" ? "Failed · retry" : flood ? "Retry by flood" : "Retry"}
           </button>
@@ -283,6 +318,76 @@ const Message = memo(function Message({ message, showSender, me, onReply: replyT
     </div>
   );
 });
+
+/** What "Keep trying" commits to, said before it is chosen. */
+const LOOP_HINT = (() => {
+  const ladder = session.retryLadder;
+  const minutes = Math.round(ladder.reduce((sum, gap) => sum + gap, 0) / 60_000);
+  return `${ladder.length} tries over ~${minutes} min`;
+})();
+
+/** The clock, ticking once a second while `active`; a loop's countdown needs nothing finer. */
+function useClock(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return now;
+}
+
+function countdown(ms: number): string {
+  const seconds = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+/**
+ * The strip inside a red bubble: what is wrong, and the one thing to do about
+ * it. A tap target of its own, apart from the text, which opens how the
+ * message travelled. While a loop runs it counts down and a tap stops it.
+ */
+function Unrelayed({ message, busy, onRetry }: { message: MessageRecord; busy: boolean; onRetry: () => void }) {
+  const plan = message.retryPlan;
+  const looping = plan !== null && plan.made < plan.total;
+  const now = useClock(looping && plan.nextAt !== null);
+
+  let icon: ReactNode;
+  let label: string;
+  if (looping && plan.nextAt === null) {
+    icon = <LinkOffIcon size={12} />;
+    label = `Waiting for the radio · ${plan.made}/${plan.total}`;
+  } else if (looping) {
+    icon = <RefreshIcon size={12} />;
+    label = message.status === "sending" ? `Trying ${plan.made}/${plan.total} · sending` : `Trying ${plan.made}/${plan.total} · next in ${countdown(plan.nextAt! - now)}`;
+  } else {
+    icon = <AlertIcon size={12} />;
+    label = "Not relayed · Send again";
+  }
+
+  return (
+    <button
+      type="button"
+      className="msg-strip"
+      disabled={busy && !looping}
+      title={looping ? "Stop trying" : "No repeater has been heard sending it on. Send it again"}
+      // Its own target: a press here neither opens the message nor starts the long-press menu,
+      // so letting go after a long press can never send by accident.
+      onPointerDown={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (looping) session.stopTrying(message.id);
+        else onRetry();
+      }}
+    >
+      {icon}
+      <span>{label}</span>
+      {looping ? <StopIcon size={12} fill="currentColor" className="msg-strip-stop" /> : null}
+    </button>
+  );
+}
 
 function Status({ message }: { message: MessageRecord }) {
   switch (message.status) {

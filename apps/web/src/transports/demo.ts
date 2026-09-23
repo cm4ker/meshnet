@@ -147,6 +147,8 @@ class DemoRadio extends BaseTransport {
   private routes = new Map<Person, number>(PEOPLE.map((p) => [p, p.hops]));
   /** Routes written by hand, relay by relay; the rest go along `RELAYS`. */
   private paths = new Map<Person, number[]>();
+  /** Texts on Friends whose first send the repeaters already missed. */
+  private missed = new Set<string>();
   private murmur: ReturnType<typeof setInterval> | null = null;
 
   start(): void {
@@ -432,6 +434,12 @@ class DemoRadio extends BaseTransport {
         const index = frame[2] ?? 0;
         const timestamp = (frame[3]! | (frame[4]! << 8) | (frame[5]! << 16) | (frame[6]! << 24)) >>> 0;
         const text = fromUtf8(frame.subarray(7));
+        // On Friends the repeaters miss the first send of every text, so a
+        // message there turns unheard and a second send gets through.
+        if (index === 1 && !this.missed.has(text)) {
+          this.missed.add(text);
+          return [new Uint8Array([Resp.Ok])];
+        }
         void groupTextPayload(fromHex(CHANNELS[index] ?? CHANNELS[0]!), timestamp, "Demo radio", text).then((payload) => {
           [[0x03], [0x03, 0x94], [0x2c]].forEach((path, i) => this.later(600 * (i + 1), this.heard(5, path, payload)));
         });
