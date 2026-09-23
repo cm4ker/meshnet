@@ -13,7 +13,7 @@ import { MeshCoreClient, MeshCoreError, TimeoutError, type TextSendResult } from
 import { bytesEqual, fromHex, pathByteLength, toHex, unixNow } from "./protocol/bytes.js";
 import { groupTextPayload, heardGroupTextPayload } from "./protocol/group.js";
 import { PayloadType, parseRawPacket, type RawPacket } from "./protocol/packet.js";
-import { AclRole, AdvType, ContactFlag, ControlType, MAX_TEXT_LEN, PUB_KEY_PREFIX_SIZE, StatsType, TxtType } from "./protocol/codes.js";
+import { AclRole, AdvType, ContactFlag, ControlType, ErrCode, MAX_TEXT_LEN, PUB_KEY_PREFIX_SIZE, StatsType, TxtType } from "./protocol/codes.js";
 import {
   accessListRequest,
   avgMinMaxRequest,
@@ -61,6 +61,23 @@ export interface ContactRecord {
    * Null while there is no route.
    */
   pathSince: number | null;
+  /**
+   * Heard in an advert the radio did not keep: new contacts are added by
+   * hand, the node was too many hops away, or the radio's memory was full.
+   * Only this app knows it; absent for a contact the radio holds.
+   */
+  unsaved?: true;
+}
+
+/** Who took a contact off the radio: you, the tidy-up rule, or the radio itself (full, or another app). */
+export type RemovedBy = "you" | "tidy" | "radio";
+
+/** A contact taken off the radio, kept so it can be put back. */
+export interface RemovedContact {
+  contact: ContactRecord;
+  /** Local ms. */
+  at: number;
+  by: RemovedBy;
 }
 
 export interface ChannelRecord {
@@ -268,6 +285,14 @@ export interface SessionState {
   contacts: Record<string, ContactRecord>;
   /** The `lastMod` cursor the next incremental contact fetch starts from. */
   contactsCursor: number;
+  /** Contacts taken off the radio in the last 90 days, by key. */
+  removed: Record<string, RemovedContact>;
+  /** Which new nodes the radio keeps by itself and how far away; null when its firmware does not say. */
+  autoAdd: { config: number; maxHops: number } | null;
+  /** The radio said its memory is full and it dropped a node; cleared once there is room. */
+  contactsFull: boolean;
+  /** Contacts being taken off the radio one by one, while that runs. */
+  removing: { done: number; total: number } | null;
   channels: ChannelRecord[];
   messages: MessageRecord[];
   unread: Record<string, number>;
@@ -299,6 +324,8 @@ export interface SessionState {
 export interface PersistedState {
   contacts: Record<string, ContactRecord>;
   contactsCursor: number;
+  /** Absent in history saved before removed contacts were kept. */
+  removed?: Record<string, RemovedContact>;
   channels: ChannelRecord[];
   messages: MessageRecord[];
   unread: Record<string, number>;
@@ -543,8 +570,20 @@ function guessPathSince(lastMod: number, now: number): number {
 
 /** The part of the state that is kept per radio. */
 function historyOf(state: SessionState): PersistedState {
-  const { contacts, contactsCursor, channels, messages, unread, logins, statusHistory, routing } = state;
-  return { contacts, contactsCursor, channels, messages, unread, logins, statusHistory, routing };
+  const { contacts, contactsCursor, removed, channels, messages, unread, logins, statusHistory, routing } = state;
+  return { contacts, contactsCursor, removed, channels, messages, unread, logins, statusHistory, routing };
+}
+
+/** How long a removed contact is kept to be put back. */
+const REMOVED_KEEP_MS = 90 * 24 * 3600 * 1000;
+
+/** How long a node the radio did not keep stays in the list after it was last heard. */
+const UNSAVED_KEEP_MS = 7 * 24 * 3600 * 1000;
+
+/** A contact as the radio holds it, without what only this app knows. */
+function saved(record: ContactRecord): ContactRecord {
+  const { unsaved: _omit, ...rest } = record;
+  return rest;
 }
 
 /**
@@ -594,6 +633,10 @@ const EMPTY: SessionState = {
   self: null,
   contacts: {},
   contactsCursor: 0,
+  removed: {},
+  autoAdd: null,
+  contactsFull: false,
+  removing: null,
   channels: [],
   messages: [],
   unread: {},
@@ -795,6 +838,7 @@ export class MeshSession {
     if (
       "contacts" in patch ||
       "contactsCursor" in patch ||
+      "removed" in patch ||
       "channels" in patch ||
       "messages" in patch ||
       "unread" in patch ||
@@ -922,13 +966,21 @@ export class MeshSession {
       // is dated as a route learned while nobody was listening.
       const contacts: Record<string, ContactRecord> = {};
       for (const [k, c] of Object.entries(persisted?.contacts ?? {})) {
+        // A node the radio never kept goes once it has been quiet for a while.
+        if (c.unsaved && (c.lastHeardAt ?? 0) < now - UNSAVED_KEEP_MS) continue;
         contacts[k] = c.pathSince !== undefined ? c : { ...c, pathSince: c.outPathLen === 0xff ? null : guessPathSince(c.lastMod, now) };
       }
+      const removed: Record<string, RemovedContact> = {};
+      for (const [k, r] of Object.entries(persisted?.removed ?? {})) if (r.at > now - REMOVED_KEEP_MS) removed[k] = r;
       this.set({
         device,
         self,
         contacts,
         contactsCursor: persisted?.contactsCursor ?? 0,
+        removed,
+        autoAdd: null,
+        contactsFull: false,
+        removing: null,
         channels: persisted?.channels ?? [],
         // History saved before the hop count was masked holds the raw path_len
         // byte (the low six bits are the hops either way), and history saved
@@ -950,6 +1002,7 @@ export class MeshSession {
       await this.syncClock();
       await this.refreshContacts();
       await this.refreshChannels();
+      await this.readAutoAdd(client);
       this.set({ status: "ready" });
       this.routeTimer = setInterval(() => void this.sweepRoutes(), ROUTE_SWEEP_MS);
       // Node keeps a process alive for an interval; a browser has no such notion.
@@ -1010,29 +1063,40 @@ export class MeshSession {
 
   // ---- contacts ----
 
-  async refreshContacts(full = false): Promise<void> {
+  /** `announce`: contacts new to this app were just added by the radio as it heard them, and are told to `onDiscovered`. */
+  async refreshContacts(full = false, announce = false): Promise<void> {
     const client = this.need();
     const since = full || this.state.contactsCursor === 0 ? undefined : this.state.contactsCursor;
     const { total, contacts: fresh, mostRecentLastMod } = await client.getContacts(since);
     const contacts = { ...this.state.contacts };
     const now = this.now();
+    const found: ContactRecord[] = [];
     for (const c of fresh) {
       const previous = contacts[toHex(c.publicKey)];
-      const record = toRecord(c, previous?.lastHeardAt ?? null, previous, now);
+      const isNew = announce && !previous && !this.state.removed[toHex(c.publicKey)];
+      const record = toRecord(c, isNew ? now : (previous?.lastHeardAt ?? null), previous, now);
       contacts[record.key] = record;
+      if (isNew) found.push(record);
     }
     const cursor = Math.max(this.state.contactsCursor, mostRecentLastMod);
-    this.set({ contacts, contactsCursor: cursor });
+    this.set({ contacts, contactsCursor: cursor, removed: this.withoutRemoved(fresh.map((c) => toHex(c.publicKey))), ...this.fullAfter(total) });
     this.rebindOrphans();
+    for (const record of found) this.announceDiscovered(record);
     // Fewer on the radio than we remember: it was reset, or contacts were
     // removed by another app. The cursor cannot say which, so ask for all.
-    if (since !== undefined && total < Object.keys(contacts).length) {
-      await this.reconcileContacts(client);
+    if (total < this.savedCount()) {
+      await this.reconcileContacts(client, since === undefined ? fresh : undefined);
     }
   }
 
-  private async reconcileContacts(client: MeshCoreClient): Promise<void> {
-    const { contacts: fresh, mostRecentLastMod } = await client.getContacts();
+  /**
+   * The contacts as the radio holds them now. One this app knew that the radio
+   * no longer holds was taken off it while nobody was listening: it is kept as
+   * removed. Nodes the radio never kept stay as they are.
+   */
+  private async reconcileContacts(client: MeshCoreClient, all?: Contact[]): Promise<void> {
+    const got = all ? null : await client.getContacts();
+    const fresh = all ?? got!.contacts;
     const contacts: Record<string, ContactRecord> = {};
     const now = this.now();
     for (const c of fresh) {
@@ -1040,7 +1104,62 @@ export class MeshSession {
       const previous = this.state.contacts[key];
       contacts[key] = toRecord(c, previous?.lastHeardAt ?? null, previous, now);
     }
-    this.set({ contacts, contactsCursor: mostRecentLastMod });
+    const gone = Object.values(this.state.contacts).filter((c) => !c.unsaved && !contacts[c.key]);
+    for (const c of Object.values(this.state.contacts)) if (c.unsaved && !contacts[c.key]) contacts[c.key] = c;
+    const removed = this.withRemoved(gone, "radio");
+    if (gone.length) this.log("contact", `${gone.length} ${gone.length === 1 ? "contact is" : "contacts are"} no longer on the radio`);
+    this.set({ contacts, removed, ...(got ? { contactsCursor: got.mostRecentLastMod } : {}) });
+  }
+
+  /** How many contacts the radio holds, as far as this app knows. */
+  private savedCount(): number {
+    let n = 0;
+    for (const c of Object.values(this.state.contacts)) if (!c.unsaved) n++;
+    return n;
+  }
+
+  /** "Full" goes once the radio holds fewer than it can. */
+  private fullAfter(total: number): Partial<SessionState> {
+    const max = this.state.device?.maxContacts ?? 0;
+    return this.state.contactsFull && max > 0 && total < max ? { contactsFull: false } : {};
+  }
+
+  /** The removed contacts with these added; the newest removal of a contact wins. */
+  private withRemoved(contacts: ContactRecord[], by: RemovedBy): Record<string, RemovedContact> {
+    if (contacts.length === 0) return this.state.removed;
+    const removed = { ...this.state.removed };
+    const at = this.now();
+    for (const c of contacts) if (!c.unsaved) removed[c.key] = { contact: c, at, by };
+    return removed;
+  }
+
+  /** The removed contacts without these, which are on the radio again. */
+  private withoutRemoved(keys: string[]): Record<string, RemovedContact> {
+    if (!keys.some((k) => this.state.removed[k])) return this.state.removed;
+    const removed = { ...this.state.removed };
+    for (const k of keys) delete removed[k];
+    return removed;
+  }
+
+  private async readAutoAdd(client: MeshCoreClient): Promise<void> {
+    try {
+      const { config, maxHops } = await client.getAutoAddConfig();
+      this.set({ autoAdd: { config, maxHops } });
+    } catch (error) {
+      // Firmware before 1.10 has no such setting.
+      if (!(error instanceof MeshCoreError)) throw error;
+      this.set({ autoAdd: null });
+    }
+  }
+
+  /**
+   * Which new nodes the radio keeps by itself when new contacts are added by
+   * hand (`AutoAdd` kind bits), whether it replaces its oldest contact when it
+   * is full, and how far away a new node may be (0: any).
+   */
+  async setAutoAdd(config: number, maxHops: number): Promise<void> {
+    await this.need().setAutoAddConfig(config, maxHops);
+    this.set({ autoAdd: { config, maxHops } });
   }
 
   private queueContactsRefresh(): void {
@@ -1048,8 +1167,19 @@ export class MeshSession {
     this.contactsRefreshQueued = true;
     setTimeout(() => {
       this.contactsRefreshQueued = false;
-      if (this.isReady) this.refreshContacts().catch((e: Error) => this.log("error", e.message));
+      if (this.isReady) this.refreshContacts(false, true).catch((e: Error) => this.log("error", e.message));
     }, 500);
+  }
+
+  private announceDiscovered(record: ContactRecord): void {
+    this.log("advert", `new: ${record.name || record.prefix} (${contactTypeName(record.type)})${record.unsaved ? ", not kept by the radio" : ""}`);
+    for (const listener of this.discoveredListeners) {
+      try {
+        listener(record);
+      } catch (error) {
+        console.error("discovered listener threw", error);
+      }
+    }
   }
 
   /** Messages filed under a bare prefix are moved to the contact once one is known. */
@@ -1077,11 +1207,12 @@ export class MeshSession {
   }
 
   /** `learnedAt` is set when the radio has just said it learned this contact's route. */
-  private upsertContact(contact: Contact, heard: boolean, learnedAt?: number): ContactRecord {
+  private upsertContact(contact: Contact, heard: boolean, learnedAt?: number, unsaved = false): ContactRecord {
     const key = toHex(contact.publicKey);
     const previous = this.state.contacts[key];
-    const record = toRecord(contact, heard ? this.now() : (previous?.lastHeardAt ?? null), previous, this.now(), learnedAt);
-    this.set({ contacts: { ...this.state.contacts, [key]: record } });
+    const fresh = toRecord(contact, heard ? this.now() : (previous?.lastHeardAt ?? null), previous, this.now(), learnedAt);
+    const record: ContactRecord = unsaved ? { ...fresh, unsaved: true } : fresh;
+    this.set({ contacts: { ...this.state.contacts, [key]: record }, ...(unsaved ? {} : { removed: this.withoutRemoved([key]) }) });
     this.rebindOrphans();
     return record;
   }
@@ -1103,11 +1234,87 @@ export class MeshSession {
     return fromHex(key);
   }
 
-  async removeContact(key: string): Promise<void> {
-    await this.need().removeContact(this.contactBytes(key));
+  /**
+   * Takes the contact off the radio and keeps it as removed, to be put back.
+   * A node the radio never kept only leaves the list. One the radio has
+   * already let go of counts as removed.
+   */
+  async removeContact(key: string, by: RemovedBy = "you"): Promise<void> {
+    const contact = this.state.contacts[key];
+    if (!contact) throw new Error("unknown contact");
+    if (!contact.unsaved) {
+      try {
+        await this.need().removeContact(fromHex(key));
+      } catch (error) {
+        if (!(error instanceof MeshCoreError && error.code === ErrCode.NotFound)) throw error;
+      }
+    }
     const contacts = { ...this.state.contacts };
     delete contacts[key];
-    this.set({ contacts });
+    this.set({ contacts, removed: this.withRemoved([contact], by), contactsFull: false });
+  }
+
+  private stopRemoval = false;
+
+  /**
+   * Takes these contacts off the radio one at a time, with `removing` counting
+   * them. Stops when asked, or at the first failure, the link dropping
+   * included; what was removed by then stays removed.
+   */
+  async removeContacts(keys: string[], by: RemovedBy): Promise<{ removed: string[]; error: Error | null }> {
+    if (this.state.removing) throw new Error("already removing contacts");
+    this.stopRemoval = false;
+    const removed: string[] = [];
+    let error: Error | null = null;
+    this.set({ removing: { done: 0, total: keys.length } });
+    try {
+      for (const key of keys) {
+        if (this.stopRemoval) break;
+        if (!this.state.contacts[key]) continue;
+        try {
+          await this.removeContact(key, by);
+        } catch (e) {
+          error = e as Error;
+          break;
+        }
+        removed.push(key);
+        this.set({ removing: { done: removed.length, total: keys.length } });
+      }
+    } finally {
+      this.set({ removing: null });
+    }
+    const who = by === "tidy" ? "tidy-up" : by === "radio" ? "radio" : "you";
+    if (removed.length) this.log("contact", `${who} removed ${removed.length} ${removed.length === 1 ? "contact" : "contacts"}`);
+    if (error) this.log("error", `removing contacts stopped: ${error.message}`);
+    return { removed, error };
+  }
+
+  /** Stops `removeContacts` after the contact it is on. */
+  stopRemoving(): void {
+    this.stopRemoval = true;
+  }
+
+  /** A removed contact written back to the radio, or a node it did not keep, added to it. */
+  async restoreContact(key: string): Promise<void> {
+    const record = this.state.removed[key]?.contact ?? this.state.contacts[key];
+    if (!record) throw new Error("unknown contact");
+    try {
+      await this.writeContact(saved(record));
+    } catch (error) {
+      if (error instanceof MeshCoreError && error.code === ErrCode.TableFull) throw new Error("The radio's memory is full. Remove a few contacts first.");
+      throw error;
+    }
+    this.set({ removed: this.withoutRemoved([key]) });
+  }
+
+  /** Puts these back one at a time; stops at the first that fails. */
+  async restoreContacts(keys: string[]): Promise<number> {
+    let n = 0;
+    for (const key of keys) {
+      await this.restoreContact(key);
+      n++;
+    }
+    return n;
   }
 
   async setFavourite(key: string, favourite: boolean): Promise<void> {
@@ -1138,7 +1345,7 @@ export class MeshSession {
       lon: record.lon,
       lastMod,
     });
-    this.set({ contacts: { ...this.state.contacts, [record.key]: { ...record, lastMod } } });
+    this.set({ contacts: { ...this.state.contacts, [record.key]: { ...saved(record), lastMod } } });
   }
 
   async resetPath(key: string): Promise<void> {
@@ -2499,7 +2706,10 @@ export class MeshSession {
       case "advert": {
         const key = toHex(frame.publicKey);
         const contact = this.state.contacts[key];
-        if (contact) {
+        // Only a contact the radio holds is announced this way: one it did not keep before has been added now.
+        if (contact?.unsaved) {
+          this.queueContactsRefresh();
+        } else if (contact) {
           this.set({
             contacts: {
               ...this.state.contacts,
@@ -2512,15 +2722,11 @@ export class MeshSession {
         return;
       }
       case "newAdvert": {
-        const record = this.upsertContact(frame.contact, true);
-        this.log("advert", `new: ${record.name || record.prefix} (${contactTypeName(record.type)})`);
-        for (const listener of this.discoveredListeners) {
-          try {
-            listener(record);
-          } catch (error) {
-            console.error("discovered listener threw", error);
-          }
-        }
+        // The radio sends the whole contact only for a node it did not keep;
+        // one it keeps comes as a plain advert (firmware `onDiscoveredContact`).
+        const known = this.state.contacts[toHex(frame.contact.publicKey)];
+        const record = this.upsertContact(frame.contact, true, undefined, true);
+        if (!known) this.announceDiscovered(record);
         return;
       }
       case "pathUpdated": {
@@ -2547,15 +2753,18 @@ export class MeshSession {
         return;
       }
       case "contactDeleted": {
+        // The radio replaced its oldest contact with a new node.
         const key = toHex(frame.publicKey);
+        const gone = this.state.contacts[key];
         const contacts = { ...this.state.contacts };
         delete contacts[key];
-        this.set({ contacts });
-        this.log("contact", `radio dropped ${key.slice(0, 12)}: contacts full`);
+        this.set({ contacts, removed: gone ? this.withRemoved([gone], "radio") : this.state.removed });
+        this.log("contact", `radio replaced ${gone?.name || key.slice(0, 12)}: its memory is full`);
         return;
       }
       case "contactsFull":
-        this.log("contact", "the radio's contact table is full");
+        this.set({ contactsFull: true });
+        this.log("contact", "the radio's memory is full: a new node was not kept");
         return;
       case "loginSuccess":
       case "loginFail": {

@@ -122,7 +122,7 @@ export function titleOf(state: SessionState, conversation: string): string {
     const channel = state.channels.find((c) => c.index === target.index);
     return channel?.name || `Channel ${target.index}`;
   }
-  if (target.kind === "contact") return state.contacts[target.key]?.name || target.key.slice(0, 12);
+  if (target.kind === "contact") return (state.contacts[target.key] ?? state.removed[target.key]?.contact)?.name || target.key.slice(0, 12);
   return `Unknown ${target.prefix}`;
 }
 

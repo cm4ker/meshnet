@@ -19,6 +19,7 @@ import { NodeStatus } from "./node/Status.js";
 import { QueuePill } from "./node/QueuePill.js";
 import { SignIn } from "./node/SignIn.js";
 import { Readings } from "./Readings.js";
+import { NotOnRadio } from "./ContactsPages.js";
 import { Gone, ScreenHead, type Chrome } from "./ScreenHead.js";
 import { NodeCheck } from "./tools/NodeCheck.js";
 
@@ -49,7 +50,31 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
   const [ask, setAsk] = useState<"rename" | "remove" | "forget" | "reboot" | "signin" | null>(null);
   const online = state.status === "ready";
 
-  if (!contact) return <Gone chrome={chrome} title="Contact" text="This contact is no longer on the radio." />;
+  if (!contact) {
+    const removed = state.removed[contactKey]?.contact;
+    if (!removed) return <Gone chrome={chrome} title="Contact" text="This contact is no longer on the radio." />;
+    const name = removed.name || removed.prefix;
+    return (
+      <div className="screen">
+        <ScreenHead chrome={chrome} />
+        <div className="screen-scroll">
+          <div className="hero">
+            <Avatar name={name} type={removed.type} size={68} />
+            <h1>{name}</h1>
+            <span className="muted">
+              {kindLabel(removed.type)} · heard {agoPhrase(heardAt(removed) || null)}
+            </span>
+          </div>
+          <NotOnRadio contactKey={contactKey} />
+          {isConversationType(removed.type) && state.messages.some((m) => m.conversation === contactConversation(contactKey)) ? (
+            <Group>
+              <LinkRow icon={<ChatIcon size={17} />} label="Open the chat" onClick={() => openConversation(contactConversation(contactKey))} />
+            </Group>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
 
   const key = contact.key;
   const name = contact.name || contact.prefix;
@@ -93,7 +118,7 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
       items.push({ label: `Reboot ${name}`, icon: <PowerIcon size={17} />, danger: true, disabled: !online, onSelect: () => setAsk("reboot") });
     }
     if (node && managed) items.push({ label: "Forget this node", icon: <CloseIcon size={17} />, danger: true, onSelect: () => setAsk("forget") });
-    items.push({ label: "Remove the contact", icon: <TrashIcon size={17} />, danger: true, disabled: !online, onSelect: () => setAsk("remove") });
+    items.push({ label: contact.unsaved ? "Remove from the list" : "Remove the contact", icon: <TrashIcon size={17} />, danger: true, disabled: !online && !contact.unsaved, onSelect: () => setAsk("remove") });
     showMenu(items, { title: name });
   };
 
@@ -128,6 +153,8 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
           </span>
           {where ? <span className="muted">{where}</span> : null}
         </div>
+
+        {contact.unsaved ? <NotOnRadio contactKey={key} /> : null}
 
         <div className="hero-actions">
           {routed ? (
@@ -228,7 +255,13 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
       <Confirm
         open={ask === "remove"}
         title={`Remove ${name}?`}
-        body={<p>The radio forgets it; it comes back on its next advert while new contacts are added automatically. Its messages stay here.</p>}
+        body={
+          contact.unsaved ? (
+            <p>The radio never kept it; it only leaves this list, and shows up again on its next advert.</p>
+          ) : (
+            <p>The radio forgets it, and its direct messages won't reach you until it advertises again. Its chat stays here, and you can put it back from Radio › Contacts › Removed.</p>
+          )
+        }
         confirmLabel="Remove"
         danger
         onCancel={() => setAsk(null)}

@@ -68,6 +68,28 @@ const CROWD = (() => {
   }
 }
 
+/**
+ * `?demo&stale=90`: that many more nodes last heard three weeks to four
+ * months ago, with no position, to fill the radio's memory and see the
+ * clean-up at work.
+ */
+{
+  let stale = 0;
+  try {
+    stale = Math.min(500, Math.max(0, Number(new URLSearchParams(globalThis.location?.search ?? "").get("stale")) || 0));
+  } catch {
+    stale = 0;
+  }
+  const kinds = [1, 1, 1, 2, 2, 3, 4];
+  for (let i = 0; i < stale; i++) {
+    const key = seeded(1000 + i);
+    key[1] = (i * 97) & 0xff;
+    const type = kinds[i % kinds.length]!;
+    const name = type === 2 ? `Old rpt ${i}` : type === 3 ? `Old room ${i}` : type === 4 ? `Old sensor ${i}` : `Passer-by ${i}`;
+    PEOPLE.push({ key, name, type, hops: 0xff, lat: 0, lon: 0, ago: (20 + ((i * 37) % 100)) * 86400 });
+  }
+}
+
 function seeded(n: number): Uint8Array {
   const key = new Uint8Array(32);
   for (let i = 0; i < 32; i++) key[i] = (n * 37 + i * 11) & 0xff;
@@ -85,14 +107,14 @@ const RELAYS = [0x03, 0x94, 0x6f, 0x2c];
 
 const CHANNELS = ["8b3387e9c5cdea6ac9e5edbaa115cd72", "0123456789abcdef0123456789abcdef"];
 
-function contactFrame(code: number, p: Person, lastMod: number, hops = p.hops, relays: number[] = RELAYS): Uint8Array {
+function contactFrame(code: number, p: Person, lastMod: number, hops = p.hops, relays: number[] = RELAYS, flags = p.name === "Alice" ? 1 : 0): Uint8Array {
   const path = new Uint8Array(64);
   if (hops !== 0xff) path.set(relays.slice(0, hops));
   return new ByteWriter()
     .u8(code)
     .bytes(p.key)
     .u8(p.type)
-    .u8(p.name === "Alice" ? 1 : 0)
+    .u8(flags)
     .u8(hops)
     .bytes(path)
     .fixedString(p.name, 32)
@@ -179,6 +201,10 @@ class DemoRadio extends BaseTransport {
   private admins = new Set<Person>();
   /** The route this radio holds to each contact, as a hop count; 0xff for none. */
   private routes = new Map<Person, number>(PEOPLE.map((p) => [p, p.hops]));
+  /** Contacts taken off this radio, and the flags written to the others. */
+  private gone = new Set<Person>();
+  private flags = new Map<Person, number>();
+  private autoAdd = { config: 0, maxHops: 0 };
   /** Routes written by hand, relay by relay; the rest go along `RELAYS`. */
   private paths = new Map<Person, number[]>();
   /** Texts on Friends whose first send the repeaters already missed. */
@@ -295,7 +321,7 @@ class DemoRadio extends BaseTransport {
   }
 
   private person(key: Uint8Array): Person | undefined {
-    return PEOPLE.find((p) => key.every((b, i) => b === p.key[i]));
+    return PEOPLE.find((p) => !this.gone.has(p) && key.every((b, i) => b === p.key[i]));
   }
 
   private sent(tag: number, flood = false): Uint8Array {
@@ -448,15 +474,30 @@ class DemoRadio extends BaseTransport {
         ];
       case Cmd.GetDeviceTime:
         return [new ByteWriter().u8(Resp.CurrTime).u32(Math.floor(Date.now() / 1000)).toBytes()];
-      case Cmd.GetContacts:
+      case Cmd.GetContacts: {
+        const kept = PEOPLE.filter((p) => !this.gone.has(p));
+        // The radio stamps a contact with the moment it stored its last advert.
+        const stamp = (p: Person) => Math.floor(Date.now() / 1000) - (p.ago ?? 600);
         return [
-          new ByteWriter().u8(Resp.ContactsStart).u32(PEOPLE.length).toBytes(),
-          ...PEOPLE.map((p, i) => contactFrame(Resp.Contact, p, 100 + i, this.routes.get(p), this.paths.get(p))),
-          new ByteWriter().u8(Resp.EndOfContacts).u32(100 + PEOPLE.length).toBytes(),
+          new ByteWriter().u8(Resp.ContactsStart).u32(kept.length).toBytes(),
+          ...kept.map((p) => contactFrame(Resp.Contact, p, stamp(p), this.routes.get(p), this.paths.get(p), this.flags.get(p))),
+          new ByteWriter().u8(Resp.EndOfContacts).u32(Math.floor(Date.now() / 1000)).toBytes(),
         ];
+      }
+      case Cmd.RemoveContact: {
+        const p = this.person(frame.subarray(1, 33));
+        if (!p) return [new Uint8Array([Resp.Err, 2])];
+        this.gone.add(p);
+        return [new Uint8Array([Resp.Ok])];
+      }
+      case Cmd.GetAutoAddConfig:
+        return [new Uint8Array([Resp.AutoAddConfig, this.autoAdd.config, this.autoAdd.maxHops])];
+      case Cmd.SetAutoAddConfig:
+        this.autoAdd = { config: frame[1] ?? 0, maxHops: frame[2] ?? 0 };
+        return [new Uint8Array([Resp.Ok])];
       case Cmd.GetContactByKey: {
         const p = this.person(frame.subarray(1, 33));
-        return p ? [contactFrame(Resp.Contact, p, Math.floor(Date.now() / 1000), this.routes.get(p), this.paths.get(p))] : [new Uint8Array([Resp.Err, 2])];
+        return p ? [contactFrame(Resp.Contact, p, Math.floor(Date.now() / 1000), this.routes.get(p), this.paths.get(p), this.flags.get(p))] : [new Uint8Array([Resp.Err, 2])];
       }
       case Cmd.ResetPath: {
         const p = this.person(frame.subarray(1, 33));
@@ -685,9 +726,12 @@ class DemoRadio extends BaseTransport {
         return [new ByteWriter().u8(Resp.AdvertPath).u32(Math.floor(Date.now() / 1000) - 900).u8(relays.length).bytes(new Uint8Array(relays)).toBytes()];
       }
       case Cmd.AddUpdateContact: {
-        const p = this.person(frame.subarray(1, 33));
+        const key = frame.subarray(1, 33);
+        const p = PEOPLE.find((x) => key.every((b, i) => b === x.key[i]));
         const length = frame[35] ?? 0xff;
         if (p) {
+          this.gone.delete(p);
+          this.flags.set(p, frame[34] ?? 0);
           this.routes.set(p, length);
           if (length !== 0xff) this.paths.set(p, Array.from(frame.subarray(36, 36 + (length & 63))));
         }

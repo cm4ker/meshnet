@@ -20,6 +20,8 @@ import { heardAt as heard, kindLabel } from "../lib/nodes.js";
 import { usePing, measuredLegs } from "../lib/ping.js";
 import { routeWords } from "../lib/routes.js";
 import { useSavedPasswords } from "../lib/secrets.js";
+import { openCleanUp } from "../lib/cleanUp.js";
+import { isYours, memoryTight, memoryUse } from "../lib/tidy.js";
 import { session, useSelector, useSession } from "../lib/session.js";
 import { act } from "../lib/toast.js";
 import { closeTool, dropOnRoute, lineOfSightTo, openLineOfSight, tapInRoute, whoHearsMe } from "../lib/toolActions.js";
@@ -64,10 +66,6 @@ function useFilter() {
   );
 }
 
-/** Repeaters, rooms and sensors you have signed in to, asked for their status, or kept a password for. */
-function isYours(state: SessionState, saved: readonly string[], c: ContactRecord): boolean {
-  return isNodeType(c.type) && (state.logins[c.key] !== undefined || state.statusHistory[c.key] !== undefined || saved.includes(c.key));
-}
 
 function matcher(state: SessionState, saved: readonly string[], kind: Kind, query: string): (c: ContactRecord) => boolean {
   const q = query.trim().toLowerCase();
@@ -217,6 +215,7 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
           <div className="empty muted">{kind === "yours" && !query ? "Repeaters, rooms and sensors you sign in to gather here." : "Nothing matches."}</div>
         ) : (
           <>
+            {only ? null : <MemoryStrip state={state} />}
             <div className="list-summary muted">
               {all.length} {all.length === 1 ? "node" : "nodes"}
               {unplaced ? ` · ${unplaced} without position` : ""}
@@ -228,6 +227,46 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * How full the radio's memory is, shown only when it nearly is: past nine
+ * tenths, or once it said it dropped a node. While contacts are being taken
+ * off, how far that has got, with a Stop.
+ */
+function MemoryStrip({ state }: { state: SessionState }) {
+  if (state.removing) {
+    const { done, total } = state.removing;
+    return (
+      <div className="memory-strip busy" role="status">
+        <span className="grow">
+          Removing… {done} of {total}
+          <span className="memory-bar">
+            <i style={{ width: `${(done / Math.max(1, total)) * 100}%` }} />
+          </span>
+        </span>
+        <button type="button" className="memory-act" onClick={() => session.stopRemoving()}>
+          Stop
+        </button>
+      </div>
+    );
+  }
+  const use = memoryUse(state);
+  if (!memoryTight(state) || !use) return null;
+  const full = state.contactsFull || use.used >= use.max;
+  return (
+    <div className={["memory-strip", full ? "full" : "warn"].join(" ")}>
+      <span className="grow">
+        {full ? "Radio memory full · new nodes aren't kept" : `Radio memory ${use.used} of ${use.max}`}
+        <span className="memory-bar">
+          <i style={{ width: `${Math.min(100, (use.used / use.max) * 100)}%` }} />
+        </span>
+      </span>
+      <button type="button" className="memory-act" disabled={state.status !== "ready"} onClick={openCleanUp}>
+        Clean up
+      </button>
+    </div>
   );
 }
 
@@ -253,7 +292,7 @@ const NodeRow = memo(function NodeRow({ contact: c, selected, yours, onOpen, log
   const route = yours ? null : routeWords(c);
   const bits = yours
     ? [kindLabel(c.type), login?.ok ? "signed in" : "not signed in", last ? `${(last.batteryMv / 1000).toFixed(2)} V` : null]
-    : [kindLabel(c.type), whereFrom(self, c)];
+    : [kindLabel(c.type), c.unsaved ? "not on your radio" : whereFrom(self, c)];
   return (
     <li>
       <button type="button" className={["row", selected ? "selected" : ""].join(" ")} onClick={() => onOpen(c.key)}>

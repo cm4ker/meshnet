@@ -13,6 +13,7 @@ import { IconButton } from "../ui/Button.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
 import { Composer, type Reply } from "./Composer.js";
+import { NotOnRadio } from "./ContactsPages.js";
 import {
   AlertIcon,
   CheckIcon,
@@ -102,8 +103,8 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
               <span>{route.text}</span>
               <ChevronRightIcon size={11} />
             </button>
-          ) : target.kind === "contact" && !contact ? (
-            <span className="chat-route">not in the contacts</span>
+          ) : target.kind === "contact" && (!contact || contact.unsaved) ? (
+            <span className="chat-route">not on your radio</span>
           ) : null}
         </span>
       </ScreenHead>
@@ -138,7 +139,11 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
         </div>
       </div>
 
-      {locked && contact ? (
+      {target.kind === "contact" && (contact?.unsaved || (!contact && state.removed[target.key])) ? (
+        <footer className="compose">
+          <NotOnRadio contactKey={target.key} compact />
+        </footer>
+      ) : locked && contact ? (
         <footer className="compose">
           <button type="button" className="compose-login" onClick={() => openProfile(contact.key)}>
             <LockIcon size={16} /> Log in to {title} to post

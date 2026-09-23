@@ -46,6 +46,10 @@ function initial(messages: MessageRecord[] = [], unread: Record<string, number> 
     self: { name: "Me" } as SessionState["self"],
     contacts: { [BOB]: contact(BOB, "Bob"), [EVE]: contact(EVE, "Eve") },
     contactsCursor: 0,
+    removed: {},
+    autoAdd: null,
+    contactsFull: false,
+    removing: null,
     channels: [
       { index: 0, name: "Public", secret: "00" },
       { index: 1, name: "test", secret: "01" },

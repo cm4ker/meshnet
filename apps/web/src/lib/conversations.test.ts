@@ -54,6 +54,10 @@ function state(messages: MessageRecord[]): SessionState {
       },
     },
     contactsCursor: 0,
+    removed: {},
+    autoAdd: null,
+    contactsFull: false,
+    removing: null,
     channels: [
       { index: 0, name: "Public", secret: "00" },
       { index: 1, name: "Friends", secret: "01" },

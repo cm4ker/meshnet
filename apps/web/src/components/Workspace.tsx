@@ -23,6 +23,7 @@ import { Palette } from "./Palette.js";
 import { Profile } from "./Profile.js";
 import { RadioHome } from "./RadioHome.js";
 import { RadioPageView } from "./RadioPages.js";
+import { CleanUpHost } from "./CleanUp.js";
 import { RouteView } from "./RouteView.js";
 import { ToolPanel } from "./tools/ToolPanel.js";
 import { UpdateButton } from "./Updates.js";
@@ -41,6 +42,7 @@ export function Workspace() {
     <>
       {wide ? <Desktop /> : <Phone />}
       <MenuHost />
+      <CleanUpHost />
       <ToastHost />
     </>
   );
@@ -355,8 +357,8 @@ function Desktop() {
       />
     );
   } else {
-    list = <RadioHome selected={radioPage} />;
-    main = <RadioPageView page={radioPage ?? "name"} chrome={{}} />;
+    list = <RadioHome selected={radioPage === "removed" ? "contacts" : radioPage} />;
+    main = <RadioPageView page={radioPage ?? "name"} chrome={radioPage === "removed" ? { onBack: back } : {}} />;
   }
 
   const panelChrome: Chrome = { onClose: closePanel, onBack: panelDepth > 1 ? back : undefined };

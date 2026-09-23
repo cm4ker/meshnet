@@ -4472,3 +4472,133 @@ button.hop {
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+/* ---- contacts: how full the radio is, the clean-up sheet, a contact not on the radio ---- */
+
+.memory-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-2) var(--space-3) 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: 10px;
+  font-size: var(--text-sm);
+}
+.memory-strip.warn {
+  background: var(--warning-subtle);
+}
+.memory-strip.full {
+  background: var(--danger-subtle);
+}
+.memory-strip.busy {
+  background: var(--panel);
+}
+.memory-strip .grow {
+  flex: 1;
+  min-width: 0;
+}
+.memory-bar {
+  display: block;
+  height: 4px;
+  margin-top: 5px;
+  border-radius: 2px;
+  background: var(--border-strong);
+  overflow: hidden;
+}
+.memory-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--warning);
+}
+.memory-strip.full .memory-bar > i {
+  background: var(--danger);
+}
+.memory-strip.busy .memory-bar > i {
+  background: var(--accent);
+  transition: width 0.2s;
+}
+.memory-act {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: var(--space-1) 0;
+}
+.memory-act:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.toast.has-action {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  pointer-events: auto;
+}
+.toast-action {
+  border: 0;
+  background: transparent;
+  color: color-mix(in oklab, var(--accent) 55%, var(--bg));
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.cleanup-note {
+  padding: 0 var(--space-4) var(--space-1);
+}
+.cleanup-kinds {
+  padding: 0 var(--space-4) var(--space-3);
+  color: var(--text-muted);
+}
+.cleanup-kept {
+  color: var(--success);
+  font-weight: 600;
+}
+.cleanup-row {
+  cursor: pointer;
+}
+.cleanup-row > input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+.cleanup-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--space-3);
+  padding-bottom: max(var(--space-3), var(--safe-bottom));
+  background: var(--bg);
+}
+.group-note.danger {
+  color: var(--danger);
+}
+
+.not-on-radio {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-3) var(--space-3) 0;
+  padding: var(--space-3);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+.not-on-radio p {
+  margin: 0;
+}
+.not-on-radio b {
+  color: var(--text);
+}
+.not-on-radio.compact {
+  margin: 0;
+}

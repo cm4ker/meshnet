@@ -8,7 +8,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, typ
 import { createPortal } from "react-dom";
 import type { MenuAt } from "../lib/press.js";
 import { useWide } from "../lib/layout.js";
-import { useToast } from "../lib/toast.js";
+import { dismissToast, useToast } from "../lib/toast.js";
 import { AirMark } from "./List.js";
 import { Sheet } from "./Sheet.js";
 
@@ -138,8 +138,21 @@ export function ToastHost() {
   const toast = useToast();
   if (!toast) return null;
   return createPortal(
-    <div key={toast.id} className={["toast", toast.tone].join(" ")} role="status">
+    <div key={toast.id} className={["toast", toast.tone, toast.action ? "has-action" : ""].join(" ")} role="status">
       {toast.text}
+      {toast.action ? (
+        <button
+          type="button"
+          className="toast-action"
+          onClick={() => {
+            const run = toast.action!.run;
+            dismissToast();
+            run();
+          }}
+        >
+          {toast.action.label}
+        </button>
+      ) : null}
     </div>,
     document.body,
   );

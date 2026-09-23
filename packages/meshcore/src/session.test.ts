@@ -26,6 +26,9 @@ class ScriptedRadio extends BaseTransport {
   binaryTag = 0x55667788;
   /** Whether the radio says a text went out as a flood. */
   sendsFlood = false;
+  /** How many contacts it has room for. */
+  capacity = 100;
+  autoAdd = { config: 0, maxHops: 0 };
 
   async send(frame: Uint8Array): Promise<void> {
     this.sent.push(frame);
@@ -124,7 +127,27 @@ class ScriptedRadio extends BaseTransport {
         return [new ByteWriter().u8(Resp.Sent).u8(0).bytes(frame.subarray(1, 5)).u32(40).toBytes()];
       case Cmd.SendControlData:
         return [new Uint8Array([Resp.Ok])];
-      case Cmd.AddUpdateContact:
+      case Cmd.AddUpdateContact: {
+        // The command carries a contact laid out as the radio sends one.
+        const record = new Uint8Array(frame.length);
+        record.set(frame);
+        record[0] = Resp.Contact;
+        const at = this.contacts.findIndex((c) => c.subarray(1, 33).every((b, i) => b === frame[1 + i]));
+        if (at >= 0) this.contacts[at] = record;
+        else if (this.contacts.length >= this.capacity) return [new Uint8Array([Resp.Err, 3])];
+        else this.contacts.push(record);
+        return [new Uint8Array([Resp.Ok])];
+      }
+      case Cmd.RemoveContact: {
+        const at = this.contacts.findIndex((c) => c.subarray(1, 33).every((b, i) => b === frame[1 + i]));
+        if (at < 0) return [new Uint8Array([Resp.Err, 2])];
+        this.contacts.splice(at, 1);
+        return [new Uint8Array([Resp.Ok])];
+      }
+      case Cmd.GetAutoAddConfig:
+        return [new Uint8Array([Resp.AutoAddConfig, this.autoAdd.config, this.autoAdd.maxHops])];
+      case Cmd.SetAutoAddConfig:
+        this.autoAdd = { config: frame[1]!, maxHops: frame[2] ?? 0 };
         return [new Uint8Array([Resp.Ok])];
       case Cmd.GetStats:
         return [new ByteWriter().u8(Resp.Stats).u8(1).u16(-115 & 0xffff).i8(-90).i8(28).u32(120).u32(3400).toBytes()];
@@ -718,17 +741,127 @@ test("a message from a sender not yet in the contacts is filed under its prefix,
   assert.equal(session.getState().messages[0]?.sender, "Bob");
 });
 
-test("a node heard for the first time is announced once; the contacts read at connect are not", async () => {
+test("a node the radio does not keep is announced once, and listed as not kept", async () => {
+  const radio = new ScriptedRadio();
+  radio.contacts = [];
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  const found: string[] = [];
+  session.onDiscovered((c) => found.push(c.name));
+  await session.connect(radio);
+  assert.deepEqual(found, []);
+  const advert = new ByteWriter().u8(Push.NewAdvert).bytes(contactFrame(BOB, "Bob", 11).subarray(1)).toBytes();
+  radio.push(advert);
+  await tick();
+  radio.push(advert);
+  await tick();
+  assert.deepEqual(found, ["Bob"]);
+  assert.equal(session.getState().contacts[bobKey()]?.name, "Bob");
+  assert.equal(session.getState().contacts[bobKey()]?.unsaved, true);
+});
+
+test("a node the radio adds as it hears it is announced once its contact is read; the contacts read at connect are not", async () => {
   const radio = new ScriptedRadio();
   const session = new MeshSession({ now: () => 1_700_000_000_000 });
   const found: string[] = [];
   session.onDiscovered((c) => found.push(c.name));
   await session.connect(radio);
   assert.deepEqual(found, []);
-  radio.push(new ByteWriter().u8(Push.NewAdvert).bytes(contactFrame(BOB, "Bob", 11).subarray(1)).toBytes());
+  const carol = fromHex("c0".repeat(32));
+  radio.contacts.push(contactFrame(carol, "Carol", 12));
+  radio.push(new ByteWriter().u8(Push.Advert).bytes(carol).toBytes());
+  await tick(600);
+  assert.deepEqual(found, ["Carol"]);
+  assert.equal(session.getState().contacts["c0".repeat(32)]?.unsaved, undefined);
+});
+
+test("removed contacts are kept to be put back, and a node the radio did not keep only leaves the list", async () => {
+  const storage = new MemoryStorage();
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  radio.push(new ByteWriter().u8(Push.NewAdvert).bytes(contactFrame(fromHex("d0".repeat(32)), "Dan", 11).subarray(1)).toBytes());
   await tick();
-  assert.deepEqual(found, ["Bob"]);
-  assert.equal(session.getState().contacts[bobKey()]?.name, "Bob");
+  const { removed, error } = await session.removeContacts([bobKey(), "d0".repeat(32)], "tidy");
+  assert.deepEqual(removed, [bobKey(), "d0".repeat(32)]);
+  assert.equal(error, null);
+  assert.equal(radio.contacts.length, 0);
+  assert.deepEqual(Object.keys(session.getState().contacts), []);
+  assert.deepEqual(Object.keys(session.getState().removed), [bobKey()]);
+  assert.equal(session.getState().removed[bobKey()]?.by, "tidy");
+  assert.equal(session.getState().removing, null);
+  await session.disconnect();
+
+  const second = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  await second.connect(radio);
+  assert.equal(second.getState().removed[bobKey()]?.contact.name, "Bob");
+  await second.restoreContact(bobKey());
+  assert.equal(radio.contacts.length, 1);
+  assert.equal(second.getState().contacts[bobKey()]?.name, "Bob");
+  assert.deepEqual(second.getState().removed, {});
+});
+
+test("a contact the radio already let go of counts as removed", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  radio.contacts = [];
+  await session.removeContact(bobKey());
+  assert.equal(session.getState().removed[bobKey()]?.by, "you");
+});
+
+test("a contact the radio replaced, or lost while nobody listened, is kept as removed by the radio", async () => {
+  const storage = new MemoryStorage();
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  radio.push(new ByteWriter().u8(Push.ContactDeleted).bytes(BOB).toBytes());
+  await tick();
+  assert.equal(session.getState().contacts[bobKey()], undefined);
+  assert.equal(session.getState().removed[bobKey()]?.by, "radio");
+  await session.disconnect();
+
+  // Bob is back on the radio: the fetch takes him out of the removed.
+  const again = new ScriptedRadio();
+  const second = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  await second.connect(again);
+  await second.refreshContacts(true);
+  assert.deepEqual(second.getState().removed, {});
+  await second.disconnect();
+
+  // And gone again while the app was away.
+  again.contacts = [];
+  const third = new MeshSession({ storage, now: () => 1_700_000_000_000 });
+  await third.connect(again);
+  assert.equal(third.getState().contacts[bobKey()], undefined);
+  assert.equal(third.getState().removed[bobKey()]?.by, "radio");
+});
+
+test("a full radio is said to be full until a contact is removed, and refuses one put back", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  await session.removeContact(bobKey());
+  radio.capacity = 0;
+  radio.push(new Uint8Array([Push.ContactsFull]));
+  await tick();
+  assert.equal(session.getState().contactsFull, true);
+  await assert.rejects(session.restoreContact(bobKey()), /memory is full/);
+  assert.ok(session.getState().removed[bobKey()]);
+  radio.capacity = 100;
+  await session.restoreContact(bobKey());
+  await session.removeContact(bobKey());
+  assert.equal(session.getState().contactsFull, false);
+});
+
+test("the radio's auto-add setting is read at connect and written back", async () => {
+  const radio = new ScriptedRadio();
+  radio.autoAdd = { config: 0x05, maxHops: 3 };
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  assert.deepEqual(session.getState().autoAdd, { config: 0x05, maxHops: 3 });
+  await session.setAutoAdd(0x03, 0);
+  assert.deepEqual(radio.autoAdd, { config: 0x03, maxHops: 0 });
+  assert.deepEqual(session.getState().autoAdd, { config: 0x03, maxHops: 0 });
 });
 
 test("the sender of a channel message is the name before the colon", () => {

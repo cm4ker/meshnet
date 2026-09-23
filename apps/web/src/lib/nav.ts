@@ -17,7 +17,7 @@ export type Section = "chats" | "mesh" | "radio";
 export type NodePage = "neighbours" | "history" | "settings" | "access" | "console";
 
 /** The radio section's pages. */
-export type RadioPage = "name" | "frequency" | "privacy" | "advanced" | "notifications" | "messages" | "appearance" | "connection" | "air" | "log" | "power" | "about";
+export type RadioPage = "name" | "frequency" | "privacy" | "contacts" | "removed" | "advanced" | "notifications" | "messages" | "appearance" | "connection" | "air" | "log" | "power" | "about";
 
 export type Screen =
   | { kind: "chat"; conversation: string }

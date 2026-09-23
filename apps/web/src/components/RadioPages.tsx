@@ -18,6 +18,7 @@ import { Button } from "../ui/Button.js";
 import { Confirm } from "../ui/Dialog.js";
 import { ActionRow, Block, Group, InfoRow, LinkRow, SelectRow, SwitchRow } from "../ui/List.js";
 import { CopyIcon } from "./Icons.js";
+import { ContactsPage, RemovedPage } from "./ContactsPages.js";
 import { LogView } from "./LogView.js";
 import { AirView } from "./AirView.js";
 import { Readings } from "./Readings.js";
@@ -31,6 +32,8 @@ export const RADIO_TITLES: Record<RadioPage, string> = {
   name: "Name and position",
   frequency: "Frequency and power",
   privacy: "Privacy and telemetry",
+  contacts: "Contacts",
+  removed: "Removed",
   advanced: "Advanced",
   notifications: "Notifications",
   messages: "Messages and routes",
@@ -154,18 +157,6 @@ function PageBody({ page }: { page: RadioPage }) {
     case "privacy":
       return self ? (
         <>
-          <Group note="Whether radios heard advertising join the contacts by themselves.">
-            <SelectRow
-              label="New contacts"
-              value={String(self.manualAddContacts & 1)}
-              disabled={!online}
-              options={[
-                { value: "0", label: "Add automatically" },
-                { value: "1", label: "Only when I add them" },
-              ]}
-              onChange={(v) => void saveOther(self, { manualAddContacts: (self.manualAddContacts & ~1) | Number(v) })}
-            />
-          </Group>
           <Group title="Who may read its telemetry">
             <SelectRow label="Battery" value={String(self.telemetryModeBase)} options={TELEMETRY} disabled={!online} onChange={(v) => void saveOther(self, { telemetryModeBase: Number(v) })} />
             <SelectRow label="Location" value={String(self.telemetryModeLocation)} options={TELEMETRY} disabled={!online} onChange={(v) => void saveOther(self, { telemetryModeLocation: Number(v) })} />
@@ -175,6 +166,10 @@ function PageBody({ page }: { page: RadioPage }) {
       ) : (
         <Offline />
       );
+    case "contacts":
+      return <ContactsPage />;
+    case "removed":
+      return <RemovedPage />;
     case "advanced":
       return self ? <AdvancedPage self={self} online={online} /> : <Offline />;
     case "notifications":

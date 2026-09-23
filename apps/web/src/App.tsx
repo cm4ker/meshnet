@@ -9,6 +9,7 @@ import { ALL_CHATS, createAnnouncer } from "./lib/announce.js";
 import { getNoticePrefs, messageWanted, nodeWanted } from "./lib/noticePrefs.js";
 import { askPermissionOnce, notify, onNotificationClick, pageOnScreen, tellWatch, withdraw } from "./lib/notify.js";
 import { session, useSelector } from "./lib/session.js";
+import { startTidyRule } from "./lib/cleanUp.js";
 import { isWide, subscribeWide } from "./lib/layout.js";
 import { getNav, openConversation, openProfile, shownConversation, subscribeNav } from "./lib/nav.js";
 
@@ -89,6 +90,9 @@ export function App() {
       }),
     [],
   );
+
+  // The tidy-up rule, when it is on for the radio: it runs while the radio is connected, whatever is on screen.
+  useEffect(() => startTidyRule(), []);
 
   // A click on a notice opens what it was about.
   useEffect(() => {

@@ -7,12 +7,13 @@ import { summaryOf, useNoticePrefs } from "../lib/noticePrefs.js";
 import { session, useSelector, useSession } from "../lib/session.js";
 import { act } from "../lib/toast.js";
 import { useDesktopUpdateInfo } from "../lib/updates.js";
+import { memoryUse } from "../lib/tidy.js";
 import { getPreference, listThemes, subscribeTheme } from "../theme/store.js";
 import { Button } from "../ui/Button.js";
 import { Group, LinkRow } from "../ui/List.js";
 import { showMenu } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
-import { AirIcon, BellIcon, InfoIcon, LinkIcon, LocationIcon, LogIcon, PaletteIcon, PowerIcon, RadioIcon, ShieldIcon, SlidersIcon, TextIcon, WavesIcon } from "./Icons.js";
+import { AirIcon, BellIcon, InfoIcon, LinkIcon, LocationIcon, LogIcon, PaletteIcon, PowerIcon, RadioIcon, ShieldIcon, SlidersIcon, TextIcon, UsersIcon, WavesIcon } from "./Icons.js";
 import { presetName, RADIO_TITLES } from "./RadioPages.js";
 
 
@@ -43,6 +44,8 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
     <LinkRow key={page} icon={icon} label={RADIO_TITLES[page]} value={value} tone={page === "power" ? "danger" : undefined} selected={selected === page} onClick={() => openRadioPage(page)} />
   );
   const notices = summaryOf(useNoticePrefs());
+  const use = memoryUse(state);
+  const contactsValue = state.contactsFull ? "Full" : use ? `${use.used} of ${use.max}` : undefined;
 
   return (
     <div className="list-pane radio-home">
@@ -92,7 +95,8 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
         <Group title="This radio">
           {row("name", <LocationIcon size={17} />, self?.name)}
           {row("frequency", <RadioIcon size={17} />, self ? presetName(self) : undefined)}
-          {row("privacy", <ShieldIcon size={17} />, self ? (self.manualAddContacts & 1 ? "Manual add" : "Auto-add") : undefined)}
+          {row("contacts", <UsersIcon size={17} />, contactsValue)}
+          {row("privacy", <ShieldIcon size={17} />)}
           {row("advanced", <SlidersIcon size={17} />)}
         </Group>
         <Group title="This app">
