@@ -5,7 +5,8 @@ import { bandwidth, frequency } from "../lib/format.js";
 import { disconnect } from "../lib/link.js";
 import { setLookalikePrefs, useLookalikePrefs } from "../lib/lookalikes.js";
 import type { RadioPage } from "../lib/nav.js";
-import { askPermission, nodeNotificationsWanted, notificationsWanted, setNodeNotificationsWanted, setNotificationsWanted } from "../lib/notify.js";
+import { setNoticePrefs, useNoticePrefs, type NoticePrefs } from "../lib/noticePrefs.js";
+import { askPermission, hasNoticeSettings, openNoticeSettings } from "../lib/notify.js";
 import { shell } from "../lib/platform.js";
 import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
 import { session, storage, useSession } from "../lib/session.js";
@@ -407,31 +408,46 @@ function AdvancedPage({ self, online }: { self: Self; online: boolean }) {
 }
 
 function NotificationsPage() {
-  const [messages, setMessages] = useState(notificationsWanted);
-  const [nodes, setNodes] = useState(nodeNotificationsWanted);
+  const prefs = useNoticePrefs();
+  // Turning something on asks the system first: a notice it refuses would never show.
+  const allowed = async () => {
+    if (await askPermission()) return true;
+    toast("Notifications are turned off for this app in the system's settings", "error");
+    return false;
+  };
+  const change = async (patch: Partial<NoticePrefs>, on: boolean) => {
+    if (on && !(await allowed())) return;
+    setNoticePrefs(patch);
+  };
   return (
-    <Group note="System notifications while the window is elsewhere. A tap opens the chat or the node.">
-      <SwitchRow
-        label="Messages"
-        hint="For a chat you are not looking at."
-        checked={messages}
-        onChange={async (v) => {
-          if (v && !(await askPermission())) return toast("Notifications are turned off for this app in the system's settings", "error");
-          setMessages(v);
-          setNotificationsWanted(v);
-        }}
-      />
-      <SwitchRow
-        label="New nodes"
-        hint="When the radio hears a node for the first time."
-        checked={nodes}
-        onChange={async (v) => {
-          if (v && !(await askPermission())) return toast("Notifications are turned off for this app in the system's settings", "error");
-          setNodes(v);
-          setNodeNotificationsWanted(v);
-        }}
-      />
-    </Group>
+    <>
+      <Group title="Messages">
+        <SwitchRow label="Direct messages" hint="From a person to you." checked={prefs.direct} onChange={(v) => void change({ direct: v }, v)} />
+        <SelectRow
+          label="Channels and rooms"
+          hint={{ all: "Every message in a chat you are not looking at.", mentions: `Only when someone writes @[${session.getState().self?.name ?? "your name"}].`, off: "They stay quiet." }[prefs.chats]}
+          value={prefs.chats}
+          options={[{ value: "all", label: "All" }, { value: "mentions", label: "Mentions" }, { value: "off", label: "Off" }]}
+          onChange={(v) => void change({ chats: v }, v !== "off")}
+        />
+      </Group>
+      <Group title="Mesh">
+        <SelectRow
+          label="New nodes"
+          hint={{ people: "A person's radio heard for the first time. Not repeaters, rooms or sensors.", all: "Any node heard for the first time.", off: "They stay quiet." }[prefs.nodes]}
+          value={prefs.nodes}
+          options={[{ value: "people", label: "People" }, { value: "all", label: "All" }, { value: "off", label: "Off" }]}
+          onChange={(v) => void change({ nodes: v }, v !== "off")}
+        />
+      </Group>
+      {hasNoticeSettings() ? (
+        <Group note="A chat can have its own setting on its page. A tap on a notification opens the chat or the node.">
+          <LinkRow label="Sound and vibration" onClick={() => void openNoticeSettings().catch(() => toast("Could not open the system's settings", "error"))} />
+        </Group>
+      ) : (
+        <p className="group-note">A chat can have its own setting on its page. A tap on a notification opens the chat or the node.</p>
+      )}
+    </>
   );
 }
 

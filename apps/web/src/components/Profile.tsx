@@ -13,6 +13,7 @@ import { Confirm, Prompt } from "../ui/Dialog.js";
 import { ActionRow, Block, Group, InfoRow, LinkRow } from "../ui/List.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
+import { ChatNotices } from "./ChatNotices.js";
 import { AirIcon, ChartIcon, ChatIcon, CheckIcon, CopyIcon, EditIcon, LockIcon, MapIcon, MoreIcon, PowerIcon, ShieldIcon, SlidersIcon, StarFilledIcon, StarIcon, TerminalIcon, TrashIcon, UsersIcon, CloseIcon } from "./Icons.js";
 import { NodeStatus } from "./node/Status.js";
 import { QueuePill } from "./node/QueuePill.js";
@@ -164,6 +165,8 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
             <NodeCheck contactKey={key} route={false} />
           </Block>
         </Group>
+
+        {isConversationType(contact.type) ? <ChatNotices conversation={contactConversation(key)} direct={contact.type !== AdvType.Room} /> : null}
 
         {node && (managed || signedIn) ? <NodeStatus contact={contact} /> : null}
 

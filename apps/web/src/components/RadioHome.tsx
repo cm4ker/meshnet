@@ -3,7 +3,7 @@ import { battery, batteryPercent, plural } from "../lib/format.js";
 import { disconnect } from "../lib/link.js";
 import { useLookalikePrefs } from "../lib/lookalikes.js";
 import { openRadioPage, type RadioPage } from "../lib/nav.js";
-import { nodeNotificationsWanted, notificationsWanted } from "../lib/notify.js";
+import { summaryOf, useNoticePrefs } from "../lib/noticePrefs.js";
 import { session, useSelector, useSession } from "../lib/session.js";
 import { act } from "../lib/toast.js";
 import { useDesktopUpdateInfo } from "../lib/updates.js";
@@ -42,7 +42,7 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
   const row = (page: RadioPage, icon: React.ReactNode, value?: string) => (
     <LinkRow key={page} icon={icon} label={RADIO_TITLES[page]} value={value} tone={page === "power" ? "danger" : undefined} selected={selected === page} onClick={() => openRadioPage(page)} />
   );
-  const notices = notificationsWanted() ? (nodeNotificationsWanted() ? "On" : "Messages") : nodeNotificationsWanted() ? "New nodes" : "Off";
+  const notices = summaryOf(useNoticePrefs());
 
   return (
     <div className="list-pane radio-home">

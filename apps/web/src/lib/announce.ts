@@ -14,7 +14,10 @@
  *   says messages are waiting, and a burst is announced once it is drained,
  *   not message by message;
  * - when more than three conversations would each have a notice, one
- *   notice stands for them all, until the app is opened or all is read.
+ *   notice stands for them all, until the app is opened or all is read;
+ * - only what the reader wants rings (noticePrefs.ts): a chat left at
+ *   mentions has a notice for the messages that mention this radio, and
+ *   counts only those.
  *
  * Pure apart from what it is handed, so the rules are testable without a
  * radio or a notification centre.
@@ -22,11 +25,14 @@
 
 import type { MessageRecord, SessionState } from "@meshnet/meshcore";
 import { titleOf } from "./conversations.js";
+import { isDirect, mentionsMe } from "./noticePrefs.js";
 
 export interface Notice {
   title: string;
   body: string;
   tag: string;
+  /** Which channel it goes on, where the system has channels. */
+  kind: "direct" | "chats";
 }
 
 /** At most this many conversations each have a notice of their own. */
@@ -41,11 +47,6 @@ export const ALL_CHATS = "c:";
 
 export function conversationTag(conversation: string): string {
   return `c:${conversation}`;
-}
-
-function mentionsMe(state: SessionState, message: MessageRecord): boolean {
-  const me = state.self?.name;
-  return !!me && message.text.includes(`@[${me}]`);
 }
 
 /** The unread messages of a conversation, oldest first: the last ones in, as many as are unread. */
@@ -67,26 +68,34 @@ function line(message: MessageRecord, title: string): string {
   return message.sender && message.sender !== title ? `${message.sender}: ${message.text}` : message.text;
 }
 
-/** What a conversation's notice says, or nothing when all in it is read. */
-export function conversationNotice(state: SessionState, conversation: string): Notice | null {
-  const unread = unreadIn(state, conversation);
+/** Which unread messages a notice is about: the ones the reader wants to hear of. */
+type Keep = (message: MessageRecord) => boolean;
+const everything: Keep = () => true;
+
+/** What a conversation's notice says, or nothing when nothing in it that rings is unread. */
+export function conversationNotice(state: SessionState, conversation: string, keep: Keep = everything): Notice | null {
+  const unread = unreadIn(state, conversation).filter(keep);
   const last = unread.at(-1);
   if (!last) return null;
   const title = titleOf(state, conversation);
   const tag = conversationTag(conversation);
-  const count = state.unread[conversation] ?? unread.length;
-  if (count === 1) return { title: heading(state, last, title), body: last.text, tag };
+  const count = unread.length;
+  const kind = isDirect(state, conversation) ? "direct" : "chats";
+  if (count === 1) return { title: heading(state, last, title), body: last.text, tag, kind };
   const mentioned = unread.some((m) => mentionsMe(state, m));
   return {
     title: `${title} · ${count} new${mentioned ? ", you are mentioned" : ""}`,
     body: unread.slice(-LINES).map((m) => line(m, title)).join("\n"),
     tag,
+    kind,
   };
 }
 
 /** What the notice for several conversations says: every unread one, busiest first. */
-export function allChatsNotice(state: SessionState): Notice | null {
+export function allChatsNotice(state: SessionState, keep: Keep = everything): Notice | null {
   const chats = Object.entries(state.unread)
+    .filter(([, n]) => n > 0)
+    .map(([c]) => [c, unreadIn(state, c).filter(keep).length] as const)
     .filter(([, n]) => n > 0)
     .sort((a, b) => b[1] - a[1]);
   if (chats.length === 0) return null;
@@ -97,6 +106,7 @@ export function allChatsNotice(state: SessionState): Notice | null {
     title: `${total} new ${total === 1 ? "message" : "messages"} in ${chats.length} ${chats.length === 1 ? "chat" : "chats"}`,
     body: named.join(", "),
     tag: ALL_CHATS,
+    kind: "chats",
   };
 }
 
@@ -111,8 +121,8 @@ export interface Announcer {
 
 export function createAnnouncer(deps: {
   state: () => SessionState;
-  /** The "Announce messages" switch. */
-  wanted: () => boolean;
+  /** Whether this message should ring (noticePrefs.ts). */
+  wanted: Keep;
   show: (notice: Notice) => void;
   withdraw: (tag: string) => void;
 }): Announcer {
@@ -130,15 +140,15 @@ export function createAnnouncer(deps: {
     // sender moves under the contact once the contact is read.
     const fresh = new Set<string>();
     for (const m of state.messages) {
-      if (pending.has(m.id) && (state.unread[m.conversation] ?? 0) > 0) fresh.add(m.conversation);
+      if (pending.has(m.id) && (state.unread[m.conversation] ?? 0) > 0 && deps.wanted(m)) fresh.add(m.conversation);
     }
     pending.clear();
-    if (fresh.size === 0 || !deps.wanted()) return;
+    if (fresh.size === 0) return;
 
     if (allOut || new Set([...out, ...fresh]).size > SEPARATE) {
       for (const c of out) deps.withdraw(conversationTag(c));
       out.clear();
-      const notice = allChatsNotice(state);
+      const notice = allChatsNotice(state, deps.wanted);
       if (notice) {
         deps.show(notice);
         allOut = true;
@@ -146,7 +156,7 @@ export function createAnnouncer(deps: {
       return;
     }
     for (const c of fresh) {
-      const notice = conversationNotice(state, c);
+      const notice = conversationNotice(state, c, deps.wanted);
       if (!notice) continue;
       deps.show(notice);
       out.add(c);

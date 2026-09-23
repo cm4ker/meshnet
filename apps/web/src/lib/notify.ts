@@ -18,29 +18,17 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { anyMessageWanted, getNoticePrefs, subscribeNoticePrefs } from "./noticePrefs.js";
 import { nativePlatform, shell } from "./platform.js";
-import { readSetting, writeSetting } from "./storage.js";
 
-const MESSAGES_KEY = "meshnet.notify";
-const NODES_KEY = "meshnet.notify.nodes";
+/** What a notice is about, which on Android is its channel: the reader sets each one's sound in the system. */
+export type NoticeKind = "direct" | "chats" | "nodes";
 
-export function notificationsWanted(): boolean {
-  return readSetting<boolean>(MESSAGES_KEY, true);
-}
-
-export function setNotificationsWanted(on: boolean): void {
-  writeSetting(MESSAGES_KEY, on);
-  void tellWatch();
-}
-
-export function nodeNotificationsWanted(): boolean {
-  return readSetting<boolean>(NODES_KEY, true);
-}
-
-export function setNodeNotificationsWanted(on: boolean): void {
-  writeSetting(NODES_KEY, on);
-  void tellWatch();
-}
+const CHANNELS: { id: NoticeKind; name: string; description: string }[] = [
+  { id: "direct", name: "Direct messages", description: "A message from a person to you." },
+  { id: "chats", name: "Channels and rooms", description: "Messages in channels and rooms, or only the ones that mention you." },
+  { id: "nodes", name: "New nodes", description: "A node heard for the first time." },
+];
 
 /**
  * The iPhone's native watch (`MeshWatch.swift`): it announces what the radio
@@ -48,11 +36,14 @@ export function setNodeNotificationsWanted(on: boolean): void {
  * a few seconds for the page to announce the same thing itself.
  */
 interface MeshWatchPlugin {
-  configure(options: { messages: boolean; nodes: boolean }): Promise<void>;
+  /** `people`: only a person's radio is a new node worth a notice. */
+  configure(options: { messages: boolean; nodes: boolean; people: boolean }): Promise<void>;
   /** The page has announced this tag itself, so the watch withdraws its own notice for it. */
   announced(options: { tag: string }): Promise<void>;
   /** The radio the page is connected to, by the BLE plugin's device id; none without one. */
   follow(options: { deviceId?: string }): Promise<void>;
+  /** Opens the system's notification settings for the app. */
+  openSettings(): Promise<void>;
 }
 
 let watch: MeshWatchPlugin | null = null;
@@ -68,14 +59,21 @@ async function withWatch(use: (watch: MeshWatchPlugin) => Promise<void>): Promis
   await use(watch);
 }
 
-/** Hands the two switches to the watch, which cannot read the page's storage. */
+/**
+ * Hands the settings to the watch, which cannot read the page's storage. It
+ * cannot tell one message from another either, only that one is waiting: it
+ * announces them all while any message may ring.
+ */
 export async function tellWatch(): Promise<void> {
+  const prefs = getNoticePrefs();
   try {
-    await withWatch((w) => w.configure({ messages: notificationsWanted(), nodes: nodeNotificationsWanted() }));
+    await withWatch((w) => w.configure({ messages: anyMessageWanted(prefs), nodes: prefs.nodes !== "off", people: prefs.nodes === "people" }));
   } catch (error) {
     console.warn("Could not configure iOS background notifications", error);
   }
 }
+
+subscribeNoticePrefs(() => void tellWatch());
 
 let followed: string | null = null;
 
@@ -139,7 +137,8 @@ export async function askPermission(): Promise<boolean> {
  */
 export async function askPermissionOnce(): Promise<void> {
   if (shell() !== "capacitor") return;
-  if (!notificationsWanted() && !nodeNotificationsWanted()) return;
+  const prefs = getNoticePrefs();
+  if (!anyMessageWanted(prefs) && prefs.nodes === "off") return;
   await askPermission().catch(() => false);
 }
 
@@ -171,8 +170,44 @@ export function noticeId(tag: string): number {
 /** The browser's notices that are out, by tag, to be closed when withdrawn. */
 const shown = new Map<string, Notification>();
 
+let channels: Promise<void> | null = null;
+
+/** Android's channels, one per kind of notice, made once; making one that exists changes nothing. */
+function androidChannels(api: LocalNotificationsModule["LocalNotifications"]): Promise<void> {
+  channels ??= Promise.all(CHANNELS.map((c) => api.createChannel({ ...c, importance: 4, visibility: 0 })))
+    .then(() => undefined)
+    .catch((error) => {
+      channels = null;
+      console.warn("Could not create notification channels", error);
+    });
+  return channels;
+}
+
+/** Whether this shell can open the system's notification settings for the app. */
+export function hasNoticeSettings(): boolean {
+  return shell() === "capacitor" || (shell() === "tauri" && navigator.userAgent.includes("Windows"));
+}
+
+interface NoticesPlugin {
+  openSettings(): Promise<void>;
+}
+let notices: NoticesPlugin | null = null;
+
+/** Sound, vibration and quiet hours are the system's: this opens its page for the app. */
+export async function openNoticeSettings(): Promise<void> {
+  if (shell() === "tauri") {
+    await invoke("plugin:opener|open_url", { url: "ms-settings:notifications" });
+    return;
+  }
+  if (shell() !== "capacitor") return;
+  if (nativePlatform() === "ios") return withWatch((w) => w.openSettings());
+  const { registerPlugin } = await import("@capacitor/core");
+  notices ??= registerPlugin<NoticesPlugin>("Notices");
+  await notices.openSettings();
+}
+
 /** The caller checks preferences and whether what it announces is already on screen. */
-export async function notify(title: string, body: string, tag: string): Promise<void> {
+export async function notify(title: string, body: string, tag: string, kind: NoticeKind): Promise<void> {
   switch (shell()) {
     case "tauri":
       await invoke("announce", { title, body, tag }).catch(() => undefined);
@@ -180,8 +215,11 @@ export async function notify(title: string, body: string, tag: string): Promise<
     case "capacitor":
       try {
         const { LocalNotifications: api } = await localNotifications();
+        const android = nativePlatform() === "android";
+        if (android) await androidChannels(api);
         await api.schedule({ notifications: [{
           id: noticeId(tag), title, body, extra: { tag },
+          ...(android ? { channelId: kind } : {}),
           // Without a sound iOS delivers silently. A missing named sound
           // uses the system default; Android already supplies its own.
           ...(nativePlatform() === "ios" ? { sound: "default", foreground: true } : {}),

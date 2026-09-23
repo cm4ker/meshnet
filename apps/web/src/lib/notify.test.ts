@@ -16,7 +16,7 @@ Object.assign(Capacitor, {
   isNativePlatform: () => true,
   getPlatform: () => platform,
   PluginHeaders: [
-    { name: "LocalNotifications", methods: ["schedule", "checkPermissions", "requestPermissions", "removeDeliveredNotificationsById"].map((name) => ({ name, rtype: "promise" })) },
+    { name: "LocalNotifications", methods: ["schedule", "checkPermissions", "requestPermissions", "removeDeliveredNotificationsById", "createChannel"].map((name) => ({ name, rtype: "promise" })) },
     { name: "MeshWatch", methods: ["configure", "announced", "follow"].map((name) => ({ name, rtype: "promise" })) },
   ],
   nativePromise: async (plugin: string, method: string, options: unknown) => {
@@ -44,7 +44,7 @@ after(() => {
 });
 
 test("an iOS message reaches the native notifier with sound", async () => {
-  await notify("Field team", "New message", "c:ch:1");
+  await notify("Field team", "New message", "c:ch:1", "chats");
   assert.equal(calls[0]?.plugin, "LocalNotifications");
   assert.equal(calls[0]?.method, "schedule");
   const notice = (calls[0]?.options as ScheduleOptions).notifications[0];
@@ -54,7 +54,7 @@ test("an iOS message reaches the native notifier with sound", async () => {
 });
 
 test("an iOS notice the page shows withdraws the native watch's stand-in for it, after it is scheduled", async () => {
-  await notify("Field team", "New message", "c:ch:1");
+  await notify("Field team", "New message", "c:ch:1", "chats");
   assert.deepEqual(calls.map(({ plugin, method, options }) => ({ plugin, method, tag: method === "announced" ? options : undefined })), [
     { plugin: "LocalNotifications", method: "schedule", tag: undefined },
     { plugin: "MeshWatch", method: "announced", tag: { tag: "c:ch:1" } },
@@ -72,8 +72,8 @@ test("a phone's page is on screen while it is visible, whatever it says about fo
 });
 
 test("a notice keeps one id per tag, so the next replaces it and a withdrawal finds it", async () => {
-  await notify("Field team", "New message", "c:ch:1");
-  await notify("Field team · 2 new", "one\ntwo", "c:ch:1");
+  await notify("Field team", "New message", "c:ch:1", "chats");
+  await notify("Field team · 2 new", "one\ntwo", "c:ch:1", "chats");
   await withdraw("c:ch:1");
   const ids = calls.filter((c) => c.method === "schedule").map((c) => (c.options as ScheduleOptions).notifications[0]?.id);
   assert.deepEqual(ids, [noticeId("c:ch:1"), noticeId("c:ch:1")]);
@@ -84,7 +84,7 @@ test("a notice keeps one id per tag, so the next replaces it and a withdrawal fi
 
 test("an iOS notice is also scheduled when the page is hidden", async () => {
   page.visibilityState = "hidden";
-  await notify("Field team", "New message", "c:ch:1");
+  await notify("Field team", "New message", "c:ch:1", "chats");
   assert.equal(calls.filter((c) => c.method === "schedule").length, 1);
 });
 
@@ -99,7 +99,7 @@ test("the first connection checks and requests iOS notification permission", asy
 test("the native watch receives notification preferences without treating its proxy as a Promise", async () => {
   await tellWatch();
   assert.deepEqual(calls, [
-    { plugin: "MeshWatch", method: "configure", options: { messages: true, nodes: true } },
+    { plugin: "MeshWatch", method: "configure", options: { messages: true, nodes: true, people: true } },
   ]);
 });
 
@@ -119,9 +119,10 @@ test("the native watch follows the radio the page connected to, and a radio let 
 test("Android keeps its default sound and does not call the iOS watch", async () => {
   platform = "android";
   await tellWatch();
-  await notify("Field team", "New message", "c:ch:1");
-  assert.equal(calls.length, 1);
-  const notice = (calls[0]?.options as ScheduleOptions).notifications[0];
+  await notify("Field team", "New message", "c:ch:1", "chats");
+  assert.deepEqual(calls.map((c) => c.method), ["createChannel", "createChannel", "createChannel", "schedule"]);
+  const notice = (calls.at(-1)?.options as ScheduleOptions).notifications[0];
   assert.equal(notice?.sound, undefined);
   assert.equal(notice?.foreground, undefined);
+  assert.equal(notice?.channelId, "chats");
 });

@@ -10,6 +10,10 @@
     "blec:default",
     "serialplugin:default",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "ms-settings:notifications" }]
+    },
     "updater:allow-download",
     "updater:allow-install",
     "autostart:allow-enable",

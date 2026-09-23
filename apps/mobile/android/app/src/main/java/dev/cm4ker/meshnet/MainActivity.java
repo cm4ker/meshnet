@@ -13,6 +13,7 @@ public class MainActivity extends BridgeActivity {
         // Plugins that live in this app rather than in a package are registered by hand, before the bridge starts.
         registerPlugin(MeshTcpPlugin.class);
         registerPlugin(SystemTextPlugin.class);
+        registerPlugin(NoticesPlugin.class);
         super.onCreate(savedInstanceState);
 
         // The page draws its text at the system's size itself (SystemTextPlugin); the WebView scaling

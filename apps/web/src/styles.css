@@ -463,6 +463,12 @@ textarea.input {
   vertical-align: -1px;
   margin-left: var(--space-1);
 }
+/* A chat that rings less than the rest, or not at all. */
+.row-quiet {
+  color: var(--text-faint);
+  vertical-align: -1px;
+  margin-left: var(--space-1);
+}
 .ok {
   color: var(--success);
 }

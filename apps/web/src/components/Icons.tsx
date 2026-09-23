@@ -82,6 +82,7 @@ export const ChevronRightIcon = icon('<path d="M9 5l7 7-7 7"/>');
 export const EditIcon = icon('<path d="M4 20h4L19 9l-4-4L4 16z"/>');
 export const HashIcon = icon('<path d="M9 4L7 20M17 4l-2 16M4.5 9h15M3.5 15h15"/>');
 export const KeyIcon = icon('<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/>');
+export const BellOffIcon = icon('<path d="M8.5 5.2A6 6 0 0 1 18 11v4.5"/><path d="M6 11v5l-1.5 2H18"/><path d="M10 20.5a2 2 0 0 0 4 0"/><path d="M3.5 3.5l17 17"/>');
 export const BellIcon = icon('<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>');
 export const PaletteIcon = icon('<path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.7-.8 1.4-1.8-.4-1.2.4-2.2 1.6-2.2H18a3 3 0 0 0 3-3A9 9 0 0 0 12 3z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16" cy="11" r="1"/>');
 export const ShieldIcon = icon('<path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/>');

@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { fromHex } from "@meshnet/meshcore";
+import { channelConversation, fromHex } from "@meshnet/meshcore";
 import { openConversation } from "../lib/nav.js";
 import { session, useSession } from "../lib/session.js";
 import { act, toast } from "../lib/toast.js";
 import { Confirm } from "../ui/Dialog.js";
 import { ActionRow, Block, Group, LinkRow } from "../ui/List.js";
 import { Avatar } from "./Avatar.js";
+import { ChatNotices } from "./ChatNotices.js";
 import { CopyIcon } from "./Icons.js";
 import { Gone, ScreenHead, type Chrome } from "./ScreenHead.js";
 
@@ -38,6 +39,7 @@ export function ChannelView({ index, chrome }: { index: number; chrome: Chrome }
           <h1>{channel.name || `Channel ${channel.index}`}</h1>
           <span className="muted">Channel {channel.index} on the radio</span>
         </div>
+        <ChatNotices conversation={channelConversation(channel.index)} direct={false} />
         <Group title="Name">
           <Block>
             <input

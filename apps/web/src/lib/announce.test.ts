@@ -76,7 +76,7 @@ function initial(messages: MessageRecord[] = [], unread: Record<string, number> 
 /** The session's side, as MeshSession plays it: state, then the change, then the news. */
 let state: SessionState;
 let focused: string | null;
-let wanted: boolean;
+let wanted: (m: MessageRecord) => boolean;
 let shown: Notice[];
 let withdrawn: string[];
 let announcer: ReturnType<typeof createAnnouncer>;
@@ -107,12 +107,12 @@ function markRead(conversation: string): void {
 
 function start(from: SessionState = initial()): void {
   state = from;
-  announcer = createAnnouncer({ state: () => state, wanted: () => wanted, show: (n) => shown.push(n), withdraw: (t) => withdrawn.push(t) });
+  announcer = createAnnouncer({ state: () => state, wanted: (m) => wanted(m), show: (n) => shown.push(n), withdraw: (t) => withdrawn.push(t) });
 }
 
 beforeEach(() => {
   focused = null;
-  wanted = true;
+  wanted = () => true;
   shown = [];
   withdrawn = [];
   start();
@@ -129,7 +129,7 @@ test("the history read back at connect is not announced, unread or not", () => {
 
 test("one message is one notice: who said it and where", () => {
   drain([message("ch:0", "hi all", "Alice")]);
-  assert.deepEqual(shown, [{ title: "Alice in Public", body: "hi all", tag: "c:ch:0" }]);
+  assert.deepEqual(shown, [{ title: "Alice in Public", body: "hi all", tag: "c:ch:0", kind: "chats" }]);
 });
 
 test("a queue drained at connect is announced once it is drained, one notice per conversation", () => {
@@ -142,8 +142,8 @@ test("a queue drained at connect is announced once it is drained, one notice per
   receive(message(`c:${BOB}`, "ping"));
   set({ syncing: false });
   assert.deepEqual(shown, [
-    { title: "Public · 4 new", body: "Bob: two\nAlice: three\nCarol: four", tag: "c:ch:0" },
-    { title: "Bob", body: "ping", tag: `c:c:${BOB}` },
+    { title: "Public · 4 new", body: "Bob: two\nAlice: three\nCarol: four", tag: "c:ch:0", kind: "chats" },
+    { title: "Bob", body: "ping", tag: `c:c:${BOB}`, kind: "direct" },
   ]);
 });
 
@@ -166,7 +166,7 @@ test("news in more than three conversations is one notice for all of them", () =
     message(`c:${BOB}`, "e"),
     message(`c:${EVE}`, "f"),
   ]);
-  assert.deepEqual(shown, [{ title: "6 new messages in 5 chats", body: "Public 2, test 1, Friends 1, Bob 1, …", tag: ALL_CHATS }]);
+  assert.deepEqual(shown, [{ title: "6 new messages in 5 chats", body: "Public 2, test 1, Friends 1, Bob 1, …", tag: ALL_CHATS, kind: "chats" }]);
 });
 
 test("conversation notices already out give way to one for all when a fourth conversation has news", () => {
@@ -183,7 +183,7 @@ test("the notice for all is withdrawn when the app is opened, and news after it 
   announcer.opened();
   assert.deepEqual(withdrawn, [ALL_CHATS]);
   drain([message(`c:${EVE}`, "hello")]);
-  assert.deepEqual(shown.at(-1), { title: "Eve", body: "hello", tag: `c:c:${EVE}` });
+  assert.deepEqual(shown.at(-1), { title: "Eve", body: "hello", tag: `c:c:${EVE}`, kind: "direct" });
 });
 
 test("a conversation read anywhere loses its notice, one from an earlier run included", () => {
@@ -212,9 +212,29 @@ test("a mention is said in the notice, alone or among others", () => {
 });
 
 test("with the switch off nothing is announced, and nothing is kept for later", () => {
-  wanted = false;
+  wanted = () => false;
   drain([message("ch:0", "quiet", "Alice")]);
-  wanted = true;
+  wanted = () => true;
   set({ syncing: false });
   assert.deepEqual(shown, []);
+});
+
+test("a chat left at mentions rings for the mentions only, and counts only those", () => {
+  wanted = (m) => m.text.includes("@[Me]");
+  drain([message("ch:0", "chatter", "Alice")]);
+  assert.deepEqual(shown, []);
+  drain([message("ch:0", "@[Me] look", "Bob"), message("ch:0", "more chatter", "Carol")]);
+  assert.deepEqual(shown, [{ title: "Bob mentioned you in Public", body: "@[Me] look", tag: "c:ch:0", kind: "chats" }]);
+});
+
+test("the notice for several chats counts only what rings", () => {
+  wanted = (m) => m.conversation !== "ch:0" || m.text.includes("@[Me]");
+  drain([
+    message("ch:0", "chatter", "Alice"),
+    message("ch:1", "one", "Bob"),
+    message("ch:2", "two", "Bob"),
+    message(`c:${BOB}`, "three"),
+    message(`c:${EVE}`, "four"),
+  ]);
+  assert.deepEqual(shown.at(-1), { title: "4 new messages in 4 chats", body: "test 1, Friends 1, Bob 1, Eve 1", tag: ALL_CHATS, kind: "chats" });
 });

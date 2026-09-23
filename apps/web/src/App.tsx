@@ -6,7 +6,8 @@ import { UpdatesDialog } from "./components/Updates.js";
 import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "./lib/geo.js";
 import { useLink } from "./lib/link.js";
 import { ALL_CHATS, createAnnouncer } from "./lib/announce.js";
-import { askPermissionOnce, nodeNotificationsWanted, notificationsWanted, notify, onNotificationClick, pageOnScreen, tellWatch, withdraw } from "./lib/notify.js";
+import { getNoticePrefs, messageWanted, nodeWanted } from "./lib/noticePrefs.js";
+import { askPermissionOnce, notify, onNotificationClick, pageOnScreen, tellWatch, withdraw } from "./lib/notify.js";
 import { session, useSelector } from "./lib/session.js";
 import { isWide, subscribeWide } from "./lib/layout.js";
 import { getNav, openConversation, openProfile, shownConversation, subscribeNav } from "./lib/nav.js";
@@ -59,8 +60,8 @@ export function App() {
   useEffect(() => {
     const announcer = createAnnouncer({
       state: () => session.getState(),
-      wanted: notificationsWanted,
-      show: (notice) => void notify(notice.title, notice.body, notice.tag),
+      wanted: (message) => messageWanted(getNoticePrefs(), session.getState(), message),
+      show: (notice) => void notify(notice.title, notice.body, notice.tag, notice.kind),
       withdraw: (tag) => void withdraw(tag),
     });
     const stopReceived = session.onReceived((message) => announcer.received(message));
@@ -82,9 +83,9 @@ export function App() {
   useEffect(
     () =>
       session.onDiscovered((contact) => {
-        if (!nodeNotificationsWanted()) return;
+        if (!nodeWanted(getNoticePrefs(), contact.type)) return;
         const name = contact.name || contact.prefix;
-        void notify(`New ${KIND[contact.type] ?? "node"}: ${name}`, discoveredBody(contact), `n:${contact.key}`);
+        void notify(`New ${KIND[contact.type] ?? "node"}: ${name}`, discoveredBody(contact), `n:${contact.key}`, "nodes");
       }),
     [],
   );

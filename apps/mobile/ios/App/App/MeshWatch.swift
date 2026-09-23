@@ -64,9 +64,11 @@ final class MeshWatch: NSObject {
     }
 
     /// Which notices the reader wants, as the page's two switches say.
-    func configure(messages: Bool, nodes: Bool) {
+    /// `people`: of the new nodes, only a person's radio (a companion) is announced.
+    func configure(messages: Bool, nodes: Bool, people: Bool) {
         UserDefaults.standard.set(messages, forKey: "meshnet.watch.messages")
         UserDefaults.standard.set(nodes, forKey: "meshnet.watch.nodes")
+        UserDefaults.standard.set(people, forKey: "meshnet.watch.people")
     }
 
     private func wants(_ key: String) -> Bool {
@@ -156,6 +158,7 @@ final class MeshWatch: NSObject {
             // code, public key (32), type, flags, path length, path (64), name (32), ...
             guard wants("nodes"), frame.count >= 132 else { return }
             let bytes = [UInt8](frame)
+            if UserDefaults.standard.bool(forKey: "meshnet.watch.people"), bytes[33] != 1 { return }
             let kind = [1: "contact", 2: "repeater", 3: "room", 4: "sensor"][Int(bytes[33])] ?? "node"
             let name = String(decoding: bytes[100..<132].prefix { $0 != 0 }, as: UTF8.self)
             let key = bytes[1..<9].map { String(format: "%02x", $0) }.joined()
@@ -216,9 +219,10 @@ extension MeshWatch: CBPeripheralDelegate {
 }
 
 /// The page's way to tell the watch which notices the reader wants,
-/// `configure({ messages, nodes })`, which it has just announced itself,
+/// `configure({ messages, nodes, people })`, which it has just announced itself,
 /// `announced({ tag })`, and which radio it is connected to,
-/// `follow({ deviceId })` (none without one).
+/// `follow({ deviceId })` (none without one). `openSettings()` opens the
+/// system's notification settings for the app, where sound and quiet hours are.
 @objc(MeshWatchPlugin)
 final class MeshWatchPlugin: CAPPlugin, CAPBridgedPlugin {
     let identifier = "MeshWatchPlugin"
@@ -227,10 +231,11 @@ final class MeshWatchPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "configure", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "announced", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "follow", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openSettings", returnType: CAPPluginReturnPromise),
     ]
 
     @objc func configure(_ call: CAPPluginCall) {
-        MeshWatch.shared.configure(messages: call.getBool("messages") ?? true, nodes: call.getBool("nodes") ?? true)
+        MeshWatch.shared.configure(messages: call.getBool("messages") ?? true, nodes: call.getBool("nodes") ?? true, people: call.getBool("people") ?? false)
         call.resolve()
     }
 
@@ -247,6 +252,20 @@ final class MeshWatchPlugin: CAPPlugin, CAPBridgedPlugin {
         let id = call.getString("deviceId").flatMap { UUID(uuidString: $0) }
         DispatchQueue.main.async {
             MeshWatch.shared.follow(id)
+            call.resolve()
+        }
+    }
+
+    @objc func openSettings(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            // The app's notification page from iOS 16; before it, the app's settings, one tap away from it.
+            let page: String
+            if #available(iOS 16.0, *) {
+                page = UIApplication.openNotificationSettingsURLString
+            } else {
+                page = UIApplication.openSettingsURLString
+            }
+            if let url = URL(string: page) { UIApplication.shared.open(url) }
             call.resolve()
         }
     }

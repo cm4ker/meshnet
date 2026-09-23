@@ -4,6 +4,7 @@ import { ago } from "../lib/format.js";
 import { summarize, type ConversationSummary } from "../lib/conversations.js";
 import { useDraft } from "../lib/drafts.js";
 import { openConversation, setStack } from "../lib/nav.js";
+import { useNoticePrefs } from "../lib/noticePrefs.js";
 import { usePress } from "../lib/press.js";
 import { session, useSession } from "../lib/session.js";
 import { toast } from "../lib/toast.js";
@@ -11,7 +12,7 @@ import { IconButton } from "../ui/Button.js";
 import { Confirm } from "../ui/Dialog.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
-import { CheckIcon, HashIcon, PersonIcon, PlusIcon, SearchIcon, StarFilledIcon, TrashIcon } from "./Icons.js";
+import { BellOffIcon, CheckIcon, HashIcon, PersonIcon, PlusIcon, SearchIcon, StarFilledIcon, TrashIcon } from "./Icons.js";
 import { NewChat } from "./NewChat.js";
 
 /** Asks the chat list to open its New chat sheet, from a shortcut or the palette. */
@@ -93,6 +94,7 @@ function ChatRow({ row, radio, selected, onDelete }: { row: ConversationSummary;
     showMenu(items.filter((x): x is MenuItem => x !== null), { title: row.title, at });
   });
   const swipe = useSwipe();
+  const own = useNoticePrefs().chat[row.id];
   return (
     <li className="swipe" ref={swipe.ref}>
       <button type="button" className="swipe-action" tabIndex={-1} onClick={() => { swipe.close(); onDelete(); }}>
@@ -105,6 +107,7 @@ function ChatRow({ row, radio, selected, onDelete }: { row: ConversationSummary;
             <span className="row-title">
               {row.title}
               {row.contact && isFavourite(row.contact) ? <StarFilledIcon size={11} className="star" /> : null}
+              {own === "off" || own === "mentions" ? <BellOffIcon size={12} className="row-quiet" aria-label={own === "off" ? "Notifications off" : "Notifications for mentions only"} /> : null}
             </span>
             {row.lastAt ? <span className="row-when muted">{ago(row.lastAt)}</span> : null}
           </span>
