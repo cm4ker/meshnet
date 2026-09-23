@@ -98,7 +98,7 @@ Download the [rolling development build](https://github.com/cm4ker/meshnet/relea
 ¹ Browser connections depend on browser and OS support. Use Chrome or Edge where the relevant API is available. Wi-Fi connections require companion firmware built with Wi-Fi support; the default TCP port is `5000`.
 
 1. Use a radio running **MeshCore companion firmware**.
-2. Choose an available connection method and connect to the radio. For Bluetooth, enter its pairing PIN when prompted.
+2. Choose an available connection method and connect to the radio. For Bluetooth, enter its pairing PIN when prompted. On Windows, if no prompt appears and the connection fails, pair the radio in the system Bluetooth settings (see “Bluetooth pairing” below).
 3. Meshnet loads contacts and channels and reads queued messages. Open **Chats** to talk, **Mesh** to explore and **Radio** to configure the device.
 
 **No radio yet?** Run the web client below, open [localhost:5180/?demo](http://localhost:5180/?demo), select **Demo** and connect to **MeshCore-demo**.
@@ -191,7 +191,8 @@ App artwork has one source: `apps/web/public/icon.svg`. After changing it, run `
 <details>
 <summary><strong>Bluetooth pairing and USB firmware</strong></summary>
 
-- **Windows:** the app handles PIN pairing for the encrypted UART service and can replace a stale bond after a radio reset or reflash. Its native GATT implementation reads the Windows characteristic cache after pairing.
+- **Windows:** the radio only lets a paired computer use its UART service. With no pairing, the app asks for the PIN — shown on the radio's screen, or `123456` on a radio without one unless changed — pairs, and connects again. It also replaces a stale bond after a radio reset or reflash. Its native GATT implementation reads the Windows characteristic cache after pairing.
+- **Windows, if no PIN prompt appears:** open **Settings → Bluetooth & devices → Add device → Bluetooth**, pick the radio and enter the same PIN, then connect in Meshnet. After a radio reset or reflash, remove it there first. In a browser (Web Bluetooth), pair the radio in the system beforehand.
 - **nRF52 USB:** boards such as T-Echo, RAK4631 and Heltec T114 need the **`_usb` firmware build** for a USB connection. The `_ble` build's serial port does not carry the companion protocol.
 - **Android:** the BLE plugin requests an MTU of 512 bytes; companion frames can be up to 176 bytes. The system pairing prompt handles the PIN.
 - **iOS:** the shell enables `bluetooth-central` background mode to support the connection while switching apps.
