@@ -7,7 +7,7 @@ import { setLookalikePrefs, useLookalikePrefs } from "../lib/lookalikes.js";
 import type { RadioPage } from "../lib/nav.js";
 import { setNoticePrefs, useNoticePrefs, type NoticePrefs } from "../lib/noticePrefs.js";
 import { askPermission, hasNoticeSettings, openNoticeSettings } from "../lib/notify.js";
-import { shell } from "../lib/platform.js";
+import { nativePlatform, shell } from "../lib/platform.js";
 import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
 import { session, storage, useSession } from "../lib/session.js";
 import { act, toast } from "../lib/toast.js";
@@ -25,6 +25,7 @@ import { Readings } from "./Readings.js";
 import { ScreenHead, type Chrome } from "./ScreenHead.js";
 import { UpdateButton } from "./Updates.js";
 import { useDesktopUpdateInfo } from "../lib/updates.js";
+import { PrivacyButton } from "./Privacy.js";
 
 type Self = NonNullable<SessionState["self"]>;
 
@@ -209,7 +210,8 @@ function NamePage({ self, online }: { self: Self; online: boolean }) {
       <Group title="Position">
         <CommitField label="Latitude" value={String(self.lat)} inputMode="decimal" disabled={!online} check={number(-90, 90, "Latitude")} onCommit={(t) => session.setLocation(Number(t), self.lon)} />
         <CommitField label="Longitude" value={String(self.lon)} inputMode="decimal" disabled={!online} check={number(-180, 180, "Longitude")} onCommit={(t) => session.setLocation(self.lat, Number(t))} />
-        {"geolocation" in navigator ? <ActionRow label="Use this device's position" disabled={!online} onClick={locate} /> : null}
+        {/* Android location permissions are limited to legacy BLE scanning; positions remain editable manually. */}
+        {nativePlatform() !== "android" && "geolocation" in navigator ? <ActionRow label="Use this device's position" disabled={!online} onClick={locate} /> : null}
         <SwitchRow
           label="Share it in adverts"
           hint="Others see this radio on their map."
@@ -542,10 +544,11 @@ function AboutPage() {
   const info = useDesktopUpdateInfo();
   return <>
     <Group note="A companion for MeshCore radios. Messages stay on this device; the radio keeps only what has not been read yet.">
-      <InfoRow label="Meshnet" icon={<img src="./icon.svg" alt="" width={24} height={24} />}>{info.version}</InfoRow>
+      <InfoRow label={shell() === "capacitor" ? "Ommesh" : "Meshnet"} icon={<img src="./icon.svg" alt="" width={24} height={24} />}>{info.version}</InfoRow>
       <InfoRow label="Running in">{shell() === "tauri" ? "the desktop shell" : shell() === "capacitor" ? "the phone shell" : "a browser"}</InfoRow>
     </Group>
     <UpdateButton />
+    <PrivacyButton />
   </>;
 }
 

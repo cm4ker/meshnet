@@ -1,0 +1,1 @@
+Сообщения, карта mesh-сети и управление радио MeshCore по Bluetooth или Wi-Fi.

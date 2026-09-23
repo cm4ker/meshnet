@@ -3,6 +3,11 @@ dist/
 *.tsbuildinfo
 .env
 *.log
+*.jks
+*.keystore
+*.p12
+apps/mobile/android/keystore.properties
+google-play-service-account*.json
 
 # The Rust build directory for the desktop shell. Gigabytes of it.
 apps/desktop/src-tauri/target/

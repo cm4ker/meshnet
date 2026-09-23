@@ -20,6 +20,7 @@
     "desktop:bundle": "pnpm --filter @meshnet/desktop desktop:bundle",
     "mobile:sync": "pnpm --filter @meshnet/mobile sync",
     "android": "pnpm --filter @meshnet/mobile android",
+    "android:aab": "pnpm --filter @meshnet/mobile android:aab",
     "ios": "pnpm --filter @meshnet/mobile ios"
   },
   "devDependencies": {

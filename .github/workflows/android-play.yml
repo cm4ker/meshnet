@@ -1,0 +1,185 @@
+name: Google Play
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/android-play.yml'
+      - 'apps/mobile/**'
+      - 'apps/web/**'
+      - 'packages/meshcore/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: 'Unused Android versionCode, greater than every previous Play upload'
+        required: true
+        type: string
+      upload:
+        description: 'Upload to Play (disable for the first bundle before Console setup)'
+        type: boolean
+        default: true
+      track:
+        description: 'Play track; production affects public users when completed'
+        type: choice
+        options: [internal, alpha, beta, production]
+        default: internal
+      status:
+        description: 'draft saves a draft; completed releases to the selected track after Play checks'
+        type: choice
+        options: [draft, completed]
+        default: draft
+      send_for_review:
+        description: 'Send changes for Google review (disable if Console requires a manual review submission)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-play-${{ github.event_name == 'pull_request' && github.ref || 'release' }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Typecheck and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  verify-android:
+    name: Verify Android release without publishing
+    if: github.event_name == 'pull_request'
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Validate release build using a disposable key
+        shell: bash
+        env:
+          ANDROID_VERSION_CODE: '1'
+          ANDROID_KEYSTORE_PASSWORD: validation-only
+          ANDROID_KEY_PASSWORD: validation-only
+          ANDROID_KEY_ALIAS: validation-only
+        run: |
+          set -euo pipefail
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/validation-only.jks"
+          trap 'rm -f -- "$ANDROID_KEYSTORE_PATH"' EXIT
+          keytool -genkeypair -keystore "$ANDROID_KEYSTORE_PATH" \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD -keypass:env ANDROID_KEY_PASSWORD \
+            -alias validation-only -dname 'CN=CI validation only' \
+            -keyalg RSA -keysize 2048 -validity 2 -noprompt
+          pnpm android:aab
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-release-lint
+          path: apps/mobile/android/app/build/reports/lint-results-release.*
+          if-no-files-found: ignore
+
+  bundle:
+    name: Signed Ommesh AAB
+    if: github.event_name == 'workflow_dispatch'
+    needs: check
+    runs-on: ubuntu-latest
+    environment: google-play
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Build and verify signed bundle
+        env:
+          ANDROID_VERSION_CODE: ${{ inputs.version_code }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${ANDROID_KEYSTORE_BASE64:?Missing upload keystore secret}"
+          : "${ANDROID_KEYSTORE_PASSWORD:?Missing keystore password secret}"
+          : "${ANDROID_KEY_ALIAS:?Missing key alias secret}"
+          : "${ANDROID_KEY_PASSWORD:?Missing key password secret}"
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/ommesh-upload.jks"
+          trap 'rm -f -- "$ANDROID_KEYSTORE_PATH"' EXIT
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          pnpm android:aab
+          jarsigner -verify apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ommesh-google-play-${{ inputs.version_code }}
+          path: apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 30
+
+  upload:
+    name: Upload to Play (${{ inputs.track }}, ${{ inputs.status }})
+    if: github.event_name == 'workflow_dispatch' && inputs.upload
+    needs: bundle
+    runs-on: ubuntu-latest
+    # Configure reviewers on this environment if production needs a release manager.
+    environment: ${{ inputs.track == 'production' && 'google-play-production' || 'google-play' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ommesh-google-play-${{ inputs.version_code }}
+          path: play-bundle
+      - name: Prepare localized release notes
+        shell: bash
+        run: |
+          mkdir -p play-notes
+          cp docs/google-play/en-US/release-notes.txt play-notes/whatsnew-en-GB
+          cp docs/google-play/en-US/release-notes.txt play-notes/whatsnew-en-US
+          cp docs/google-play/ru-RU/release-notes.txt play-notes/whatsnew-ru-RU
+      - name: Upload bundle and release notes
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1, node24
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: dev.cm4ker.meshnet
+          releaseFiles: play-bundle/app-release.aab
+          tracks: ${{ inputs.track }}
+          status: ${{ inputs.status }}
+          whatsNewDirectory: play-notes
+          changesNotSentForReview: ${{ !inputs.send_for_review }}

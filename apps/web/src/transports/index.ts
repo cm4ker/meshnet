@@ -33,7 +33,8 @@ export function connectors(): Connector[] {
       if (hasWebBluetooth()) list.push(webBluetoothConnector);
       if (hasWebSerial()) list.push(webSerialConnector);
   }
-  if (demoWanted()) list.push(demoConnector);
+  // Available to phone users and store reviewers without a radio or a special URL.
+  if (shell() === "capacitor" || demoWanted()) list.push(demoConnector);
   return list;
 }
 

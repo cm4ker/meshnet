@@ -1,0 +1,28 @@
+Ommesh is a companion for MeshCore LoRa radios. Connect a compatible radio over Bluetooth LE or Wi-Fi/TCP to exchange messages, explore nearby nodes and manage your radio from your phone.
+
+A compatible radio running MeshCore companion firmware is required for real mesh communication. No radio yet? Choose Demo on the connection screen to explore with simulated contacts and messages.
+
+MESSAGES
+• Direct conversations, channels and rooms.
+• Delivery feedback, retries and message route details.
+• Local conversation history stored separately for each radio.
+
+EXPLORE THE MESH
+• See nodes that share their position on a map.
+• Inspect routes, signal quality and node telemetry.
+• Ping repeaters and explore terrain profiles along radio paths.
+• Reuse previously viewed map and elevation tiles from the local cache.
+
+MANAGE YOUR RADIO
+• Change radio settings and contact preferences.
+• Administer compatible repeaters, rooms and sensors when you have their credentials.
+• Inspect radio traffic and diagnostic logs.
+
+MADE FOR YOUR PHONE
+• Light and dark themes with adjustable text size.
+• Optional local notifications for messages and discovered nodes.
+• No Ommesh account, advertising or analytics SDK.
+
+Mesh messaging uses your connected radio; it does not need an internet connection. Loading new map or elevation areas does require internet access. Wi-Fi connections require compatible companion firmware with TCP support. Android USB connections are not supported.
+
+Ommesh is the mobile version of the Meshnet project. The app interface is currently in English. Radio range and delivery depend on your hardware, configuration and local mesh.

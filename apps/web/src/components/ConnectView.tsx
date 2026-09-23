@@ -7,6 +7,7 @@ import { Prompt } from "../ui/Dialog.js";
 import { Input, Toggle } from "../ui/Field.js";
 import { LinkIcon } from "./Icons.js";
 import { UpdateButton } from "./Updates.js";
+import { PrivacyButton } from "./Privacy.js";
 
 export function ConnectView() {
   const list = useMemo(connectors, []);
@@ -23,7 +24,7 @@ export function ConnectView() {
         <header className="connect-head">
           <img src="./icon.svg" alt="" width={40} height={40} />
           <div>
-            <h1>Meshnet</h1>
+            <h1>{shell() === "capacitor" ? "Ommesh" : "Meshnet"}</h1>
             <p className="muted">A MeshCore companion.</p>
           </div>
         </header>
@@ -69,6 +70,7 @@ export function ConnectView() {
           }}
         />
         <UpdateButton />
+        <PrivacyButton />
       </div>
     </div>
   );
