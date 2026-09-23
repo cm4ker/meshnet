@@ -21,3 +21,19 @@ export function parseSecret(text: string): string | null {
   const hex = text.replace(/[\s-]+/g, "").toLowerCase();
   return /^[0-9a-f]{32}$/.test(hex) ? hex : null;
 }
+
+/**
+ * A public channel's name as it is keyed: one leading "#", lower case, no
+ * spaces; null when nothing is left. Everyone who types "#Berlin" or "berlin"
+ * lands on the same channel.
+ */
+export function hashtagName(text: string): string | null {
+  const bare = text.trim().replace(/^#+/, "").replace(/\s+/g, "").toLowerCase();
+  return bare ? `#${bare}` : null;
+}
+
+/** A public channel's key: the first 16 bytes of SHA-256 of its name, "#" included, as MeshCore derives it. */
+export async function hashtagSecret(name: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(name)));
+  return Array.from(digest.subarray(0, 16), (b) => b.toString(16).padStart(2, "0")).join("");
+}

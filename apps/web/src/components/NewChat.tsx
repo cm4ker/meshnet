@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { channelConversation, contactConversation, fromHex, isConversationType, isFavourite } from "@meshnet/meshcore";
-import { freeChannelIndex, parseSecret, randomSecret } from "../lib/channels.js";
+import { freeChannelIndex, hashtagName, hashtagSecret, parseSecret, randomSecret } from "../lib/channels.js";
 import { openConversation } from "../lib/nav.js";
 import { heardAt, kindLabel } from "../lib/nodes.js";
 import { routeWords } from "../lib/routes.js";
@@ -9,27 +9,30 @@ import { Button } from "../ui/Button.js";
 import { Group, LinkRow } from "../ui/List.js";
 import { Sheet } from "../ui/Sheet.js";
 import { Avatar } from "./Avatar.js";
-import { HashIcon, KeyIcon, PersonIcon, SearchIcon } from "./Icons.js";
+import { HashIcon, KeyIcon, PersonIcon, PlusIcon, SearchIcon } from "./Icons.js";
 
-type Step = "menu" | "people" | "create" | "join";
+type Step = "menu" | "people" | "public" | "create" | "join";
 
-/** Three ways to start talking: to someone the radio has heard, on a new channel, or on one someone shared. */
+/** Four ways to start talking: to someone the radio has heard, on a public channel known by name, on one someone shared, or on a new one. */
 export function NewChat({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [step, setStep] = useState<Step>("menu");
   useEffect(() => {
     if (open) setStep("menu");
   }, [open]);
-  const title = step === "people" ? "Message someone" : step === "create" ? "Create a channel" : step === "join" ? "Join a channel" : "New chat";
+  const title = step === "people" ? "Message someone" : step === "public" ? "Join a public #channel" : step === "create" ? "Create a channel" : step === "join" ? "Join a private channel" : "New chat";
   return (
     <Sheet open={open} onClose={onClose} title={title}>
       {step === "menu" ? (
         <Group>
           <LinkRow icon={<PersonIcon size={18} />} label="Message someone" hint="A person or a room the radio has heard" onClick={() => setStep("people")} />
-          <LinkRow icon={<HashIcon size={18} />} label="Create a channel" hint="A new key, to share with the people you want in" onClick={() => setStep("create")} />
-          <LinkRow icon={<KeyIcon size={18} />} label="Join a channel" hint="With the name and key someone sent you" onClick={() => setStep("join")} />
+          <LinkRow icon={<HashIcon size={18} />} label="Join a public #channel" hint="Only its name, like #berlin" onClick={() => setStep("public")} />
+          <LinkRow icon={<KeyIcon size={18} />} label="Join a private channel" hint="With the name and key someone sent you" onClick={() => setStep("join")} />
+          <LinkRow icon={<PlusIcon size={18} />} label="Create a channel" hint="A new key, to share with the people you want in" onClick={() => setStep("create")} />
         </Group>
       ) : step === "people" ? (
         <People onDone={onClose} />
+      ) : step === "public" ? (
+        <PublicChannelForm onDone={onClose} />
       ) : (
         <ChannelForm join={step === "join"} onDone={onClose} />
       )}
@@ -79,6 +82,88 @@ function People({ onDone }: { onDone: () => void }) {
         </ul>
       )}
     </>
+  );
+}
+
+/**
+ * A public channel: the name is all there is, its key is derived from it, so
+ * anyone who knows "#berlin" reads it. The key is shown so two people can
+ * compare it with another app's. A channel the radio already has is opened.
+ */
+function PublicChannelForm({ onDone }: { onDone: () => void }) {
+  const state = useSession();
+  const [text, setText] = useState("");
+  const [key, setKey] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const index = freeChannelIndex(state);
+  const name = hashtagName(text);
+  const existing = name ? state.channels.find((c) => c.name.toLowerCase() === name) : undefined;
+
+  useEffect(() => {
+    let live = true;
+    setKey(null);
+    if (name) void hashtagSecret(name).then((k) => live && setKey(k));
+    return () => {
+      live = false;
+    };
+  }, [name]);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!name) return;
+    if (existing) {
+      openConversation(channelConversation(existing.index));
+      onDone();
+      return;
+    }
+    if (index < 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await session.setChannel(index, name, fromHex(await hashtagSecret(name)));
+      openConversation(channelConversation(index));
+      onDone();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (index < 0 && !existing) return <p className="group-note">Every channel slot on the radio is taken. Remove one from its channel page first.</p>;
+
+  return (
+    <form className="stack sheet-form" onSubmit={submit}>
+      <label className="field">
+        <span className="field-label">Name</span>
+        <span className="input-prefixed">
+          <span className="input-prefix" aria-hidden="true">#</span>
+          <input
+            className="input"
+            value={text.replace(/^#+/, "")}
+            maxLength={30}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="berlin"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            autoFocus
+          />
+        </span>
+        <span className="field-hint">{existing ? "The radio already has this channel." : "Everyone who knows the name can read it."}</span>
+      </label>
+      {key ? (
+        <div className="field">
+          <span className="field-label">Key, from the name</span>
+          <span className="key-text mono muted">{key.match(/.{4}/g)!.join(" ")}</span>
+        </div>
+      ) : null}
+      {error ? <p className="connect-error">{error}</p> : null}
+      <Button variant="primary" size="lg" type="submit" busy={busy} disabled={!name || state.status !== "ready"}>
+        {existing ? "Open" : "Join"}
+      </Button>
+    </form>
   );
 }
 

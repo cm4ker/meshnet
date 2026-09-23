@@ -298,6 +298,22 @@ code,
 .input:disabled {
   opacity: 0.6;
 }
+/* A fixed first character inside the field, as the "#" of a public channel's name. */
+.input-prefixed {
+  position: relative;
+  display: block;
+}
+.input-prefix {
+  position: absolute;
+  left: var(--space-2);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.input-prefixed .input {
+  padding-left: calc(var(--space-2) + 1ch);
+}
 .select {
   appearance: auto;
 }
