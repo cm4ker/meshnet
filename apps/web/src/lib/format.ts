@@ -58,6 +58,22 @@ export function initials(name: string): string {
   return (words[0]![0]! + words[1]![0]!).toUpperCase();
 }
 
+const graphemes = typeof Intl !== "undefined" && "Segmenter" in Intl ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
+
+/**
+ * The emoji a name ends with, "Fox 🦊" gives "🦊", for the node's circle as
+ * the official app draws it; null when it ends otherwise. A symbol drawn as
+ * text by default, such as "©", does not count unless it asks to be an emoji.
+ */
+export function trailingEmoji(name: string): string | null {
+  const text = name.trimEnd();
+  if (!text || !graphemes) return null;
+  let last = "";
+  for (const { segment } of graphemes.segment(text)) last = segment;
+  if (/\p{Regional_Indicator}/u.test(last)) return last;
+  return /\p{Extended_Pictographic}/u.test(last) && (/\p{Emoji_Presentation}/u.test(last) || last.includes("\uFE0F")) ? last : null;
+}
+
 /** A stable hue from a name, for the swatch behind its initials. */
 export function hue(seed: string): number {
   let h = 0;
