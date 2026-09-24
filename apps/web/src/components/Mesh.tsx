@@ -13,18 +13,18 @@ import { useHears } from "../lib/hears.js";
 import { legId, useLegVerdicts } from "../lib/legVerdicts.js";
 import type { LinkRadio } from "../lib/los.js";
 import { useDiscovery } from "../lib/discovery.js";
-import { contactEnd, defaultHeight, discoveryOverlay, EMPTY_OVERLAY, editOverlay, hearsOverlay, losOverlay, relayOf, routeOverlay, selfEnd, type MapHandle, type MapOverlay } from "../lib/mapOverlay.js";
+import { contactEnd, defaultHeight, discoveryOverlay, EMPTY_OVERLAY, editOverlay, hearsOverlay, losOverlay, relayOf, routeOverlay, selfEnd, spanOverlay, type MapHandle, type MapOverlay } from "../lib/mapOverlay.js";
 import { useMeshTool, type LosEnd } from "../lib/meshTool.js";
 import { focusOnMap, openConversation, openProfile, useNav } from "../lib/nav.js";
 import { heardAt as heard, kindLabel } from "../lib/nodes.js";
-import { usePing, measuredLegs } from "../lib/ping.js";
+import { usePing, measuredLegs, spanKey } from "../lib/ping.js";
 import { routeWords } from "../lib/routes.js";
 import { useSavedPasswords } from "../lib/secrets.js";
 import { openCleanUp } from "../lib/cleanUp.js";
 import { isYours, memoryTight, memoryUse } from "../lib/tidy.js";
 import { session, useSelector, useSession } from "../lib/session.js";
 import { act } from "../lib/toast.js";
-import { closeTool, dropOnRoute, lineOfSightTo, openLineOfSight, tapInRoute, whoHearsMe } from "../lib/toolActions.js";
+import { closeTool, dropOnRoute, lineOfSightTo, openLineOfSight, tapInRoute, tapInSpan, whoHearsMe } from "../lib/toolActions.js";
 import { getTextScale, subscribeTextSize } from "../theme/textSize.js";
 import { IconButton } from "../ui/Button.js";
 import { AirMark, Group } from "../ui/List.js";
@@ -327,8 +327,8 @@ const NodeRow = memo(function NodeRow({ contact: c, selected, yours, onOpen, log
  */
 function useMeshOverlay(selected: string | null, state: SessionState): MapOverlay {
   const tool = useMeshTool();
-  const focus = tool?.kind === "route" ? tool.key : selected;
-  const ping = usePing(focus);
+  const focus = tool?.kind === "route" ? tool.key : tool?.kind === "span" ? tool.from : selected;
+  const ping = usePing(tool?.kind === "span" ? (tool.to ? spanKey(tool.from, tool.to) : null) : focus);
   const discovery = useDiscovery(focus);
   const hears = useHears();
   const self = state.self;
@@ -355,6 +355,8 @@ function useMeshOverlay(selected: string | null, state: SessionState): MapOverla
         ? editOverlay(tool.key, tool.draft, state, new Set(blockedKey ? blockedKey.split(";") : []), ping)
         : tool?.kind === "hears"
           ? hearsOverlay(hears, state)
+          : tool?.kind === "span"
+            ? spanOverlay(tool.from, tool.to, state, ping)
           : focus
             ? discovery && (discovery.running || discovery.found) && discovery.at >= (ping?.at ?? 0)
               ? discoveryOverlay(focus, state, discovery)
@@ -372,13 +374,13 @@ export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zo
   const saved = useSavedPasswords();
   const { kind, query } = useFilter();
   const tool = useMeshTool();
-  const ping = usePing(selected);
+  const ping = usePing(tool?.kind === "span" ? (tool.to ? spanKey(tool.from, tool.to) : null) : selected);
   const overlay = useMeshOverlay(selected, state);
   // The map redraws markers when the filter function changes, so it changes only with what it filters by.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const test = useCallback(matcher(state, saved, kind, query), [state.logins, state.statusHistory, saved, kind, query]);
   const pick = (key: string | null) => {
-    if (tapInRoute(key, state)) return;
+    if (tapInRoute(key, state) || tapInSpan(key, state)) return;
     // A tap on the empty map puts a line of sight away, as it puts away a picked node.
     if (key === null && tool && tool.kind !== "route") closeTool();
     onSelect(key);
@@ -386,10 +388,11 @@ export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zo
   const leg = (from: LosEnd, to: LosEnd) => {
     // The legs of a pinged route carry what the ping measured on them.
     const back = tool?.kind === "los" ? tool.back : selected;
-    let heard: [number, number] | null = null;
-    if ((!tool || (tool.kind === "route" && !tool.draft)) && selected && ping && !ping.via) {
-      const relays = ping.targetInChain ? ping.chain.slice(0, -1) : ping.chain;
-      const keys = ["self", ...relays.map((h) => relayOf(h, state.contacts)?.key ?? h), selected];
+    let heard: [number, number | null] | null = null;
+    const span = tool?.kind === "span";
+    if ((!tool || (tool.kind === "route" && !tool.draft) || span) && (selected || span) && ping && !ping.via) {
+      const relays = span || !ping.targetInChain ? ping.chain : ping.chain.slice(0, -1);
+      const keys = ["self", ...relays.map((h) => relayOf(h, state.contacts)?.key ?? h), ...(span ? [] : [selected])];
       const index = keys.findIndex((k, i) => k === from.key && keys[i + 1] === to.key);
       heard = index >= 0 ? (measuredLegs(ping)[index] ?? null) : null;
     }

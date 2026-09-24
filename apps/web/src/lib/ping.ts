@@ -1,23 +1,30 @@
 /**
- * Pings to repeaters and checks of routes to people, kept per contact while
- * the app runs: five traces out along the route and back, one in flight at a
- * time, and on request one hop further at a time to find where a route
- * breaks. The route is the one the radio holds, or one being changed on the
- * map. Only a tap starts either; nothing here repeats on its own.
+ * Checks of the way to a contact, kept per contact while the app runs, and
+ * of the way between two repeaters. A check sends five traces out along the
+ * route and back, one at a time. When the first two stay silent it stops,
+ * finds where the way breaks by halving it, and then looks for a way round
+ * in the link book (lib/linkGraph.ts), trying at most four, one trace each.
+ * A way that comes back becomes the route, and the one before can be put
+ * back. A route being changed on the map is checked the same way, but only
+ * to see where it breaks: a way round is not looked for.
+ *
+ * Only a tap starts any of it; nothing here repeats on its own.
  */
 
 import { useSyncExternalStore } from "react";
-import { AdvType, traceLegs } from "@meshnet/meshcore";
+import { AdvType, contactRoute, isConversationType, traceLegs, type SessionState } from "@meshnet/meshcore";
+import { buildGraph, findWay, isUnresolved, linkId, locateBreak, planWay, resolver, SELF, tracedLegs, wayLinks, type Graph, type PlannedWay, type WayOptions } from "./linkGraph.js";
+import { linkBook, noteBreak, noteTrace } from "./links.js";
 import { session } from "./session.js";
 
 export const ROUNDS = 5;
-/** A hop that stays silent this many times is where the route breaks. */
-const TRIES = 2;
+/** Ways a search tries, one trace each, before it gives up: about a flood's worth of air. */
+export const TRIES = 4;
 /** Between one trace coming back and the next going out, so the relays' queues drain. */
 const GAP_MS = 300;
 
-/** How one leg sounded: the SNR at its far end going out, at its near end coming back. */
-export type Leg = [out: number, back: number];
+/** How one leg sounded: the SNR at its far end going out, at its near end coming back; null when it came home another way. */
+export type Leg = [out: number, back: number | null];
 
 export interface PingRun {
   ok: boolean;
@@ -26,14 +33,25 @@ export interface PingRun {
   legs: Leg[];
 }
 
-export interface HopCheck {
-  state: "waiting" | "trying" | "ok" | "silent";
-  tries: number;
-  /** The leg ending at this hop, once it answered. */
-  leg: Leg | null;
+/** A look for a way round a break, or for a way at all. */
+export interface Search {
+  total: number;
+  /** Each way tried, in order: whether it came back. */
+  tries: boolean[];
+  /** The ways that stayed silent, out as hashes. */
+  tried: string[][];
+  /** The way on its way now, out as hashes. */
+  trying: string[] | null;
+  /** The way the one found came home, relays as hashes nearest the turn first; null when it came back the way it went. */
+  back: string[] | null;
+  found: boolean;
+  /** The route held before the one found was written, to put back; absent when nothing was written. */
+  before?: { relays: string[] | null; since: number | null };
+  done: boolean;
 }
 
 export interface Ping {
+  /** A contact's key, or `spanKey(a, b)` for the way between two repeaters. */
   key: string;
   /** What was traced: the relays, then the node itself when it relays too. */
   chain: string[];
@@ -41,10 +59,15 @@ export interface Ping {
   targetInChain: boolean;
   /** The relays of a route being changed that it went along, as hashes; null for the route the radio holds. */
   via: string[] | null;
-  mode: "rounds" | "hops";
+  /** Where along `chain` the part asked about starts: the legs after `chain[from]` count. -1 counts them all. */
+  from: number;
   runs: PingRun[];
-  hops: HopCheck[] | null;
   running: boolean;
+  /** What a running check is doing: going round, finding the break, trying other ways. */
+  stage: "rounds" | "locate" | "search" | null;
+  /** The chain a check broke on, and the leg it broke at: leg i ends at `chain[i]`. */
+  broken: { chain: string[]; at: number } | null;
+  search: Search | null;
   error: string | null;
   at: number;
 }
@@ -54,7 +77,7 @@ const listeners = new Set<() => void>();
 const stopped = new Set<string>();
 
 function publish(ping: Ping): void {
-  pings.set(ping.key, { ...ping });
+  pings.set(ping.key, { ...ping, search: ping.search ? { ...ping.search } : null });
   for (const listener of listeners) listener();
 }
 
@@ -72,7 +95,35 @@ export function getPing(key: string): Ping | null {
   return pings.get(key) ?? null;
 }
 
+/** The key a check of the way between two repeaters is kept under. */
+export function spanKey(from: string, to: string): string {
+  return `span:${from}:${to}`;
+}
+
+function spanEnds(key: string): [string, string] | null {
+  const m = /^span:([0-9a-f]+):([0-9a-f]+)$/.exec(key);
+  return m ? [m[1]!, m[2]!] : null;
+}
+
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** The size a route to `key` is written at, in bytes: that of the route held, else the radio's own. */
+function hashSize(state: SessionState, key: string | null): number {
+  const held = key && state.contacts[key] ? contactRoute(state.contacts[key]) : null;
+  return held?.[0] ? held[0].length / 2 : (state.device?.pathHashMode ?? 0) + 1;
+}
+
+/** A node of the graph as a trace names it: a key cut to the size, or a hash long enough. */
+function hashOf(node: string, size: number): string | null {
+  if (node === SELF) return null;
+  const hex = isUnresolved(node) ? node.slice(1) : node;
+  return hex.length >= size * 2 ? hex.slice(0, size * 2) : null;
+}
+
+function hashesOf(nodes: string[], size: number): string[] | null {
+  const out = nodes.map((n) => hashOf(n, size));
+  return out.every((h): h is string => h !== null) ? out : null;
+}
 
 /** The way a trace to this contact goes along relays given by hand: through them, and on to it when it relays too. */
 function pathVia(key: string, via: string[]): { relays: string[]; target: string | null } | null {
@@ -83,86 +134,257 @@ function pathVia(key: string, via: string[]): { relays: string[]; target: string
   return { relays: via, target: contact.type === AdvType.Repeater ? key.slice(0, size * 2) : null };
 }
 
-async function begin(key: string, mode: Ping["mode"], via: string[] | null): Promise<Ping | null> {
-  stopped.delete(key);
-  const base: Ping = { key, chain: [], targetInChain: false, via, mode, runs: [], hops: null, running: true, error: null, at: Date.now() };
-  publish(base);
-  try {
-    const path = via ? pathVia(key, via) : await session.pingPath(key);
-    if (!path) {
-      publish({ ...base, running: false, error: "No route to it is known yet. It shows up with its next advert, or after a message." });
-      return null;
-    }
-    const chain = path.target ? [...path.relays, path.target] : path.relays;
-    if (chain.length === 0) {
-      publish({ ...base, running: false, error: "Heard direct: there is nobody between you to check." });
-      return null;
-    }
-    const ping = { ...base, chain, targetInChain: path.target !== null };
-    publish(ping);
-    return ping;
-  } catch (error) {
-    publish({ ...base, running: false, error: (error as Error).message });
-    return null;
-  }
+/**
+ * The way to check between two repeaters: to the first along the route held
+ * to it, or the likeliest way the book knows, then on to the second the
+ * likeliest way. Null when the book knows no way.
+ */
+function spanPath(from: string, to: string, g: Graph, avoid: Set<string> = new Set(), doubt?: Map<string, number>): { chain: string[]; from: number } | null {
+  const state = session.getState();
+  const size = hashSize(state, null);
+  // The route held to the first leads there unless what the radio has heard since says otherwise.
+  const held = state.contacts[from] ? contactRoute(state.contacts[from]) : null;
+  const resolve = resolver(state.contacts);
+  const prefer = new Set<string>();
+  const heldNodes = held ? [SELF, ...held.map(resolve), from] : [];
+  for (let i = 0; i < heldNodes.length - 1; i++) prefer.add(linkId(heldNodes[i]!, heldNodes[i + 1]!));
+  const opts: WayOptions = { avoid, ...(doubt ? { doubt } : {}) };
+  const way = findWay(g, SELF, from, { ...opts, prefer });
+  const approach = way ? hashesOf(way.slice(1, -1), size) : held && avoid.size === 0 ? held.map((h) => h.slice(0, size * 2)) : null;
+  const seg = findWay(g, from, to, opts);
+  const segHashes = seg ? hashesOf(seg.slice(1), size) : null;
+  if (!approach || !segHashes) return null;
+  return { chain: [...approach, from.slice(0, size * 2), ...segHashes], from: approach.length };
 }
 
-/** Five round trips along the route, or along `via`, one after the other. */
+function blank(key: string, via: string[] | null): Ping {
+  return { key, chain: [], targetInChain: false, via, from: -1, runs: [], running: true, stage: null, broken: null, search: null, error: null, at: Date.now() };
+}
+
+/** The legs of a trace that came back through `chain`, and home through `back` or the same way. */
+function legsOf(chain: string[], back: string[] | null, snrs: number[]): Leg[] {
+  if (!back) return traceLegs(snrs, chain.length);
+  return chain.slice(0, snrs.length).map((_, j) => [snrs[j]!, null]);
+}
+
+/**
+ * One trace, out through `chain` and home through `back` or the same way.
+ * What comes back goes in the link book, and its legs in `heard`: legs this
+ * check has heard work, so a way that then stays silent broke elsewhere.
+ */
+async function trace(chain: string[], back: string[] | null, heard: Set<string>): Promise<{ rttMs: number; snrs: number[] } | null> {
+  const home = back ?? chain.slice(0, -1).reverse();
+  const res = await session.traceRoute(chain, back ?? undefined);
+  if (res) {
+    noteTrace([...chain, ...home], res.snrs);
+    const resolve = resolver(session.getState().contacts);
+    for (const leg of tracedLegs([...chain, ...home], res.snrs)) heard.add(linkId(resolve(leg.from), resolve(leg.to)));
+  }
+  return res;
+}
+
+/**
+ * Checks the way to `key`: along `via` when given (a route being changed),
+ * else the route the radio holds. When it does not come back, finds where it
+ * breaks and, for the route held, looks for a way round.
+ */
 export async function ping(key: string, via: string[] | null = null): Promise<void> {
-  const p = await begin(key, "rounds", via);
-  if (!p) return;
+  stopped.delete(key);
+  const p = blank(key, via);
+  const heard = new Set<string>();
+  publish(p);
   try {
+    const span = spanEnds(key);
+    let path: { relays: string[]; target: string | null } | null;
+    if (span) {
+      const found = spanPath(span[0], span[1], buildGraph(linkBook(), session.getState(), Date.now()));
+      if (!found) {
+        p.running = false;
+        p.error = "Nothing the radio has heard links them yet. It learns who hears whom from the packets it hears.";
+        return publish(p);
+      }
+      path = { relays: found.chain, target: null };
+      p.from = found.from;
+    } else {
+      path = via ? pathVia(key, via) : await session.pingPath(key);
+    }
+    if (!path) {
+      if (via) {
+        p.running = false;
+        p.error = "This contact is no longer on the radio.";
+        return publish(p);
+      }
+      // No route known: look for one.
+      await search(p, null, heard);
+      return finish(p);
+    }
+    p.chain = path.target ? [...path.relays, path.target] : path.relays;
+    p.targetInChain = path.target !== null || span !== null;
+    if (p.chain.length === 0) {
+      p.running = false;
+      p.error = "Heard direct: there is nobody between you to check.";
+      return publish(p);
+    }
+    p.stage = "rounds";
+    publish(p);
     for (let i = 0; i < ROUNDS && !stopped.has(key); i++) {
       if (i > 0) await wait(GAP_MS);
-      const back = await session.traceRoute(p.chain);
-      if (stopped.has(key)) break;
+      const back = await trace(p.chain, null, heard);
+      if (stopped.has(key)) return;
       p.runs = [...p.runs, back ? { ok: true, rttMs: back.rttMs, legs: traceLegs(back.snrs, p.chain.length) } : { ok: false, rttMs: null, legs: [] }];
       publish(p);
+      // Two silent in a row from the start: the way is broken, not unlucky.
+      if (i === 1 && !p.runs[0]!.ok && !p.runs[1]!.ok) break;
     }
+    if (p.runs.some((r) => r.ok) || stopped.has(key)) return finish(p);
+    await locate(p, heard);
+    if (stopped.has(key) || via) return finish(p);
+    await search(p, p.broken, heard);
   } catch (error) {
     p.error = (error as Error).message;
   }
+  finish(p);
+}
+
+function finish(p: Ping): void {
+  if (stopped.has(p.key)) return;
   p.running = false;
+  p.stage = null;
+  if (p.search) p.search = { ...p.search, trying: null, done: true };
   publish(p);
 }
 
-/** One hop further each time, until a hop stays silent twice: that is where the route breaks. */
-export async function findBreak(key: string, via: string[] | null = null): Promise<void> {
-  const p = await begin(key, "hops", via);
-  if (!p) return;
-  p.hops = p.chain.map(() => ({ state: "waiting", tries: 0, leg: null }));
+/**
+ * Finds the first leg of the chain that stays silent, by halving the chain.
+ * A part that stays silent is tried once more before it counts: a weak leg
+ * loses a trace now and then, and blaming it would send the search round a
+ * leg that works.
+ */
+async function locate(p: Ping, heard: Set<string>): Promise<void> {
+  p.stage = "locate";
   publish(p);
-  try {
-    for (let k = 0; k < p.chain.length && !stopped.has(key); k++) {
-      const hop = p.hops[k]!;
-      while (hop.state !== "ok" && hop.state !== "silent" && !stopped.has(key)) {
-        hop.state = "trying";
-        publish(p);
-        const back = await session.traceRoute(p.chain.slice(0, k + 1));
-        if (stopped.has(key)) break;
-        if (back) {
-          hop.state = "ok";
-          hop.leg = traceLegs(back.snrs, k + 1)[k] ?? null;
-        } else if (++hop.tries >= TRIES) {
-          hop.state = "silent";
-        }
-        publish(p);
-        await wait(GAP_MS);
-      }
-      if (hop.state === "silent") break;
+  const chain = p.chain;
+  const at = await locateBreak(chain.length, async (m) => {
+    for (let tries = 0; tries < 2; tries++) {
+      if (stopped.has(p.key)) return false;
+      await wait(GAP_MS);
+      if (await trace(chain.slice(0, m), null, heard)) return true;
     }
-  } catch (error) {
-    p.error = (error as Error).message;
-  }
-  for (const hop of p.hops) if (hop.state === "trying") hop.state = "waiting";
-  p.running = false;
+    return false;
+  });
+  if (stopped.has(p.key)) return;
+  p.broken = { chain, at };
+  noteBreak(at === 0 ? SELF : chain[at - 1]!, chain[at]!);
   publish(p);
+}
+
+/**
+ * Looks in the link book for a way to the contact, round the leg a check
+ * broke at, and tries the likeliest, one trace each, until one comes back.
+ * A way that stays silent broke on a leg this check has not heard work:
+ * those count for less in the next look, so the next way goes round them
+ * where it can, and through them only where there is no other.
+ */
+async function search(p: Ping, broken: Ping["broken"], heard: Set<string>): Promise<void> {
+  const state = session.getState();
+  const span = spanEnds(p.key);
+  const contact = span ? null : state.contacts[p.key];
+  if (!span && !contact) return;
+  const relaysItself = span !== null || contact!.type === AdvType.Repeater;
+  const size = hashSize(state, span ? null : p.key);
+  const resolve = resolver(state.contacts);
+  const avoid = new Set<string>();
+  const doubt = new Map<string, number>();
+  if (broken) {
+    const a = broken.at === 0 ? SELF : resolve(broken.chain[broken.at - 1]!);
+    const b = resolve(broken.chain[broken.at]!);
+    avoid.add(linkId(a, b));
+    avoid.add(linkId(b, a));
+  }
+  p.stage = "search";
+  p.search = { total: TRIES, tries: [], tried: [], trying: null, back: null, found: false, done: false };
+  publish(p);
+  for (let guard = 0; p.search.tries.length < TRIES && guard < TRIES * 3; guard++) {
+    if (stopped.has(p.key)) return;
+    const g = buildGraph(linkBook(), session.getState(), Date.now());
+    let plan: (PlannedWay & { from: number }) | null = null;
+    let out: string[] | null = null;
+    if (span) {
+      const found = spanPath(span[0], span[1], g, avoid, doubt);
+      if (found) {
+        out = found.chain;
+        plan = { out: [], back: null, from: found.from };
+      }
+    } else {
+      const way = planWay(g, p.key, relaysItself, avoid, doubt);
+      if (way) {
+        plan = { ...way, from: -1 };
+        out = hashesOf(way.out, size);
+      }
+    }
+    if (!plan) break;
+    const back = plan.back ? hashesOf(plan.back, size) : null;
+    const nodes = span ? [SELF, ...(out ?? []).map(resolve)] : [SELF, ...plan.out];
+    const loop = [...nodes, ...(plan.back ?? nodes.slice(1, -1).reverse()), SELF];
+    // The legs of this way not yet heard to work count for less from now on.
+    const doubtIt = () => {
+      const links = wayLinks(loop);
+      const suspects = links.filter((id) => !heard.has(id));
+      for (const id of suspects.length ? suspects : links) doubt.set(id, (doubt.get(id) ?? 1) * 0.3);
+    };
+    // A hash too short to name at the size traced, or a way tried already: doubt it, and look again.
+    if (!out || (plan.back && !back) || p.search.tried.some((t) => t.join(" ") === out!.join(" "))) {
+      doubtIt();
+      continue;
+    }
+    if (out.length + (back ?? out.slice(0, -1)).length > 63) break;
+    p.search.trying = out;
+    publish(p);
+    if (p.search.tries.length > 0) await wait(GAP_MS);
+    const res = await trace(out, back, heard);
+    if (stopped.has(p.key)) return;
+    p.search.tries = [...p.search.tries, !!res];
+    p.search.trying = null;
+    if (res) {
+      p.chain = out;
+      p.targetInChain = relaysItself;
+      p.from = plan.from;
+      p.runs = [{ ok: true, rttMs: res.rttMs, legs: legsOf(out, back, res.snrs) }];
+      p.search.found = true;
+      p.search.back = back;
+      if (contact) await keep(p, contact.key, relaysItself ? out.slice(0, -1) : out);
+      publish(p);
+      return;
+    }
+    p.search.tried = [...p.search.tried, out];
+    publish(p);
+    doubtIt();
+  }
+}
+
+/** Writes a way found as the route, as learned: it ages like any other. Not for a contact pinned to flood. */
+async function keep(p: Ping, key: string, relays: string[]): Promise<void> {
+  const contact = session.getState().contacts[key];
+  if (!contact || !p.search) return;
+  if (isConversationType(contact.type) && session.routePolicy(key).flood) return;
+  const before = { relays: contactRoute(contact), since: contact.pathSince };
+  await session.setRoute(key, relays, { learnedAt: Date.now() });
+  p.search.before = before;
+}
+
+/** Puts back the route held before a search wrote the one it found. */
+export async function undoFound(key: string): Promise<void> {
+  const before = pings.get(key)?.search?.before;
+  if (!before) return;
+  if (before.relays) await session.setRoute(key, before.relays, { learnedAt: before.since });
+  else await session.resetPath(key);
+  clearPing(key);
 }
 
 export function stopPing(key: string): void {
   stopped.add(key);
   const p = pings.get(key);
-  if (p?.running) publish({ ...p, running: false });
+  if (p?.running) publish({ ...p, running: false, stage: null, search: p.search ? { ...p.search, trying: null, done: true } : null });
 }
 
 /** Forgets what was measured, when the route it was measured along has changed. */
@@ -179,20 +401,24 @@ export function settlePing(key: string, relays: string[]): void {
   else clearPing(key);
 }
 
-/** The legs measured last: from the last round that came back, or from the hops checked so far. */
+/** The legs measured last, from the last trace that came back. */
 export function measuredLegs(p: Ping | null): (Leg | null)[] {
   if (!p) return [];
-  if (p.mode === "hops") return (p.hops ?? []).map((h) => h.leg);
   const last = [...p.runs].reverse().find((r) => r.ok);
   return last ? last.legs : [];
 }
 
-/** The weakest leg measured, by its worse direction. */
+/** A leg's worse direction, or its only one. */
+export function legSnr(leg: Leg): number {
+  return leg[1] === null ? leg[0] : Math.min(leg[0], leg[1]);
+}
+
+/** The weakest leg measured, by its worse direction; for the way between two repeaters, only between them. */
 export function weakestLeg(p: Ping | null): { index: number; snr: number } | null {
   let worst: { index: number; snr: number } | null = null;
   measuredLegs(p).forEach((leg, index) => {
-    if (!leg) return;
-    const snr = Math.min(leg[0], leg[1]);
+    if (!leg || (p && index <= p.from)) return;
+    const snr = legSnr(leg);
     if (!worst || snr < worst.snr) worst = { index, snr };
   });
   return worst;

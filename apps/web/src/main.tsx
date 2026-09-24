@@ -4,6 +4,8 @@ import { App } from "./App.js";
 import { goBack } from "./lib/back.js";
 import { followKeyboard } from "./lib/keyboard.js";
 import { autoConnect, connectWith, disconnect, getLink } from "./lib/link.js";
+import { linkBook, startLinks } from "./lib/links.js";
+import { getPing } from "./lib/ping.js";
 import { isCapacitor, nativePlatform } from "./lib/platform.js";
 import { session } from "./lib/session.js";
 import { connectors } from "./transports/index.js";
@@ -12,9 +14,12 @@ import { initTextSize } from "./theme/textSize.js";
 import "./styles.css";
 
 // For the console, and for driving the shell from a test rig: the session,
-// the link and the connectors, under one name. Android's shell calls `back`
+// the link, the connectors and what the radio has heard of the mesh, under one name. Android's shell calls `back`
 // on its Back button (MainActivity).
-Object.assign(window, { meshnet: { session, getLink, connectWith, disconnect, connectors, back: goBack } });
+Object.assign(window, { meshnet: { session, getLink, connectWith, disconnect, connectors, back: goBack, linkBook, getPing } });
+
+// Who hears whom, from every packet the radio hands up, for finding a way through the mesh.
+startLinks();
 
 // Before the first render, so the page never paints in one palette or one text size and resolves
 // into another.

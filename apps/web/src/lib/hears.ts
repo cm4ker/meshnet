@@ -7,6 +7,7 @@
 
 import { useSyncExternalStore } from "react";
 import type { DiscoverReply } from "@meshnet/meshcore";
+import { noteHeardUs } from "./links.js";
 import { session } from "./session.js";
 
 export const LISTEN_MS = 10_000;
@@ -50,7 +51,10 @@ export async function askWhoHears(): Promise<void> {
   const now = Date.now();
   set({ listening: true, startedAt: now, replies: [], asks: [...state.asks.filter((t) => now - t < WINDOW_MS), now], error: null });
   try {
-    const replies = await session.discoverRepeaters(LISTEN_MS, (reply) => set({ replies: [...state.replies.filter((r) => r.key !== reply.key), reply] }));
+    const replies = await session.discoverRepeaters(LISTEN_MS, (reply) => {
+      noteHeardUs(reply.key, reply.heardUs, reply.heardThem);
+      set({ replies: [...state.replies.filter((r) => r.key !== reply.key), reply] });
+    });
     set({ replies });
   } catch (error) {
     set({ error: (error as Error).message });

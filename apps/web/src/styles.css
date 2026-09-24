@@ -4631,3 +4631,9 @@ button.hop {
 .not-on-radio.compact {
   margin: 0;
 }
+
+/* The head of a way a check found round a break: a line, not a figure. */
+.check-result b.found-head {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}

@@ -10,7 +10,7 @@ import { askWhoHears } from "./hears.js";
 import { relayOf, selfEnd, type MapHandle } from "./mapOverlay.js";
 import { getMeshTool, setMeshTool, type LosEnd, type RouteTool } from "./meshTool.js";
 import { focusOnMap, getNav, goSection, showOnMap } from "./nav.js";
-import { clearPing, getPing } from "./ping.js";
+import { clearPing, getPing, spanKey, stopPing } from "./ping.js";
 import { session } from "./session.js";
 import { toast } from "./toast.js";
 
@@ -23,10 +23,31 @@ export function openRoute(key: string): void {
   setMeshTool({ kind: "route", key, draft: null, returnTo });
 }
 
+/** The way from the repeater whose route is open to another, picked next on the map. */
+export function openSpan(from: string): void {
+  const tool = getMeshTool();
+  showOnMap(from);
+  setMeshTool({ kind: "span", from, to: null, prev: tool?.kind === "route" ? { ...tool, draft: null } : null });
+}
+
+/** A tap on a node while the way between two repeaters is open picks its far end; says whether the tap was taken. */
+export function tapInSpan(key: string | null, state: SessionState): boolean {
+  const tool = getMeshTool();
+  if (tool?.kind !== "span") return false;
+  if (!key || key === tool.from || key === tool.to) return true;
+  if (state.contacts[key]?.type !== AdvType.Repeater) {
+    if (state.contacts[key]) toast("Pick a repeater: only they pass a trace on.");
+    return true;
+  }
+  if (tool.to) stopPing(spanKey(tool.from, tool.to));
+  setMeshTool({ ...tool, to: key });
+  return true;
+}
+
 /** The line of sight between two ends, over the map; `back` is the node whose card to return to, or the route it was opened from. */
-export function openLineOfSight(from: LosEnd, to: LosEnd, back: string | null, heard: [number, number] | null = null): void {
+export function openLineOfSight(from: LosEnd, to: LosEnd, back: string | null, heard: [number, number | null] | null = null): void {
   const current = getMeshTool();
-  const prev = current?.kind === "route" ? current : current?.kind === "los" ? (current.prev ?? null) : null;
+  const prev = current?.kind === "route" || current?.kind === "span" ? current : current?.kind === "los" ? (current.prev ?? null) : null;
   if (back) showOnMap(back);
   else focusOnMap(null);
   setMeshTool({ kind: "los", from, to, back, heard, prev });
@@ -127,6 +148,14 @@ export function closeTool(): void {
   if (tool?.kind === "los" && tool.prev) {
     setMeshTool(tool.prev);
     return;
+  }
+  if (tool?.kind === "span") {
+    if (tool.to) stopPing(spanKey(tool.from, tool.to));
+    if (tool.prev) {
+      showOnMap(tool.prev.key);
+      setMeshTool(tool.prev);
+      return;
+    }
   }
   setMeshTool(null);
   if (tool?.kind === "los" && tool.back) showOnMap(tool.back);

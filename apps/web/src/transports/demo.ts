@@ -23,6 +23,8 @@ interface Person {
   lon: number;
   /** Seconds since its last advert; ten minutes when not said. */
   ago?: number;
+  /** The route the radio holds to it, relay by relay, when it is not along `RELAYS`. */
+  route?: number[];
 }
 
 const PEOPLE: Person[] = [
@@ -37,6 +39,83 @@ const PEOPLE: Person[] = [
   // A name ending in an emoji, which goes on the node's circle.
   { key: seeded(8), name: "Kolya ⛺", type: 1, hops: 1, lat: 55.075, lon: 73.43, ago: 3 * 86400 },
 ];
+
+/**
+ * A town's worth of repeaters south of the radio, linked as `LINKS` says, so
+ * a way can be looked for and checked: the route held to RMK-3 goes through
+ * SKK_Blinova → Marksa, a link that has died, and a way round it is there to
+ * be found. Their floods are overheard all the time, so the app learns who
+ * hears whom from them.
+ */
+const TOWN: [number, string, number, number, number[] | null][] = [
+  [0x1a, "K10 Юг Круг", 54.992, 73.418, []],
+  [0x21, "MIR", 54.982, 73.467, [0x1a]],
+  [0x37, "Wan7-KORDNIY", 54.969, 73.568, null],
+  [0x45, "SKK_Blinova", 54.94, 73.531, null],
+  [0x58, "Marksa", 54.936, 73.423, null],
+  [0x62, "AMUR-21", 54.883, 73.489, null],
+  [0xf1, "РМК-3", 54.862, 73.466, [0x1a, 0x21, 0x37, 0x45, 0x58, 0x62]],
+  [0x7a, "Frezernaya", 54.999, 73.548, [0x1a, 0x8d]],
+  [0x8d, "DGG-R2", 55.034, 73.332, [0x1a]],
+];
+TOWN.forEach(([first, name, lat, lon, route], i) => {
+  PEOPLE.push({ key: startingWith(first, 20 + i), name, type: 2, hops: route ? route.length : 0xff, lat, lon, ago: 300 + i * 97, ...(route ? { route } : {}) });
+});
+const TOWN_HASHES = new Set(TOWN.map(([first]) => first));
+
+/**
+ * Who hears whom in the town: `a>b` is how well b hears a, dB; "me" is this
+ * radio. A pair not here does not hear each other at all.
+ */
+const LINKS: Record<string, number> = {};
+{
+  const both = (a: string, b: string, ab: number, ba: number) => {
+    LINKS[`${a}>${b}`] = ab;
+    LINKS[`${b}>${a}`] = ba;
+  };
+  both("me", "1a", 11.75, 11.5);
+  both("1a", "21", 11, 10.5);
+  both("21", "37", 4.75, 3);
+  both("37", "45", 2.5, -1.5);
+  // SKK_Blinova and Marksa heard each other once; the link is gone.
+  both("58", "62", 3, 2);
+  both("62", "f1", 6, 1);
+  both("21", "58", -2.5, -4);
+  both("1a", "8d", 6, 6.75);
+  both("8d", "7a", -3.5, -4.75);
+  both("7a", "58", -6.5, -8);
+  both("45", "62", -9, -11);
+  both("37", "7a", -2, -3);
+  both("me", "8d", 4, 3.5);
+}
+
+/** Floods that between them go along every link the town has, each ending at a repeater the radio hears. */
+const TOWN_FLOODS = [
+  ["f1", "62", "58", "21", "1a"],
+  ["f1", "62", "58", "7a", "8d"],
+  ["45", "37", "21", "1a"],
+  ["37", "45", "62", "58", "21", "1a"],
+  ["1a", "21", "58", "7a", "8d"],
+  ["1a", "21", "37", "7a", "8d"],
+  ["8d", "7a", "58", "21", "1a"],
+  ["62", "58", "7a", "8d"],
+  ["f1", "62", "58", "21", "1a"],
+  ["45", "37", "21", "1a"],
+];
+
+function townKey(node: number | "me"): string {
+  return node === "me" ? "me" : node.toString(16).padStart(2, "0");
+}
+
+/** How well `b` hears `a` on a trace, dB, or null when it does not; the older demo relays keep their own fixed figures. */
+function legSnr(a: number | "me", b: number | "me"): number | null {
+  const town = (x: number | "me") => x === "me" || TOWN_HASHES.has(x);
+  if (town(a) && town(b)) {
+    const snr = LINKS[`${townKey(a)}>${townKey(b)}`];
+    return snr === undefined ? null : Math.round((snr + (Math.random() * 1.5 - 0.75)) * 4) / 4;
+  }
+  return heardAt(b === "me" ? (a as number) : b);
+}
 
 /**
  * `?demo&crowd=400`: that many more nodes scattered round the town, heard
@@ -206,7 +285,7 @@ class DemoRadio extends BaseTransport {
   private flags = new Map<Person, number>();
   private autoAdd = { config: 0, maxHops: 0 };
   /** Routes written by hand, relay by relay; the rest go along `RELAYS`. */
-  private paths = new Map<Person, number[]>();
+  private paths = new Map<Person, number[]>(PEOPLE.filter((p) => p.route).map((p) => [p, p.route!]));
   /** Texts on Friends whose first send the repeaters already missed. */
   private missed = new Set<string>();
   private murmur: ReturnType<typeof setInterval> | null = null;
@@ -216,11 +295,48 @@ class DemoRadio extends BaseTransport {
     this.queue.push(this.dm(PEOPLE[0]!, "Welcome to the demo mesh 👋"), this.channel(0, "Bob (bike)", "Public channel works too"));
     this.chatter = setInterval(() => void this.chat(), 25_000);
     this.murmur = setInterval(() => this.overhear(), 3_500);
+    // The town's floods: every link once at first, so there is something to look through from the start.
+    TOWN_FLOODS.forEach((path, i) => this.later(300 + i * 250, () => this.overhearTown(path)));
+  }
+
+  /**
+   * A flood from somewhere in the town, as the radio hears it: a walk back
+   * from a repeater it hears direct, each step to one that hears the next.
+   * An advert names who sent it.
+   */
+  private overhearTown(given?: string[]): void {
+    const heardHere = ["1a", "8d"];
+    const path = given ? [...given] : [heardHere[Math.floor(Math.random() * heardHere.length)]!];
+    const before = (to: string) => Object.keys(LINKS).filter((l) => l.endsWith(`>${to}`)).map((l) => l.split(">")[0]!).filter((f) => f !== "me" && !path.includes(f));
+    const steps = given ? 0 : 1 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < steps; i++) {
+      const options = before(path[0]!);
+      if (!options.length) break;
+      path.unshift(options[Math.floor(Math.random() * options.length)]!);
+    }
+    const snr = LINKS[`${path[path.length - 1]}>me`]! + (Math.random() * 2 - 1);
+    const hops = path.map((h) => parseInt(h, 16));
+    const senders = before(path[0]!);
+    if (senders.length && Math.random() < 0.4) {
+      const first = parseInt(senders[Math.floor(Math.random() * senders.length)]!, 16);
+      const sender = PEOPLE.find((p) => p.key[0] === first && TOWN_HASHES.has(first))!;
+      const advert = new Uint8Array(110);
+      crypto.getRandomValues(advert);
+      advert.set(sender.key, 0);
+      this.emitFrame(this.heard(4, hops, advert, snr));
+    } else {
+      const noise = new Uint8Array(30);
+      crypto.getRandomValues(noise);
+      this.emitFrame(this.heard(5, hops, noise, snr));
+    }
   }
 
   /** The mesh going about its business: adverts, acks and requests between others, which the radio overhears. */
   private overhear(): void {
-    const someone = PEOPLE[Math.floor(Math.random() * PEOPLE.length)]!;
+    if (Math.random() < 0.45) return this.overhearTown();
+    // The town's repeaters are heard only along the town's own links.
+    const others = PEOPLE.filter((p) => !(p.type === 2 && TOWN_HASHES.has(p.key[0]!)));
+    const someone = others[Math.floor(Math.random() * others.length)]!;
     const pick = Math.random();
     const noise = (n: number) => {
       const bytes = new Uint8Array(n);
@@ -280,10 +396,10 @@ class DemoRadio extends BaseTransport {
   }
 
   /** A packet the radio heard, as it hands them up on LOG_RX_DATA: flooded, one-byte hashes. */
-  private heard(payloadType: number, path: number[], payload: Uint8Array): Uint8Array {
+  private heard(payloadType: number, path: number[], payload: Uint8Array, snr = Math.random() * 20 - 8): Uint8Array {
     return new ByteWriter()
       .u8(Push.LogRxData)
-      .i8(Math.round((Math.random() * 20 - 8) * 4))
+      .i8(Math.round(snr * 4))
       .i8(-60 - Math.round(Math.random() * 50))
       .u8((payloadType << 2) | 1)
       .u8(path.length)
@@ -657,10 +773,14 @@ class DemoRadio extends BaseTransport {
         const size = 1 << (flags & 3);
         const path = frame.subarray(10);
         const hashes = Array.from({ length: path.length / size }, (_, i) => path[i * size]!);
-        const snrs = hashes.map(heardAt);
-        const final = heardAt(hashes[0]!) - 1;
-        const back = snrs.every(through) && through(final);
-        const estimate = 500 + (160 * 6 + 250) * (hashes.length + 1);
+        // Each node hears the one before it, and this radio hears the last; a pair that does not hear each other loses it.
+        const nodes: (number | "me")[] = ["me", ...hashes, "me"];
+        const legs = nodes.slice(1).map((b, i) => legSnr(nodes[i]!, b));
+        const snrs = legs.slice(0, -1).map((s) => s ?? 0);
+        const final = legs[legs.length - 1] ?? 0;
+        const back = legs.every((s) => s !== null && through(s));
+        // Shorter than a real radio would say, so a trace lost in the demo is not waited on for long.
+        const estimate = 600 + 350 * (hashes.length + 1);
         if (back) {
           const trip = 170 * (hashes.length + 1) + Math.random() * 90 * hashes.length;
           this.later(

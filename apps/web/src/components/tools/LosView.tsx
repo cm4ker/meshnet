@@ -104,7 +104,8 @@ export function LosView({ tool, onBack, onClose }: { tool: Extract<MeshTool, { k
           </p>
           {tool.heard ? (
             <p className="tool-line">
-              Pinged: <b>{formatSnr(tool.heard[0])} dB</b> out, <b>{formatSnr(tool.heard[1])} dB</b> back.
+              Pinged: <b>{formatSnr(tool.heard[0])} dB</b> out
+              {tool.heard[1] === null ? "; it came home another way." : <>, <b>{formatSnr(tool.heard[1])} dB</b> back.</>}
             </p>
           ) : null}
           <p className="tool-credit muted">

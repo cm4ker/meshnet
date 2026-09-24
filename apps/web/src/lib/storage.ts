@@ -103,7 +103,17 @@ export class IndexedDbStorage implements SessionStorage {
 
   async listRadios(): Promise<string[]> {
     const keys = await this.request<IDBValidKey[]>("readonly", (s) => s.getAllKeys());
-    return keys.map(String);
+    // Records kept beside a radio's history carry a prefix and a colon; radio keys are hex.
+    return keys.map(String).filter((k) => !k.includes(":"));
+  }
+
+  /** A record kept beside the histories, under a key of the form `what:radio`; null when there is none. */
+  async loadExtra(key: string): Promise<unknown> {
+    return (await this.request<unknown>("readonly", (s) => s.get(key))) ?? null;
+  }
+
+  async saveExtra(key: string, value: unknown): Promise<void> {
+    await this.request("readwrite", (s) => s.put(value, key));
   }
 }
 

@@ -77,7 +77,8 @@ export function routeStatus(contact: ContactRecord, ping: Ping | null, found: Di
     return words;
   }
   if (!checked) return words;
-  if (checked.running) return { text: `${words.text} · checking…`, tone: words.tone };
-  if (checked.mode === "hops" || checked.runs.length === 0) return words;
+  if (checked.running) return { text: `${words.text} · ${checked.stage === "search" ? "looking…" : "checking…"}`, tone: words.tone };
+  if (checked.search) return checked.search.found ? { text: `${words.text} · works`, tone: "good" } : { text: `${words.text} · no answer`, tone: "bad" };
+  if (checked.runs.length === 0) return words;
   return checked.runs.some((r) => r.ok) ? { text: `${words.text} · works`, tone: "good" } : { text: `${words.text} · no answer`, tone: "bad" };
 }

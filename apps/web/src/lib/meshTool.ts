@@ -1,7 +1,7 @@
 /**
  * What the map is being used for besides picking a node: a line of sight
- * between two points, the route to a contact, or the answers to "who hears
- * me". One at a time; the sheet on a phone and the panel on a desktop show
+ * between two points, the route to a contact, the way between two
+ * repeaters, or the answers to "who hears me". One at a time; the sheet on a phone and the panel on a desktop show
  * it, and the map draws it. It lives only while the app runs, like the map's
  * own view.
  */
@@ -25,12 +25,13 @@ export type MeshTool =
       to: LosEnd;
       /** The node whose card it was opened from, to go back to. */
       back: string | null;
-      /** How the leg sounded when last pinged, out and back, dB. */
-      heard?: [number, number] | null;
-      /** The route it was opened from, to go back to. */
-      prev?: RouteTool | null;
+      /** How the leg sounded when last pinged, out and back, dB; back is null when the trace came home another way. */
+      heard?: [number, number | null] | null;
+      /** The route, or the way between two repeaters, it was opened from, to go back to. */
+      prev?: RouteTool | SpanTool | null;
     }
   | RouteTool
+  | SpanTool
   | { kind: "hears" };
 
 /**
@@ -44,6 +45,18 @@ export interface RouteTool {
   key: string;
   draft: string[] | null;
   returnTo?: { section: Section; focus: string | null } | null;
+}
+
+/**
+ * The way between two repeaters, checked from this radio: `from` is the one
+ * whose route it was opened from, `to` the one tapped on the map, null until
+ * then. `prev` is that route, to go back to.
+ */
+export interface SpanTool {
+  kind: "span";
+  from: string;
+  to: string | null;
+  prev: RouteTool | null;
 }
 
 let tool: MeshTool | null = null;
