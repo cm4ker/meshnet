@@ -19,7 +19,7 @@ import { legId, useLegVerdicts } from "../../lib/legVerdicts.js";
 import { formatSnr, quality, QUALITY_WORDS, type LinkRadio } from "../../lib/los.js";
 import { contactEnd, defaultHeight, relayOf, sameRelays, selfEnd } from "../../lib/mapOverlay.js";
 import { setMeshTool, type LosEnd, type RouteTool } from "../../lib/meshTool.js";
-import { measuredLegs, ping, ROUNDS, settlePing, stopPing, undoFound, usePing, weakestLeg, type Ping } from "../../lib/ping.js";
+import { keepLooking, measuredLegs, ping, ROUNDS, settlePing, stopPing, undoFound, usePing, weakestLeg, type Ping } from "../../lib/ping.js";
 import { inMinutes, limitLabel, ROUTE_LIMITS, routeStatus, useNow } from "../../lib/routes.js";
 import { session, useSession } from "../../lib/session.js";
 import { act, toast } from "../../lib/toast.js";
@@ -198,8 +198,12 @@ export function RouteSheet({ tool, onClose }: { tool: RouteTool; onClose: () => 
   } else if (flooded) {
     primary = { label: "Asking the whole mesh…", onClick: () => undefined, busy: true };
   } else if (!flooding) {
-    primary = { label: held === null && !relaysItself ? "Find a way" : "Check", onClick: () => void ping(key), disabled: !online };
-    if (!shownFlood && heldPing?.search?.done && !heldPing.search.found) links.push({ label: "Ask the whole mesh", onClick: flood, disabled: !online, cost: needsSignIn ? "sign in first" : "floods" });
+    // A search that found nothing goes on from where it stopped; the flood is the last resort.
+    const gaveUp = !shownFlood && !!heldPing?.search?.done && !heldPing.search.found;
+    primary = gaveUp
+      ? { label: "Keep looking", onClick: () => void keepLooking(key), disabled: !online }
+      : { label: held === null && !relaysItself ? "Find a way" : "Check", onClick: () => void ping(key), disabled: !online };
+    if (gaveUp) links.push({ label: "Ask the whole mesh", onClick: flood, disabled: !online, cost: needsSignIn ? "sign in first" : "floods" });
   }
 
   const idle = !running && !shownFlood && !shownPing;
@@ -477,7 +481,7 @@ export function CheckResult({ p, names, reach, placed, onLeg, onUndo }: { p: Pin
             {weakest ? <QualityChip snr={weakest.snr} numbers={false} /> : null}
           </div>
           <p className="check-note">
-            {p.broken ? `The old one broke ${broke}` : "Now the route"}
+            {p.search.tries.length > 1 ? `On try ${p.search.tries.length} · ${p.broken ? `the old one broke ${broke}` : "now the route"}` : p.broken ? `The old one broke ${broke}` : "Now the route"}
             {p.search.before && onUndo ? (
               <>
                 {" · "}

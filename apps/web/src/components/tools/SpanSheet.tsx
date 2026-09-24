@@ -9,7 +9,7 @@
 
 import { nameOfHash } from "../../lib/echoes.js";
 import type { SpanTool } from "../../lib/meshTool.js";
-import { measuredLegs, ping, spanKey, stopPing, usePing } from "../../lib/ping.js";
+import { keepLooking, measuredLegs, ping, spanKey, stopPing, usePing } from "../../lib/ping.js";
 import { useSession } from "../../lib/session.js";
 import { openLineOfSight } from "../../lib/toolActions.js";
 import { Button } from "../../ui/Button.js";
@@ -35,6 +35,8 @@ export function SpanSheet({ tool, onClose }: { tool: SpanTool; onClose: () => vo
 
   const nameB = b.name || b.prefix;
   const running = p?.running ?? false;
+  // A search that found nothing goes on from where it stopped.
+  const gaveUp = !running && !!p?.search?.done && !p.search.found;
   const name = (h: string) => nameOfHash(h, state.contacts) ?? h;
   // The chain as traced: the way to the first repeater, then on to the second.
   const chain = p && p.chain.length ? p.chain : null;
@@ -64,8 +66,8 @@ export function SpanSheet({ tool, onClose }: { tool: SpanTool; onClose: () => vo
       ) : null}
       {approach.length ? <p className="tool-credit muted">Reached from you via {approach.map(name).join(" › ")}</p> : null}
       {p ? <CheckResult p={p} names={names} reach={null} placed onLeg={openLeg} /> : null}
-      <Button variant={running ? "default" : "primary"} size="lg" disabled={!online} onClick={() => (running ? stopPing(key) : void ping(key))}>
-        {running ? "Stop" : "Check"}
+      <Button variant={running ? "default" : "primary"} size="lg" disabled={!online} onClick={() => (running ? stopPing(key) : gaveUp ? void keepLooking(key) : void ping(key))}>
+        {running ? "Stop" : gaveUp ? "Keep looking" : "Check"}
       </Button>
       {!p ? <p className="tool-credit muted">Tap another repeater to change the far end.</p> : null}
     </div>

@@ -3,16 +3,17 @@
  * of the way between two repeaters. A check sends five traces out along the
  * route and back, one at a time. When the first two stay silent it stops,
  * finds where the way breaks by halving it, and then looks for a way round
- * in the link book (lib/linkGraph.ts), trying at most four, one trace each.
- * A way that comes back becomes the route, and the one before can be put
- * back. A route being changed on the map is checked the same way, but only
- * to see where it breaks: a way round is not looked for.
+ * in the link book (lib/linkGraph.ts), trying four, one trace each; "Keep
+ * looking" tries four more from where it stopped. A way that comes back
+ * becomes the route, and the one before can be put back. A route being
+ * changed on the map is checked the same way, but only to see where it
+ * breaks: a way round is not looked for.
  *
  * Only a tap starts any of it; nothing here repeats on its own.
  */
 
 import { useSyncExternalStore } from "react";
-import { AdvType, contactRoute, isConversationType, traceLegs, type SessionState } from "@meshnet/meshcore";
+import { AdvType, contactRoute, isConversationType, traceLegs, type SessionState, type TraceResult } from "@meshnet/meshcore";
 import { buildGraph, findWay, isUnresolved, linkId, locateBreak, planWay, resolver, SELF, tracedLegs, wayLinks, type Graph, type PlannedWay, type WayOptions } from "./linkGraph.js";
 import { linkBook, noteBreak, noteTrace } from "./links.js";
 import { session } from "./session.js";
@@ -171,17 +172,36 @@ function legsOf(chain: string[], back: string[] | null, snrs: number[]): Leg[] {
  * One trace, out through `chain` and home through `back` or the same way.
  * What comes back goes in the link book, and its legs in `heard`: legs this
  * check has heard work, so a way that then stays silent broke elsewhere.
+ * One that comes back after it was given up on counts the same, and
+ * `onLate` hears it.
  */
-async function trace(chain: string[], back: string[] | null, heard: Set<string>): Promise<{ rttMs: number; snrs: number[] } | null> {
-  const home = back ?? chain.slice(0, -1).reverse();
-  const res = await session.traceRoute(chain, back ?? undefined);
-  if (res) {
-    noteTrace([...chain, ...home], res.snrs);
+async function trace(chain: string[], back: string[] | null, heard: Set<string>, onLate?: (res: TraceResult) => void): Promise<TraceResult | null> {
+  const hops = [...chain, ...(back ?? chain.slice(0, -1).reverse())];
+  const took = (res: TraceResult) => {
+    noteTrace(hops, res.snrs);
     const resolve = resolver(session.getState().contacts);
-    for (const leg of tracedLegs([...chain, ...home], res.snrs)) heard.add(linkId(resolve(leg.from), resolve(leg.to)));
-  }
+    for (const leg of tracedLegs(hops, res.snrs)) heard.add(linkId(resolve(leg.from), resolve(leg.to)));
+  };
+  const res = await session.traceRoute(chain, back ?? undefined, (late) => {
+    took(late);
+    onLate?.(late);
+  });
+  if (res) took(res);
   return res;
 }
+
+/** What a search has learned, kept so that "Keep looking" goes on from where it stopped. */
+interface Look {
+  heard: Set<string>;
+  avoid: Set<string>;
+  doubt: Map<string, number>;
+  /** How many times each way was tried, by its hashes out and home. */
+  tried: Map<string, number>;
+  /** Each way may be tried once a round. */
+  round: number;
+}
+
+const looks = new Map<string, Look>();
 
 /**
  * Checks the way to `key`: along `via` when given (a route being changed),
@@ -229,7 +249,13 @@ export async function ping(key: string, via: string[] | null = null): Promise<vo
     publish(p);
     for (let i = 0; i < ROUNDS && !stopped.has(key); i++) {
       if (i > 0) await wait(GAP_MS);
-      const back = await trace(p.chain, null, heard);
+      // A round that comes back late, while the rounds are still going, came back.
+      const late = (res: TraceResult) => {
+        if (p.stage !== "rounds" || p.runs[i]?.ok !== false) return;
+        p.runs = p.runs.map((r, j) => (j === i ? { ok: true, rttMs: res.rttMs, legs: traceLegs(res.snrs, p.chain.length) } : r));
+        publish(p);
+      };
+      const back = await trace(p.chain, null, heard, late);
       if (stopped.has(key)) return;
       p.runs = [...p.runs, back ? { ok: true, rttMs: back.rttMs, legs: traceLegs(back.snrs, p.chain.length) } : { ok: false, rttMs: null, legs: [] }];
       publish(p);
@@ -286,6 +312,44 @@ async function locate(p: Ping, heard: Set<string>): Promise<void> {
  * where it can, and through them only where there is no other.
  */
 async function search(p: Ping, broken: Ping["broken"], heard: Set<string>): Promise<void> {
+  const resolve = resolver(session.getState().contacts);
+  const look: Look = { heard, avoid: new Set(), doubt: new Map(), tried: new Map(), round: 1 };
+  if (broken) {
+    const a = broken.at === 0 ? SELF : resolve(broken.chain[broken.at - 1]!);
+    const b = resolve(broken.chain[broken.at]!);
+    look.avoid.add(linkId(a, b));
+    look.avoid.add(linkId(b, a));
+  }
+  looks.set(p.key, look);
+  p.search = { total: TRIES, tries: [], tried: [], trying: null, back: null, found: false, done: false };
+  await goOn(p, look);
+}
+
+/**
+ * Four more ways, after a search found none: on from where it stopped, with
+ * the break and the legs heard working as they were. What the last round
+ * doubted counts for more again, and each way may be tried once more, since
+ * a weak leg loses a trace now and then.
+ */
+export async function keepLooking(key: string): Promise<void> {
+  const prior = pings.get(key);
+  const look = looks.get(key);
+  if (!prior?.search || prior.running || prior.search.found || !look) return;
+  stopped.delete(key);
+  for (const [id, d] of look.doubt) look.doubt.set(id, Math.min(1, d * 2.5));
+  look.round++;
+  const p: Ping = { ...prior, running: true, error: null, search: { ...prior.search, total: prior.search.tries.length + TRIES, done: false } };
+  publish(p);
+  try {
+    await goOn(p, look);
+  } catch (error) {
+    p.error = (error as Error).message;
+  }
+  finish(p);
+}
+
+/** Tries ways, one trace each, until one comes back or the search has tried as many as it may. */
+async function goOn(p: Ping, look: Look): Promise<void> {
   const state = session.getState();
   const span = spanEnds(p.key);
   const contact = span ? null : state.contacts[p.key];
@@ -293,18 +357,11 @@ async function search(p: Ping, broken: Ping["broken"], heard: Set<string>): Prom
   const relaysItself = span !== null || contact!.type === AdvType.Repeater;
   const size = hashSize(state, span ? null : p.key);
   const resolve = resolver(state.contacts);
-  const avoid = new Set<string>();
-  const doubt = new Map<string, number>();
-  if (broken) {
-    const a = broken.at === 0 ? SELF : resolve(broken.chain[broken.at - 1]!);
-    const b = resolve(broken.chain[broken.at]!);
-    avoid.add(linkId(a, b));
-    avoid.add(linkId(b, a));
-  }
+  const { heard, avoid, doubt } = look;
+  if (!p.search) return;
   p.stage = "search";
-  p.search = { total: TRIES, tries: [], tried: [], trying: null, back: null, found: false, done: false };
   publish(p);
-  for (let guard = 0; p.search.tries.length < TRIES && guard < TRIES * 3; guard++) {
+  for (let guard = 0; p.search.tries.length < p.search.total && guard < TRIES * 3; guard++) {
     if (stopped.has(p.key)) return;
     const g = buildGraph(linkBook(), session.getState(), Date.now());
     let plan: (PlannedWay & { from: number }) | null = null;
@@ -332,12 +389,14 @@ async function search(p: Ping, broken: Ping["broken"], heard: Set<string>): Prom
       const suspects = links.filter((id) => !heard.has(id));
       for (const id of suspects.length ? suspects : links) doubt.set(id, (doubt.get(id) ?? 1) * 0.3);
     };
-    // A hash too short to name at the size traced, or a way tried already: doubt it, and look again.
-    if (!out || (plan.back && !back) || p.search.tried.some((t) => t.join(" ") === out!.join(" "))) {
+    // A hash too short to name at the size traced, or a way tried this round already: doubt it, and look again.
+    const wayKey = `${out?.join(" ")}|${back?.join(" ") ?? ""}`;
+    if (!out || (plan.back && !back) || (look.tried.get(wayKey) ?? 0) >= look.round) {
       doubtIt();
       continue;
     }
     if (out.length + (back ?? out.slice(0, -1)).length > 63) break;
+    look.tried.set(wayKey, (look.tried.get(wayKey) ?? 0) + 1);
     p.search.trying = out;
     publish(p);
     if (p.search.tries.length > 0) await wait(GAP_MS);
@@ -356,7 +415,7 @@ async function search(p: Ping, broken: Ping["broken"], heard: Set<string>): Prom
       publish(p);
       return;
     }
-    p.search.tried = [...p.search.tried, out];
+    if (!p.search.tried.some((t) => t.join(" ") === out!.join(" "))) p.search.tried = [...p.search.tried, out];
     publish(p);
     doubtIt();
   }
@@ -391,6 +450,7 @@ export function stopPing(key: string): void {
 export function clearPing(key: string): void {
   stopPing(key);
   pings.delete(key);
+  looks.delete(key);
   for (const listener of listeners) listener();
 }
 
