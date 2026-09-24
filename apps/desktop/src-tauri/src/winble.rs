@@ -32,12 +32,12 @@ use windows::Devices::Bluetooth::Advertisement::{
 };
 use windows::Devices::Bluetooth::GenericAttributeProfile::{
     GattCharacteristic, GattClientCharacteristicConfigurationDescriptorValue, GattCommunicationStatus,
-    GattDeviceService, GattValueChangedEventArgs,
+    GattDeviceService, GattOpenStatus, GattSharingMode, GattValueChangedEventArgs,
 };
 use windows::core::HSTRING;
 use windows::Devices::Bluetooth::{BluetoothCacheMode, BluetoothConnectionStatus, BluetoothLEDevice};
 use windows::Devices::Enumeration::{
-    DeviceInformationCustomPairing, DevicePairingKinds, DevicePairingProtectionLevel, DevicePairingRequestedEventArgs,
+    DeviceAccessStatus, DeviceInformationCustomPairing, DevicePairingKinds, DevicePairingProtectionLevel, DevicePairingRequestedEventArgs,
     DevicePairingResultStatus, DeviceUnpairingResultStatus,
 };
 use windows::Foundation::TypedEventHandler;
@@ -57,6 +57,7 @@ pub const CLOSED_EVENT: &str = "winble:closed";
 
 struct Link {
     device: BluetoothLEDevice,
+    service: GattDeviceService,
     rx: GattCharacteristic,
     tx: GattCharacteristic,
     /// Event registration tokens, which this crate version hands out as plain integers.
@@ -170,6 +171,19 @@ fn parse_address(text: &str) -> Result<u64, String> {
 
 fn err(context: &str, error: windows::core::Error) -> String {
     format!("{context}: {} (0x{:08X})", error.message(), error.code().0 as u32)
+}
+
+/// Only ATT authentication/encryption failures mean that an existing bond
+/// needs repair. Marking an unreachable phone as NEEDS_PAIRING makes the
+/// client discard its bond, including the identity behind its rotating address.
+fn gatt_failure(what: &str, status: GattCommunicationStatus, protocol_error: Option<u8>) -> String {
+    let att = protocol_error.map(|code| format!(", ATT 0x{code:02X}")).unwrap_or_default();
+    let hint = if status == GattCommunicationStatus::ProtocolError && matches!(protocol_error, Some(0x05 | 0x08 | 0x0F)) {
+        ". NEEDS_PAIRING"
+    } else {
+        ""
+    };
+    format!("{what}: {status:?}{att}{hint}")
 }
 
 /// Waits for a WinRT operation on the worker, pumping the apartment meanwhile,
@@ -293,14 +307,15 @@ pub async fn winble_stop_scan(state: State<'_, WinBle>) -> Result<(), String> {
     Ok(())
 }
 
-/// Asks for the UART service by its UUID only. A phone sharing its radio
-/// serves other apps' services too, and Windows reads the descriptors of each
-/// service it discovers: one app that never answers (realme's accessory
-/// service does not) stalls the link until it drops.
+/// Looks up the UART service in Windows' cache first, querying the device
+/// when it is missing. A UUID filter limits the results, but does not stop
+/// Windows from discovering other apps' services on an Android phone. An
+/// unresponsive vendor service can stall that discovery, so do not force it
+/// again on every connection once Windows has found the UART service.
 fn find_service(device: &BluetoothLEDevice) -> Result<GattDeviceService, String> {
     let result = wait(
         device
-            .GetGattServicesForUuidWithCacheModeAsync(SERVICE, BluetoothCacheMode::Uncached)
+            .GetGattServicesForUuidWithCacheModeAsync(SERVICE, BluetoothCacheMode::Cached)
             .map_err(|e| err("services", e))?,
         "service discovery",
     )?;
@@ -325,7 +340,7 @@ fn characteristics_in(
     )?;
     let status = result.Status().map_err(|e| err("characteristics", e))?;
     if status != GattCommunicationStatus::Success {
-        return Err(format!("characteristic discovery: {status:?}. NEEDS_PAIRING"));
+        return Err(gatt_failure("characteristic discovery", status, result.ProtocolError().and_then(|e| e.Value()).ok()));
     }
     let mut rx = None;
     let mut tx = None;
@@ -349,6 +364,16 @@ fn characteristics_in(
 /// the subscribe that follows raises the link without trouble. The radio is
 /// only asked when the cache has nothing, which is the case before a bond.
 fn find_characteristics(service: &GattDeviceService) -> Result<(GattCharacteristic, GattCharacteristic), String> {
+    // A cached service still needs access in this process. Open it for shared
+    // use before enumerating its characteristics, and retain it in Link.
+    let access = wait(service.RequestAccessAsync().map_err(|e| err("service access", e))?, "service access")?;
+    if access != DeviceAccessStatus::Allowed {
+        return Err(format!("service access: {access:?}"));
+    }
+    let opened = wait(service.OpenAsync(GattSharingMode::SharedReadAndWrite).map_err(|e| err("service open", e))?, "service open")?;
+    if opened != GattOpenStatus::Success && opened != GattOpenStatus::AlreadyOpened {
+        return Err(format!("service open: {opened:?}"));
+    }
     if let (Some(rx), Some(tx)) = characteristics_in(service, BluetoothCacheMode::Cached)? {
         log::debug!("winble: characteristics from the cache");
         return Ok((rx, tx));
@@ -368,6 +393,7 @@ fn close_link(link: Link) {
     {
         let _ = wait(op, "unsubscribe");
     }
+    let _ = link.service.Close();
     let _ = link.device.Close();
     log::info!("winble: link closed");
 }
@@ -410,17 +436,22 @@ fn open_link(app: AppHandle, mac: u64, address: &str, on_frame: Channel<Vec<u8>>
         ))
         .map_err(|e| err("notify", e))?;
 
-    let status = wait(
-        tx.WriteClientCharacteristicConfigurationDescriptorAsync(GattClientCharacteristicConfigurationDescriptorValue::Notify)
+    let subscription = wait(
+        tx.WriteClientCharacteristicConfigurationDescriptorWithResultAsync(GattClientCharacteristicConfigurationDescriptorValue::Notify)
             .map_err(|e| err("subscribe", e))?,
         "subscribe",
     )
-    .map_err(unpaired)?;
-    if status != GattCommunicationStatus::Success {
+    .and_then(|result| {
+        let status = result.Status().map_err(|e| err("subscribe", e))?;
+        if status == GattCommunicationStatus::Success {
+            Ok(())
+        } else {
+            Err(gatt_failure("subscribe", status, result.ProtocolError().and_then(|e| e.Value()).ok()))
+        }
+    });
+    if let Err(error) = subscription {
         let _ = tx.RemoveValueChanged(value_token);
-        // `ProtocolError` here is the radio refusing an unencrypted link: it
-        // is not paired with this computer, or no longer trusts the bond.
-        return Err(format!("subscribe: {status:?}. NEEDS_PAIRING"));
+        return Err(unpaired(error));
     }
 
     let status_token = device
@@ -437,7 +468,7 @@ fn open_link(app: AppHandle, mac: u64, address: &str, on_frame: Channel<Vec<u8>>
         .map_err(|e| err("status", e))?;
 
     log::info!("winble: link up to {name}");
-    Ok(Link { device, rx, tx, value_token, status_token })
+    Ok(Link { device, service, rx, tx, value_token, status_token })
 }
 
 /// Bonds with the radio using the PIN its screen shows (or its configured
@@ -557,4 +588,28 @@ pub async fn winble_disconnect(state: State<'_, WinBle>) -> Result<(), String> {
         Ok(())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temporary_gatt_failures_do_not_request_bond_repair() {
+        for status in [GattCommunicationStatus::Unreachable, GattCommunicationStatus::AccessDenied] {
+            assert!(!gatt_failure("characteristic discovery", status, None).contains("NEEDS_PAIRING"));
+        }
+        for code in [None, Some(0x01), Some(0x03), Some(0x0E)] {
+            assert!(!gatt_failure("subscribe", GattCommunicationStatus::ProtocolError, code).contains("NEEDS_PAIRING"));
+        }
+    }
+
+    #[test]
+    fn att_security_failures_request_bond_repair_and_keep_the_error_code() {
+        for code in [0x05, 0x08, 0x0F] {
+            let error = gatt_failure("subscribe", GattCommunicationStatus::ProtocolError, Some(code));
+            assert!(error.contains("NEEDS_PAIRING"));
+            assert!(error.contains(&format!("ATT 0x{code:02X}")));
+        }
+    }
 }

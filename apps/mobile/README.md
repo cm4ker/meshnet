@@ -34,6 +34,48 @@ methods and events on both. The framing is the client's
 
 CI builds a debug APK on every push (`.github/workflows/build.yml`).
 
+### Sharing a radio with Windows: realme service discovery timeout
+
+On a realme 15T running Android 16, the phone could use Node-21 normally while
+Windows failed with `service discovery: Windows gave no answer in 20 s`.
+The phone's Bluetooth log showed a read of characteristic
+`00009890-0000-1000-8000-00805f9b34fb`, owned by `com.heytap.accessory`, with no
+response. Windows never reached the relay's notification subscription. Asking
+WinRT for only the UART UUID did not isolate discovery from the vendor service.
+The desktop now uses `BluetoothCacheMode::Cached` for the UART service as well
+as its characteristics, so it can reuse a completed discovery. As described in
+[Microsoft's cache documentation](https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothcachemode),
+a cache miss still queries the device; this does not fix a first discovery
+blocked by the vendor service.
+The cached service is explicitly granted access and opened for shared reading
+and writing in each process, then retained until disconnect. Without that,
+restarting the Windows app could immediately return `AccessDenied` while
+enumerating characteristics.
+
+Discovery and subscription failures also used to request pairing for every
+non-success status. On a phone, that automatically removed the existing bond
+even for a temporary `Unreachable` or `AccessDenied` result, losing Windows'
+ability to resolve the phone's rotating BLE address. The desktop now requests
+bond repair only for ATT authentication/authorization/encryption errors
+(`0x05`, `0x08`, `0x0F`); a device with no bond still follows the pairing flow.
+
+To diagnose this specific conflict with an attached phone, temporarily disable
+the accessory package, connect to the phone in the Windows app, then restore
+the package's original enabled state. On the tested phone that state was
+`default`:
+
+    adb shell pm disable-user --user 0 com.heytap.accessory
+    # Connect to realme 15T in Meshnet on Windows.
+    adb shell pm default-state --user 0 com.heytap.accessory
+
+The package runs realme's cross-device features, which are unavailable during
+this brief test. A plain `am force-stop` was insufficient: the service restarted
+before discovery completed. With its original state restored, the tested link
+continued working and reconnected; both clients read Node-21's battery, 93
+contacts and four channels. This is a device-specific workaround, not a fix
+for the vendor service; a later return of its unresponsive GATT service can
+cause the timeout again.
+
 ## iOS
 
 It needs a Mac with Xcode. The Mac here is `server.lan`, the same one the Sovabox
