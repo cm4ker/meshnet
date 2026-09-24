@@ -95,7 +95,7 @@ async function begin(key: string, mode: Ping["mode"], via: string[] | null): Pro
     }
     const chain = path.target ? [...path.relays, path.target] : path.relays;
     if (chain.length === 0) {
-      publish({ ...base, running: false, error: "Heard direct: there is nobody between you to ping." });
+      publish({ ...base, running: false, error: "Heard direct: there is nobody between you to check." });
       return null;
     }
     const ping = { ...base, chain, targetInChain: path.target !== null };

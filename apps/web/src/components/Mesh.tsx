@@ -27,11 +27,11 @@ import { act } from "../lib/toast.js";
 import { closeTool, dropOnRoute, lineOfSightTo, openLineOfSight, tapInRoute, whoHearsMe } from "../lib/toolActions.js";
 import { getTextScale, subscribeTextSize } from "../theme/textSize.js";
 import { IconButton } from "../ui/Button.js";
-import { AirMark } from "../ui/List.js";
+import { AirMark, Group } from "../ui/List.js";
 import { Avatar } from "./Avatar.js";
 import { ChatIcon, CloseIcon, InfoIcon, RefreshIcon, SearchIcon, StarFilledIcon, WavesIcon } from "./Icons.js";
 import { LOW_BATTERY_MV } from "./node/Status.js";
-import { NodeCheck } from "./tools/NodeCheck.js";
+import { RouteLink } from "./tools/RouteSheet.js";
 import { ToolPanel } from "./tools/ToolPanel.js";
 
 // Leaflet and its styles load with the map, not with the app.
@@ -322,13 +322,14 @@ const NodeRow = memo(function NodeRow({ contact: c, selected, yours, onOpen, log
 
 /**
  * What goes over the nodes: the tool in use, or else the route to the node
- * picked, coloured by its last ping, or as its last discovery found it,
- * whichever is newer.
+ * picked or opened, coloured by its last check, or as its last search found
+ * it, whichever is newer.
  */
 function useMeshOverlay(selected: string | null, state: SessionState): MapOverlay {
   const tool = useMeshTool();
-  const ping = usePing(tool?.kind === "route" ? tool.key : selected);
-  const discovery = useDiscovery(selected);
+  const focus = tool?.kind === "route" ? tool.key : selected;
+  const ping = usePing(focus);
+  const discovery = useDiscovery(focus);
   const hears = useHears();
   const self = state.self;
   const radio: LinkRadio | null = useMemo(
@@ -337,9 +338,9 @@ function useMeshOverlay(selected: string | null, state: SessionState): MapOverla
   );
   // A route being changed marks the legs the terrain closes; they are read once and kept.
   const editLegs = useMemo(() => {
-    if (tool?.kind !== "route") return [];
+    if (tool?.kind !== "route" || !tool.draft) return [];
     const target = state.contacts[tool.key];
-    const ends: (LosEnd | null)[] = [selfEnd(state), ...tool.relays.map((k) => { const r = state.contacts[k] ?? relayOf(k, state.contacts); return r ? contactEnd(r) : null; }), target ? contactEnd(target) : null];
+    const ends: (LosEnd | null)[] = [selfEnd(state), ...tool.draft.map((k) => { const r = state.contacts[k] ?? relayOf(k, state.contacts); return r ? contactEnd(r) : null; }), target ? contactEnd(target) : null];
     return ends.slice(1).flatMap((b, i) => {
       const a = ends[i];
       return a && b ? [{ a, b, ha: defaultHeight(a, state.contacts), hb: defaultHeight(b, state.contacts) }] : [];
@@ -350,14 +351,14 @@ function useMeshOverlay(selected: string | null, state: SessionState): MapOverla
   const overlay =
     tool?.kind === "los"
       ? losOverlay(tool)
-      : tool?.kind === "route"
-        ? editOverlay(tool, state, new Set(blockedKey ? blockedKey.split(";") : []), ping)
+      : tool?.kind === "route" && tool.draft
+        ? editOverlay(tool.key, tool.draft, state, new Set(blockedKey ? blockedKey.split(";") : []), ping)
         : tool?.kind === "hears"
           ? hearsOverlay(hears, state)
-          : selected
+          : focus
             ? discovery && (discovery.running || discovery.found) && discovery.at >= (ping?.at ?? 0)
-              ? discoveryOverlay(selected, state, discovery)
-              : routeOverlay(selected, state, ping)
+              ? discoveryOverlay(focus, state, discovery)
+              : routeOverlay(focus, state, ping)
             : EMPTY_OVERLAY;
   // The state changes with every packet heard; the lines are drawn again only when they change.
   const same = JSON.stringify(overlay);
@@ -386,7 +387,7 @@ export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zo
     // The legs of a pinged route carry what the ping measured on them.
     const back = tool?.kind === "los" ? tool.back : selected;
     let heard: [number, number] | null = null;
-    if (!tool && selected && ping) {
+    if ((!tool || (tool.kind === "route" && !tool.draft)) && selected && ping && !ping.via) {
       const relays = ping.targetInChain ? ping.chain.slice(0, -1) : ping.chain;
       const keys = ["self", ...relays.map((h) => relayOf(h, state.contacts)?.key ?? h), selected];
       const index = keys.findIndex((k, i) => k === from.key && keys[i + 1] === to.key);
@@ -405,7 +406,7 @@ export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zo
   );
 }
 
-/** A picked node, in a few lines: who, how far, which way the messages go, and a ping along that way. */
+/** A picked node, in a few lines: who, how far, the row that opens its route, and the way to its chat and profile. */
 export function NodeCard({ contactKey, onClose }: { contactKey: string; onClose: () => void }) {
   const state = useSession();
   const c = state.contacts[contactKey];
@@ -423,7 +424,9 @@ export function NodeCard({ contactKey, onClose }: { contactKey: string; onClose:
           <CloseIcon size={18} />
         </IconButton>
       </div>
-      <NodeCheck contactKey={c.key} />
+      <Group>
+        <RouteLink contactKey={c.key} />
+      </Group>
       <div className="hero-actions">
         {isConversationType(c.type) ? (
           <button type="button" className="hero-act primary" onClick={() => openConversation(contactConversation(c.key))}>
@@ -758,7 +761,7 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
           ) : group ? (
             <GroupList keys={group} onPick={pick} onClose={() => setGroup(null)} />
           ) : (
-            <MeshListBodyNoSearch onOpen={(key) => openProfile(key)} />
+            <MeshListBodyNoSearch onOpen={pick} />
           )}
           {/* The part of the sheet below the screen's edge, so the end of the list can be scrolled into view. */}
           <div aria-hidden="true" style={{ height: full - heights[detent] }} />

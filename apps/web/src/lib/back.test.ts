@@ -17,7 +17,7 @@ test("at the chat list with nothing open there is no step, and the app may leave
 test("screens close one at a time, down to the chat list", () => {
   openConversation("c:abc");
   push({ kind: "profile", key: "abc" });
-  push({ kind: "route", key: "abc" });
+  push({ kind: "node", key: "abc", page: "history" });
   assert.equal(goBack(), true);
   assert.deepEqual(getNav().stacks.chats.map((s) => s.kind), ["chat", "profile"]);
   assert.equal(goBack(), true);

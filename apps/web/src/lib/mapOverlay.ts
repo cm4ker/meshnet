@@ -202,16 +202,16 @@ export function discoveryOverlay(key: string, state: SessionState, d: Discovery)
  * the contact it leads to; coloured once it is pinged as it stands. Every
  * leg opens its line of sight, even one that goes round a node off the map.
  */
-export function editOverlay(tool: Extract<MeshTool, { kind: "route" }>, state: SessionState, blocked: Set<string>, ping: Ping | null): MapOverlay {
-  const target = state.contacts[tool.key];
-  const ends = [selfEnd(state), ...tool.relays.map((k) => { const r = state.contacts[k] ?? relayOf(k, state.contacts); return r ? contactEnd(r) : null; }), target ? contactEnd(target) : null];
+export function editOverlay(key: string, relays: string[], state: SessionState, blocked: Set<string>, ping: Ping | null): MapOverlay {
+  const target = state.contacts[key];
+  const ends = [selfEnd(state), ...relays.map((k) => { const r = state.contacts[k] ?? relayOf(k, state.contacts); return r ? contactEnd(r) : null; }), target ? contactEnd(target) : null];
   const toPerson = target?.type !== AdvType.Repeater;
-  const pinged = ping?.via && sameRelays(ping.via, tool.relays) ? ping : null;
+  const pinged = ping?.via && sameRelays(ping.via, relays) ? ping : null;
   const measured = pingTone(pinged, ends.length - 1, toPerson);
   const tone = (i: number): LineTone => (pinged ? measured(i) : i === ends.length - 2 && toPerson ? "dest" : "unknown");
-  const overlay = chainOverlay(ends, tool.relays, tone, (a, b) => (blocked.has(legId(a, b)) ? "blocked" : undefined), !pinged?.running);
+  const overlay = chainOverlay(ends, relays, tone, (a, b) => (blocked.has(legId(a, b)) ? "blocked" : undefined), !pinged?.running);
   const numbers: Record<string, number> = {};
-  tool.relays.forEach((k, i) => (numbers[k] = i + 1));
+  relays.forEach((k, i) => (numbers[k] = i + 1));
   return { ...overlay, lines: overlay.lines.map((l) => ({ ...l, tappable: true })), numbers };
 }
 

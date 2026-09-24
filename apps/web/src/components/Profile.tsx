@@ -2,15 +2,15 @@ import { useState } from "react";
 import { AdvType, aclRoleName, contactConversation, isConversationType, isFavourite, isNodeType, NoReplyError } from "@meshnet/meshcore";
 import { ago, agoPhrase } from "../lib/format.js";
 import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "../lib/geo.js";
-import { openConversation, openNodePage, openRoute, showOnMap, type NodePage } from "../lib/nav.js";
+import { useWide } from "../lib/layout.js";
+import { openConversation, openNodePage, showOnMap, useNav, type NodePage } from "../lib/nav.js";
 import { heardAt, isAdmin, kindLabel } from "../lib/nodes.js";
-import { routeWords } from "../lib/routes.js";
 import { forgetPassword, hasSavedPassword, useSavedPasswords } from "../lib/secrets.js";
 import { session, useSession } from "../lib/session.js";
 import { act, toast } from "../lib/toast.js";
 import { IconButton } from "../ui/Button.js";
 import { Confirm, Prompt } from "../ui/Dialog.js";
-import { ActionRow, Block, Group, InfoRow, LinkRow } from "../ui/List.js";
+import { ActionRow, Group, InfoRow, LinkRow } from "../ui/List.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
 import { ChatNotices } from "./ChatNotices.js";
@@ -21,7 +21,7 @@ import { SignIn } from "./node/SignIn.js";
 import { Readings } from "./Readings.js";
 import { NotOnRadio } from "./ContactsPages.js";
 import { Gone, ScreenHead, type Chrome } from "./ScreenHead.js";
-import { NodeCheck } from "./tools/NodeCheck.js";
+import { RouteLink } from "./tools/RouteSheet.js";
 
 const PAGES: Record<NodePage, { label: string; icon: React.ReactNode; admin: boolean }> = {
   neighbours: { label: "Neighbours", icon: <UsersIcon size={17} />, admin: false },
@@ -46,6 +46,10 @@ export function nodePages(type: number): NodePage[] {
 export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Chrome }) {
   const state = useSession();
   const saved = useSavedPasswords();
+  // Beside the map, the node is on it already.
+  const wide = useWide();
+  const section = useNav().section;
+  const mapBeside = wide && section === "mesh";
   const contact = state.contacts[contactKey];
   const [ask, setAsk] = useState<"rename" | "remove" | "forget" | "reboot" | "signin" | null>(null);
   const online = state.status === "ready";
@@ -88,7 +92,6 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
   const placed = hasPosition(contact.lat, contact.lon);
   const where = self && placed && hasPosition(self.lat, self.lon) ? `${formatDistance(distanceKm(self.lat, self.lon, contact.lat, contact.lon))} ${compass(bearingDeg(self.lat, self.lon, contact.lat, contact.lon))} of you` : placed ? "" : "No position shared";
   const heard = heardAt(contact) || null;
-  const route = routeWords(contact);
   const telemetry = state.telemetry[key];
   const owner = state.ownerInfo[key];
 
@@ -176,10 +179,12 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
               </button>
             )
           ) : null}
-          <button type="button" className="hero-act" disabled={!placed} onClick={() => showOnMap(key)}>
-            <MapIcon size={20} />
-            On map
-          </button>
+          {mapBeside ? null : (
+            <button type="button" className="hero-act" disabled={!placed} onClick={() => showOnMap(key)}>
+              <MapIcon size={20} />
+              On map
+            </button>
+          )}
           <button type="button" className="hero-act" onClick={more}>
             <MoreIcon size={20} />
             More
@@ -187,10 +192,7 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
         </div>
 
         <Group>
-          <LinkRow label="Route" value={<span className={`route-${route.tone}`}>{route.text}</span>} onClick={() => openRoute(key)} />
-          <Block>
-            <NodeCheck contactKey={key} route={false} />
-          </Block>
+          <RouteLink contactKey={key} />
         </Group>
 
         {isConversationType(contact.type) ? <ChatNotices conversation={contactConversation(key)} direct={contact.type !== AdvType.Room} /> : null}

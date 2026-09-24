@@ -25,7 +25,6 @@ export type Screen =
   | { kind: "message"; conversation: string; id: string }
   | { kind: "channel"; index: number }
   | { kind: "profile"; key: string }
-  | { kind: "route"; key: string }
   | { kind: "node"; key: string; page: NodePage }
   | { kind: "radio"; page: RadioPage };
 
@@ -53,7 +52,8 @@ function restore(saved: unknown): Nav {
   const value = saved as Partial<Nav>;
   if (value.stacks && SECTIONS.includes(value.section as Section)) {
     const stacks = { ...EMPTY.stacks };
-    for (const s of SECTIONS) if (Array.isArray(value.stacks[s])) stacks[s] = value.stacks[s].filter((x) => x && typeof x === "object" && "kind" in x);
+    // A route was a screen of its own before it moved to the map.
+    for (const s of SECTIONS) if (Array.isArray(value.stacks[s])) stacks[s] = value.stacks[s].filter((x) => x && typeof x === "object" && "kind" in x && (x as { kind: string }).kind !== "route");
     return { section: value.section as Section, stacks, meshFocus: typeof value.meshFocus === "string" ? value.meshFocus : null };
   }
   // Seven sections became three: Contacts, Map and Nodes are Mesh; Settings and Log are Radio.
@@ -147,10 +147,6 @@ export function openConversation(conversation: string | null): void {
 export function openProfile(key: string, inMesh = false): void {
   if (inMesh || nav.section === "radio") setStack("mesh", [{ kind: "profile", key }], { meshFocus: key });
   else push({ kind: "profile", key });
-}
-
-export function openRoute(key: string): void {
-  push({ kind: "route", key });
 }
 
 export function openChannel(index: number): void {

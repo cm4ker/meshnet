@@ -27,7 +27,6 @@ import { Profile } from "./Profile.js";
 import { RadioHome } from "./RadioHome.js";
 import { RadioPageView } from "./RadioPages.js";
 import { CleanUpHost } from "./CleanUp.js";
-import { RouteView } from "./RouteView.js";
 import { ToolPanel } from "./tools/ToolPanel.js";
 import { UpdateButton } from "./Updates.js";
 import type { Chrome } from "./ScreenHead.js";
@@ -62,8 +61,6 @@ function ScreenView({ screen, chrome, wide }: { screen: Screen; chrome: Chrome; 
       return <ChannelView index={screen.index} chrome={chrome} />;
     case "profile":
       return <Profile key={screen.key} contactKey={screen.key} chrome={chrome} />;
-    case "route":
-      return <RouteView contactKey={screen.key} chrome={chrome} />;
     case "node":
       return <NodePageView key={`${screen.key}:${screen.page}`} contactKey={screen.key} page={screen.page} chrome={chrome} tabs={wide} />;
     case "radio":
@@ -357,7 +354,8 @@ function Desktop() {
     if (target) setStack("chats", [chat, target]);
   };
 
-  useDesktopKeys({ openPalette: () => setPalette(true), togglePanel, escape: full ? back : panel ? closePanel : null });
+  // A tool on the map puts itself away first, back to where it was opened from.
+  useDesktopKeys({ openPalette: () => setPalette(true), togglePanel, escape: full ? back : nav.section === "mesh" && tool ? closeTool : panel ? closePanel : null });
 
   let list: ReactNode;
   let main: ReactNode;
@@ -371,7 +369,7 @@ function Desktop() {
       <Empty>Pick a conversation, or start one with +.</Empty>
     );
   } else if (nav.section === "mesh") {
-    const focus = panel?.kind === "profile" || panel?.kind === "route" ? panel.key : full?.key ?? nav.meshFocus;
+    const focus = panel?.kind === "profile" ? panel.key : full?.key ?? nav.meshFocus;
     list = <MeshList selected={focus ?? null} onOpen={(key) => { setGroup(null); setStack("mesh", [], { meshFocus: key }); }} />;
     main = full ? (
       <ScreenView screen={full} chrome={{ onBack: back }} wide />

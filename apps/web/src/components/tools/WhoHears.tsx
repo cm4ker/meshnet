@@ -11,7 +11,7 @@ import { setMeshTool } from "../../lib/meshTool.js";
 import { useSession } from "../../lib/session.js";
 import { Button, IconButton } from "../../ui/Button.js";
 import { CloseIcon, RadioIcon, WavesIcon } from "../Icons.js";
-import { QualityChip } from "./NodeCheck.js";
+import { QualityChip } from "./RouteSheet.js";
 
 export function WhoHears({ onClose }: { onClose: () => void }) {
   const state = useSession();

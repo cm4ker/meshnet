@@ -97,13 +97,6 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
               )}
             </button>
           </div>
-          {self ? (
-            // The preset and the power; frequency, bandwidth, SF and CR are on the page this opens.
-            <button type="button" className="radio-card-freq" onClick={() => openRadioPage("frequency")}>
-              <span>{presetName(self)}</span>
-              <span className="muted">{self.txPower} dBm</span>
-            </button>
-          ) : null}
           <div className="radio-card-actions">
             <Button variant="primary" size="lg" disabled={!online} onClick={(e) => advertise(e.detail === 0 ? null : { x: e.clientX, y: e.clientY })}>
               <AirIcon size={17} />
@@ -117,7 +110,7 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
 
         <Group title="This radio">
           {row("name", <LocationIcon size={17} />, self?.name)}
-          {row("frequency", <RadioIcon size={17} />, self ? presetName(self) : undefined)}
+          {row("frequency", <RadioIcon size={17} />, self ? `${presetName(self)} · ${self.txPower} dBm` : undefined)}
           {row("contacts", <UsersIcon size={17} />, contactsValue)}
           {row("privacy", <ShieldIcon size={17} />)}
           {row("advanced", <SlidersIcon size={17} />)}
