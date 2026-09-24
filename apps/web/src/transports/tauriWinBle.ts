@@ -53,6 +53,8 @@ class TauriWinBleTransport extends BaseTransport {
 
 /** Radios connected to before, so a launch can reach one without a scan. */
 const KNOWN_KEY = "meshnet.winble.known";
+/** How the firmware names a radio; anything else with its service is a phone sharing one. */
+const RADIO_PREFIX = "MeshCore-";
 
 function known(): FoundDevice[] {
   return readSetting<FoundDevice[]>(KNOWN_KEY, []);
@@ -90,9 +92,19 @@ export const tauriWinBleConnector: Connector = {
     let transport: TauriWinBleTransport | null = null;
     const channel = new Channel<number[]>();
     channel.onmessage = (data) => transport?.receive(data);
+    const open = () => invoke<{ name: string }>("winble_connect", { address: device.id, onFrame: channel });
     let name: string;
     try {
-      ({ name } = await invoke<{ name: string }>("winble_connect", { address: device.id, onFrame: channel }));
+      try {
+        ({ name } = await open());
+      } catch (error) {
+        // A phone sharing its radio has no PIN to type: it asks on its own
+        // screen, and Windows takes any answer. So it is paired at once, and
+        // only a radio (named MeshCore-…) is left to the PIN prompt.
+        if (!/NEEDS_PAIRING/.test(String(error)) || device.name.startsWith(RADIO_PREFIX)) throw error;
+        await invoke<string>("winble_pair", { address: device.id, pin: "" });
+        ({ name } = await open());
+      }
     } catch (error) {
       const text = String(error);
       if (/NEEDS_PAIRING/.test(text)) {
