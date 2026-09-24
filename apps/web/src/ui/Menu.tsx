@@ -134,12 +134,80 @@ function Popover({ menu }: { menu: MenuState }) {
   );
 }
 
+/**
+ * Where the toast sits: just above the field being typed in, when one is
+ * at the bottom of the screen (a chat, a console), so it covers no message;
+ * else where the stylesheet puts it, above the tab bar. A distance from the
+ * bottom, px, or null.
+ */
+function aboveComposer(): number | null {
+  const fields = [...document.querySelectorAll<HTMLElement>(".compose, .composer")];
+  const low = fields.map((el) => el.getBoundingClientRect()).filter((r) => r.height > 0 && r.bottom > window.innerHeight - 160);
+  if (low.length === 0) return null;
+  const top = Math.min(...low.map((r) => r.top));
+  return window.innerHeight - top + 8;
+}
+
+/** Seconds left for the action, and a ring that runs out with them. */
+function Countdown({ ms }: { ms: number }) {
+  const [left, setLeft] = useState(Math.ceil(ms / 1000));
+  useEffect(() => {
+    const end = Date.now() + ms;
+    const tick = setInterval(() => setLeft(Math.max(0, Math.ceil((end - Date.now()) / 1000))), 250);
+    return () => clearInterval(tick);
+  }, [ms]);
+  return (
+    <svg className="toast-ring" viewBox="0 0 20 20" aria-hidden="true">
+      <circle cx="10" cy="10" r="8" className="toast-ring-track" />
+      <circle cx="10" cy="10" r="8" className="toast-ring-run" style={{ animationDuration: `${ms}ms` }} transform="rotate(-90 10 10)" />
+      <text x="10" y="13.5" textAnchor="middle">
+        {left}
+      </text>
+    </svg>
+  );
+}
+
 export function ToastHost() {
   const toast = useToast();
+  const [bottom, setBottom] = useState<number | null>(null);
+  const start = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (!toast) return;
+    const place = () => setBottom(aboveComposer());
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [toast]);
   if (!toast) return null;
+  // A short note with nothing more to it hugs its text; the rest take the width.
+  const short = !toast.action && !toast.detail && toast.tone !== "error";
+  const icon = toast.tone === "error" ? "!" : toast.action ? "✓" : null;
   return createPortal(
-    <div key={toast.id} className={["toast", toast.tone, toast.action ? "has-action" : ""].join(" ")} role="status">
-      {toast.text}
+    <div
+      key={toast.id}
+      className={["toast", toast.tone, short ? "short" : ""].join(" ")}
+      role="status"
+      style={bottom !== null ? { bottom } : undefined}
+      // Pulled down, it goes.
+      onPointerDown={(e) => (start.current = e.clientY)}
+      onPointerMove={(e) => {
+        if (start.current !== null && e.clientY - start.current > 24) {
+          start.current = null;
+          dismissToast();
+        }
+      }}
+      onPointerUp={() => (start.current = null)}
+      onPointerCancel={() => (start.current = null)}
+    >
+      {icon ? (
+        <span className="toast-icon" aria-hidden="true">
+          {icon}
+        </span>
+      ) : null}
+      <span className="toast-text">
+        <span className="toast-main">{toast.text}</span>
+        {toast.detail ? <span className="toast-detail">{toast.detail}</span> : null}
+      </span>
       {toast.action ? (
         <button
           type="button"
@@ -151,6 +219,7 @@ export function ToastHost() {
           }}
         >
           {toast.action.label}
+          <Countdown ms={toast.ms} />
         </button>
       ) : null}
     </div>,

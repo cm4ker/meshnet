@@ -1621,25 +1621,78 @@ details.more .kv-grid {
   color: var(--danger);
 }
 
+/*
+ * What an action did: a dark card, the same in either theme, above the field
+ * being typed in or the tab bar. A line, a smaller one under it, and a button
+ * with the seconds left to use it. A short note on its own hugs its text.
+ */
 .toast {
   position: fixed;
-  left: 50%;
-  bottom: calc(var(--tabbar-height) + var(--safe-bottom) + var(--keyboard, 0px) + var(--space-4));
+  left: 12px;
+  right: 12px;
+  bottom: calc(var(--tabbar-height) + var(--safe-bottom) + var(--keyboard, 0px) + var(--space-3));
   z-index: 1200;
-  max-width: min(90vw, 480px);
-  padding: 9px 16px;
-  border-radius: 999px;
-  background: var(--text);
-  color: var(--bg);
-  font-weight: 500;
-  transform: translateX(-50%);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
-  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 10px 12px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 14px;
+  background: rgb(28 31 36 / 0.94);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  color: #f1f3f6;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+  touch-action: none;
+}
+.toast.short {
+  left: 50%;
+  right: auto;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  translate: -50% 0;
 }
 .toast.error {
-  border-radius: var(--radius-lg);
-  background: var(--danger);
-  color: #fff;
+  border-color: #6b3434;
+  background: rgb(52 26 26 / 0.96);
+}
+.toast-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #2e3a4b;
+  color: #74a9ec;
+  font-size: 14px;
+  font-weight: 700;
+}
+.toast.error .toast-icon {
+  background: #5a2a2a;
+  color: #ff9b93;
+}
+.toast-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.toast-main {
+  display: -webkit-box;
+  overflow: hidden;
+  font-weight: 600;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.toast-detail {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  color: #9aa3b1;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 @media (min-width: 840px) {
   .toast {
@@ -1648,7 +1701,13 @@ details.more .kv-grid {
 }
 @media (prefers-reduced-motion: no-preference) {
   .toast {
-    animation: fade-in 0.15s;
+    animation: toast-in 0.18s ease-out;
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
   }
 }
 
@@ -4615,20 +4674,48 @@ button.hop {
   cursor: default;
 }
 
-.toast.has-action {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  pointer-events: auto;
-}
 .toast-action {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 4px 4px;
   border: 0;
   background: transparent;
-  color: color-mix(in oklab, var(--accent) 55%, var(--bg));
+  color: #74a9ec;
   font: inherit;
   font-weight: 600;
   cursor: pointer;
-  padding: 0;
+}
+.toast-ring {
+  width: 20px;
+  height: 20px;
+}
+.toast-ring circle {
+  fill: none;
+  stroke-width: 2;
+}
+.toast-ring-track {
+  stroke: #3a404b;
+}
+.toast-ring-run {
+  stroke: #74a9ec;
+  stroke-dasharray: 50.27;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .toast-ring-run {
+    animation: toast-ring linear forwards;
+  }
+}
+@keyframes toast-ring {
+  to {
+    stroke-dashoffset: 50.27;
+  }
+}
+.toast-ring text {
+  fill: #e9edf3;
+  font-size: 9px;
+  font-weight: 600;
 }
 
 .cleanup-note {

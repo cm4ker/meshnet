@@ -60,18 +60,24 @@ export async function removeNodes(keys: string[], rule = false): Promise<void> {
   if (removed.length === 0) return;
   const max = session.getState().device?.maxContacts;
   const used = Object.values(session.getState().contacts).filter((c) => !c.unsaved).length;
-  const room = max ? ` · ${used} of ${max} used` : "";
-  toast(`${rule ? "Tidy-up removed" : "Removed"} ${nodes(removed.length)}${room}`, "", {
-    label: "Undo",
-    run: async () => {
-      try {
-        await session.restoreContacts(removed);
-        toast(`Put back ${nodes(removed.length)}`);
-      } catch (e) {
-        toast((e as Error).message, "error");
-      }
+  const detail = [rule ? "Tidy-up" : null, max ? `${used} of ${max} slots used` : null].filter(Boolean).join(" · ");
+  toast(
+    // The rule takes only nodes long unheard: say so.
+    rule ? `Removed ${removed.length} old ${removed.length === 1 ? "node" : "nodes"}` : `Removed ${nodes(removed.length)}`,
+    "",
+    {
+      label: "Undo",
+      run: async () => {
+        try {
+          await session.restoreContacts(removed);
+          toast(`Put back ${nodes(removed.length)}`);
+        } catch (e) {
+          toast((e as Error).message, "error");
+        }
+      },
     },
-  });
+    detail || undefined,
+  );
 }
 
 // ---- the rule ----
