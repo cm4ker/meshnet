@@ -223,7 +223,7 @@ function ConnectorPanel({ connector, lastDevice }: { connector: Connector; lastD
       <Prompt
         open={pinFor !== null}
         title={`Pair with ${pinFor?.name ?? "the radio"}`}
-        label="PIN shown on the radio's screen"
+        label="PIN on the radio's screen, or any digits for a phone"
         placeholder="6 digits"
         submitLabel="Pair"
         onCancel={() => {

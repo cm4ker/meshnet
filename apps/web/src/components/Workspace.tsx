@@ -2,16 +2,19 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useBackLayer, useSectionsBack } from "../lib/back.js";
 import { summarize, totalUnread } from "../lib/conversations.js";
 import { batteryPercent } from "../lib/format.js";
-import { useLink } from "../lib/link.js";
+import { pairLink, useLink } from "../lib/link.js";
 import { useWide } from "../lib/layout.js";
 import { back, focusOnMap, getNav, goSection, openConversation, setStack, shownConversation, topOf, useNav, type Nav, type Screen, type Section } from "../lib/nav.js";
 import { useMeshTool } from "../lib/meshTool.js";
 import { isTauri } from "../lib/platform.js";
 import { useSelector, useSession } from "../lib/session.js";
 import { closeTool } from "../lib/toolActions.js";
+import { toast } from "../lib/toast.js";
 import { MenuHost, ToastHost } from "../ui/Menu.js";
 import { ScreenBoundary } from "../ui/ErrorBoundary.js";
 import { Sheet } from "../ui/Sheet.js";
+import { Button } from "../ui/Button.js";
+import { Prompt } from "../ui/Dialog.js";
 import { ChannelView } from "./ChannelView.js";
 import { ChatList, NEW_CHAT_EVENT } from "./ChatList.js";
 import { ChatView } from "./ChatView.js";
@@ -72,6 +75,7 @@ function ScreenView({ screen, chrome, wide }: { screen: Screen; chrome: Chrome; 
 function Offline() {
   const state = useSession();
   const link = useLink();
+  const [asking, setAsking] = useState(false);
   if (state.status === "ready") return null;
   return (
     <div className="offline" role="status">
@@ -80,9 +84,39 @@ function Offline() {
           <span className="spinner" /> Reconnecting{link.attempt ? ` · attempt ${link.attempt}` : ""}
         </>
       ) : (
-        <>Disconnected{link.error ? `: ${link.error}` : ""}</>
+        <>
+          <span className="offline-text">Disconnected{link.error ? `: ${link.error}` : ""}</span>
+          {link.pair ? (
+            <Button size="sm" onClick={() => setAsking(true)}>
+              Pair…
+            </Button>
+          ) : null}
+        </>
       )}
+      <PairPrompt open={asking} onDone={() => setAsking(false)} />
     </div>
+  );
+}
+
+/** The PIN for a radio that wants a bond; any digits for a phone sharing its radio, which asks on its own screen. */
+function PairPrompt({ open, onDone }: { open: boolean; onDone: () => void }) {
+  return (
+    <Prompt
+      open={open}
+      title="Pair"
+      label="PIN on the radio's screen, or any digits for a phone"
+      placeholder="6 digits"
+      submitLabel="Pair"
+      onCancel={onDone}
+      onSubmit={async (pin) => {
+        try {
+          await pairLink(pin);
+          onDone();
+        } catch (error) {
+          toast(`Could not pair: ${(error as Error).message ?? error}`, "error");
+        }
+      }}
+    />
   );
 }
 

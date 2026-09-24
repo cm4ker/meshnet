@@ -884,6 +884,10 @@ textarea.input {
   font-size: var(--text-sm);
   order: -1;
 }
+.offline-text {
+  flex: 1;
+  min-width: 0;
+}
 .app.narrow .offline {
   padding-top: calc(6px + var(--safe-top));
 }

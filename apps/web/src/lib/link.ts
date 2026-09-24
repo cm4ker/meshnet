@@ -17,9 +17,11 @@ export interface LinkState {
   retrying: boolean;
   /** Which try this is, while a link is being retried or a picked radio tried again; 0 otherwise. */
   attempt: number;
+  /** The last try failed for want of a bond, and the connector can make one with a PIN (`pairLink`). */
+  pair: boolean;
 }
 
-let state: LinkState = { phase: "idle", error: null, retrying: false, attempt: 0 };
+let state: LinkState = { phase: "idle", error: null, retrying: false, attempt: 0, pair: false };
 const listeners = new Set<() => void>();
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let wantedLink: { connector: Connector; device: FoundDevice | null } | null = null;
@@ -27,7 +29,7 @@ let wantedLink: { connector: Connector; device: FoundDevice | null } | null = nu
 let generation = 0;
 
 function set(patch: Partial<LinkState>): void {
-  state = { ...state, ...patch };
+  state = { ...state, pair: false, ...patch };
   for (const listener of listeners) listener();
 }
 
@@ -107,10 +109,26 @@ export async function connectWith(connector: Connector, device: FoundDevice | nu
       if (gen !== generation) return;
       if (attempt < tries && !needsPairing(error)) continue;
       const message = error instanceof Error ? error.message : String(error);
-      set({ phase: "failed", error: message, attempt: 0 });
+      set({ phase: "failed", error: message, attempt: 0, pair: canPair(connector, device, error) });
       throw error;
     }
   }
+}
+
+function canPair(connector: Connector, device: FoundDevice | null, error: unknown): boolean {
+  return Boolean(device && connector.pair && needsPairing(error));
+}
+
+/**
+ * Bonds with the radio the last try wanted, with the PIN on its screen (for
+ * a phone sharing its radio, any digits: the phone asks on its own screen),
+ * and connects again. Throws when the pairing fails, for the PIN prompt.
+ */
+export async function pairLink(pin: string): Promise<void> {
+  const link = wantedLink;
+  if (!link?.device || !link.connector.pair) throw new Error("nothing to pair with");
+  await link.connector.pair(link.device, pin);
+  void connectWith(link.connector, link.device).catch(() => undefined);
 }
 
 export async function disconnect(): Promise<void> {
@@ -178,7 +196,13 @@ function scheduleRetry(): void {
       set({ phase: "connected", retrying: false, attempt: 0, error: null });
     } catch (error) {
       if (gen !== generation) return;
-      set({ error: error instanceof Error ? error.message : String(error) });
+      const message = error instanceof Error ? error.message : String(error);
+      if (canPair(link.connector, link.device, error)) {
+        // A radio that wants a bond will not stop wanting it: ask for the PIN instead of trying again.
+        set({ phase: "failed", error: message, retrying: false, attempt: 0, pair: true });
+        return;
+      }
+      set({ error: message });
       scheduleRetry();
     }
   }, delay);
