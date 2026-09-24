@@ -293,10 +293,14 @@ pub async fn winble_stop_scan(state: State<'_, WinBle>) -> Result<(), String> {
     Ok(())
 }
 
+/// Asks for the UART service by its UUID only. A phone sharing its radio
+/// serves other apps' services too, and Windows reads the descriptors of each
+/// service it discovers: one app that never answers (realme's accessory
+/// service does not) stalls the link until it drops.
 fn find_service(device: &BluetoothLEDevice) -> Result<GattDeviceService, String> {
     let result = wait(
         device
-            .GetGattServicesWithCacheModeAsync(BluetoothCacheMode::Uncached)
+            .GetGattServicesForUuidWithCacheModeAsync(SERVICE, BluetoothCacheMode::Uncached)
             .map_err(|e| err("services", e))?,
         "service discovery",
     )?;
@@ -305,16 +309,10 @@ fn find_service(device: &BluetoothLEDevice) -> Result<GattDeviceService, String>
         return Err(format!("service discovery: {status:?}"));
     }
     let list = result.Services().map_err(|e| err("services", e))?;
-    let mut uuids = Vec::new();
-    for service in &list {
-        let uuid = service.Uuid().map_err(|e| err("services", e))?;
-        uuids.push(format!("{uuid:?}"));
-        if uuid == SERVICE {
-            log::debug!("winble: services: {}", uuids.join(", "));
-            return Ok(service);
-        }
+    match list.into_iter().next() {
+        Some(service) => Ok(service),
+        None => Err("this device has no MeshCore UART service".into()),
     }
-    Err(format!("this radio has no MeshCore UART service (it offers {})", uuids.join(", ")))
 }
 
 fn characteristics_in(

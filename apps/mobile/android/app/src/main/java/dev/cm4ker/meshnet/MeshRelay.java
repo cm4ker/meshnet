@@ -105,6 +105,11 @@ final class MeshRelay {
     private final Runnable mtuTimeout = () -> {
         if (radio != null && radioRx == null) radio.discoverServices();
     };
+    /** Discoveries that came back without the UART service; tried again a few times, a second apart. */
+    private int discoveries = 0;
+    private final Runnable rediscover = () -> {
+        if (radio != null && radioRx == null) radio.discoverServices();
+    };
 
     private BluetoothDevice computer;
     private int computerMtu = 23;
@@ -337,6 +342,7 @@ final class MeshRelay {
     };
 
     private void attachComputer(BluetoothDevice device) {
+        Log.i(TAG, "computer subscribed: " + device.getAddress());
         if (computer != null && computer.equals(device)) return;
         computer = device;
         backlog.clear();
@@ -411,6 +417,7 @@ final class MeshRelay {
 
         @Override
         public void onConnectionStateChange(BluetoothDevice device, int status, int newState) {
+            Log.i(TAG, "computer " + device.getAddress() + " state " + newState + " status " + status);
             main.post(() -> {
                 if (newState == BluetoothProfile.STATE_DISCONNECTED && device.equals(computer)) dropComputer();
             });
@@ -423,8 +430,16 @@ final class MeshRelay {
             });
         }
 
+        /** Nothing here is readable, but every request is answered: one left unanswered stalls the computer's discovery. */
+        @Override
+        public void onCharacteristicReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattCharacteristic characteristic) {
+            Log.i(TAG, "computer reads " + characteristic.getUuid());
+            respond(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, new byte[0]);
+        }
+
         @Override
         public void onDescriptorReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattDescriptor descriptor) {
+            Log.i(TAG, "computer reads descriptor " + descriptor.getUuid());
             byte[] value = device.equals(computer)
                 ? BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
                 : BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE;
@@ -441,6 +456,7 @@ final class MeshRelay {
             int offset,
             byte[] value
         ) {
+            Log.i(TAG, "computer writes descriptor " + descriptor.getUuid());
             if (responseNeeded) respond(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null);
             if (!CCCD.equals(descriptor.getUuid()) || !TX.equals(descriptor.getCharacteristic().getUuid())) return;
             boolean subscribed = value != null && value.length > 0 && (value[0] & 0x01) != 0;
@@ -463,6 +479,7 @@ final class MeshRelay {
             int offset,
             byte[] value
         ) {
+            Log.d(TAG, "computer writes " + (value == null ? 0 : value.length) + " bytes");
             if (responseNeeded) respond(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value);
             if (!RX.equals(characteristic.getUuid()) || value == null) return;
             main.post(() -> {
@@ -478,6 +495,7 @@ final class MeshRelay {
 
         @Override
         public void onExecuteWrite(BluetoothDevice device, int requestId, boolean execute) {
+            Log.i(TAG, "computer executes a long write: " + execute);
             respond(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null);
             main.post(() -> {
                 byte[] frame = prepared.toByteArray();
@@ -602,6 +620,8 @@ final class MeshRelay {
                         gatt.discoverServices();
                     }
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    main.removeCallbacks(rediscover);
+                    discoveries = 0;
                     radioRx = null;
                     radioWrites.clear();
                     radioWriting = false;
@@ -626,9 +646,12 @@ final class MeshRelay {
                 if (gatt != radio) return;
                 BluetoothGattService service = gatt.getService(SERVICE);
                 if (status != BluetoothGatt.GATT_SUCCESS || service == null) {
+                    // Right after the link comes up, Android can answer from a discovery still under way.
                     Log.w(TAG, "the radio's UART service was not found: " + status);
+                    if (++discoveries < 5) main.postDelayed(rediscover, 1000);
                     return;
                 }
+                discoveries = 0;
                 radioRx = service.getCharacteristic(RX);
                 BluetoothGattCharacteristic tx = service.getCharacteristic(TX);
                 if (radioRx == null || tx == null) {
