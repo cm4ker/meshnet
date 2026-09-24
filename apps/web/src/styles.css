@@ -3432,6 +3432,13 @@ button.hop {
 .console-composer .input {
   font-size: var(--text-sm);
 }
+/* What the value after the command is, once the command is typed. */
+.console-hint {
+  display: block;
+  padding: 0 0 var(--space-2) var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
 .console-composer .composer-row {
   align-items: center;
 }

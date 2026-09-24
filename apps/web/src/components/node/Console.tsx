@@ -1,41 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import type { ConsoleEntry, ContactRecord } from "@meshnet/meshcore";
+import { suggest } from "../../lib/cli.js";
 import { timeOfDay } from "../../lib/format.js";
 import { session, useSession } from "../../lib/session.js";
 import { Button } from "../../ui/Button.js";
 import { Confirm } from "../../ui/Dialog.js";
 
-/** The commands offered as chips, and completed from. `CommonCLI.cpp` has the whole set. */
-const KNOWN = [
-  "ver",
-  "board",
-  "clock",
-  "clock sync",
-  "advert",
-  "advert.zerohop",
-  "neighbors",
-  "get name",
-  "get radio",
-  "get tx",
-  "get repeat",
-  "get flood.max",
-  "get advert.interval",
-  "get owner.info",
-  "get public.key",
-  "get role",
-  "set tx ",
-  "set name ",
-  "set repeat ",
-  "clear stats",
-  "powersaving",
-  "log start",
-  "log stop",
-  "reboot",
-  "tempradio ",
-];
-
 /** Commands that take a node down, move it, or lock people out. */
-const DANGEROUS = /^(reboot|clkreboot|erase|start ota|poweroff|shutdown|set radio|password |set prv\.key|set guest\.password)/;
+const DANGEROUS = /^(reboot|clkreboot|erase|start ota|poweroff|shutdown|set radio |password |set prv\.key|set guest\.password|setperm |set wifi\.(ssid|pwd) )/;
 
 export function Console({ contact }: { contact: ContactRecord }) {
   const state = useSession();
@@ -68,8 +40,17 @@ export function Console({ contact }: { contact: ContactRecord }) {
     else send(command);
   };
 
+  const typed = draft.trim();
+  const { chips, hint } = suggest(draft);
+
   const past = entries.filter((e) => e.command && !e.command.includes("••")).map((e) => e.command);
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    // Tab takes the first suggestion, as a shell would.
+    if (e.key === "Tab" && typed && chips[0]) {
+      e.preventDefault();
+      setDraft(chips[0].fill);
+      return;
+    }
     if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
     if (past.length === 0) return;
     e.preventDefault();
@@ -78,9 +59,6 @@ export function Console({ contact }: { contact: ContactRecord }) {
     setRecall(next === past.length ? null : next);
     setDraft(next === past.length ? "" : past[next]!);
   };
-
-  const typed = draft.trim();
-  const suggestions = typed ? KNOWN.filter((k) => k.startsWith(typed) && k.trim() !== typed).slice(0, 6) : ["ver", "clock", "get radio", "neighbors", "advert"];
 
   return (
     <>
@@ -96,17 +74,17 @@ export function Console({ contact }: { contact: ContactRecord }) {
       </div>
       <form className="composer console-composer" onSubmit={submit}>
         <div className="chips console-chips">
-          {suggestions.map((s) => (
+          {chips.map((s) => (
             <button
-              key={s}
+              key={s.fill}
               type="button"
               className="chip mono"
               onClick={() => {
-                setDraft(s);
+                setDraft(s.fill);
                 input.current?.focus();
               }}
             >
-              {s.trim()}
+              {s.label}
             </button>
           ))}
           {entries.length > 0 ? (
@@ -115,6 +93,7 @@ export function Console({ contact }: { contact: ContactRecord }) {
             </button>
           ) : null}
         </div>
+        {hint ? <span className="console-hint mono">{hint}</span> : null}
         <div className="composer-row">
           <span className="prompt" aria-hidden="true">
             ›
