@@ -11,6 +11,7 @@
 
 import { MeshCoreClient, MeshCoreError, TimeoutError, type TextSendResult } from "./client.js";
 import { ByteReader, bytesEqual, fromHex, pathByteLength, toHex, unixNow } from "./protocol/bytes.js";
+import { traceBudgetMs } from "./protocol/airtime.js";
 import { groupTextPayload, heardGroupTextPayload } from "./protocol/group.js";
 import { PayloadType, parseRawPacket, type RawPacket } from "./protocol/packet.js";
 import { AclRole, AdvType, Cmd, ContactFlag, ControlType, ErrCode, MAX_TEXT_LEN, PUB_KEY_PREFIX_SIZE, StatsType, TxtType } from "./protocol/codes.js";
@@ -357,7 +358,7 @@ export interface SessionOptions {
   /** How long to wait for a remote node, from the radio's estimate; for tests. */
   replyWaitMs?: (estimateMs: number, extraMs: number) => number;
   trace?: ConstructorParameters<typeof MeshCoreClient>[1] extends infer O ? (O extends { trace?: infer T } ? T : never) : never;
-  /** How long to wait for a trace to come back, from the radio's estimate; for tests. */
+  /** How long to wait for a trace to come back, from the time worked out for it; for tests. */
   traceWaitMs?: (estimateMs: number) => number;
 }
 
@@ -815,7 +816,7 @@ export class MeshSession {
     this.storage = options.storage ?? null;
     this.now = options.now ?? (() => Date.now());
     this.replyWait = options.replyWaitMs ?? replyWaitMs;
-    this.traceWait = options.traceWaitMs ?? ((estimate) => Math.min(30_000, Math.max(2_500, estimate * 1.2 + 500)));
+    this.traceWait = options.traceWaitMs ?? ((budget) => Math.min(30_000, Math.max(2_500, budget)));
     this.trace = options.trace;
   }
 
@@ -2352,10 +2353,15 @@ export class MeshSession {
    * One trace out along `hashes` and back: the same way, or through
    * `homeVia`, the relays from the last of `hashes` home, nearest it first. The radio
    * does not care which way a trace comes back, only that it ends in range.
-   * Resolves with how it came back, or null when it did not within the time
-   * the radio estimated.
+   * Resolves with how it came back, or null when it did not in time.
+   *
+   * The time is worked out from the radio's own settings (`traceBudgetMs`):
+   * the radio's estimate allows six airtimes a hop where a hop takes at most
+   * about two and a half, so a lost trace would be waited on three times as
+   * long as it needs. Should one come back later all the same, up to the
+   * radio's estimate, `onLate` hears it.
    */
-  async traceRoute(hashes: string[], homeVia?: string[]): Promise<TraceResult | null> {
+  async traceRoute(hashes: string[], homeVia?: string[], onLate?: (result: TraceResult) => void): Promise<TraceResult | null> {
     if (hashes.length === 0) throw new Error("nothing to trace");
     const client = this.need();
     const home = homeVia ?? hashes.slice(0, -1).reverse();
@@ -2368,13 +2374,29 @@ export class MeshSession {
     const back = new Promise<Extract<PushFrame, { kind: "traceData" }>>((resolve) => (arrive = resolve));
     this.traceWaiters.set(tag, (frame) => arrive(frame));
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let listening = false;
     try {
       const sent = await client.sendTracePath(tag, 0, Math.log2(size), fromHex(path.join("")));
       const started = this.now();
-      const wait = this.traceWait(sent.estTimeoutMs);
+      const self = this.state.self;
+      const budget = self && self.bandwidthHz > 0 ? Math.min(sent.estTimeoutMs, traceBudgetMs(path.length, size, self)) : sent.estTimeoutMs * 1.2 + 500;
+      const wait = this.traceWait(budget);
       const frame = await Promise.race([back, new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), wait)))]);
       if (!frame) {
         this.log("trace", `${path.join(" ")}: no answer in ${(wait / 1000).toFixed(1)} s`);
+        const lateFor = sent.estTimeoutMs * 1.2 + 500 - wait;
+        if (onLate && lateFor > 0) {
+          // Still listened for, up to the radio's own estimate.
+          listening = true;
+          const giveUp = setTimeout(() => this.traceWaiters.delete(tag), lateFor);
+          this.traceWaiters.set(tag, (late) => {
+            clearTimeout(giveUp);
+            this.traceWaiters.delete(tag);
+            const rttMs = Math.max(0, this.now() - started);
+            this.log("trace", `${path.join(" ")}: back late, in ${rttMs} ms`);
+            onLate({ rttMs, snrs: late.snrs });
+          });
+        }
         return null;
       }
       const rttMs = Math.max(0, this.now() - started);
@@ -2382,7 +2404,7 @@ export class MeshSession {
       return { rttMs, snrs: frame.snrs };
     } finally {
       if (timer) clearTimeout(timer);
-      this.traceWaiters.delete(tag);
+      if (!listening) this.traceWaiters.delete(tag);
     }
   }
 

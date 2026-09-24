@@ -1622,6 +1622,19 @@ test("a trace can come home another way than it went", async () => {
   await session.disconnect();
 });
 
+test("a trace that comes back after it was given up on is still heard, up to the radio's estimate", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ traceWaitMs: () => 30 });
+  await session.connect(radio);
+  const late: number[][] = [];
+  assert.equal(await session.traceRoute(["3f"], undefined, (r) => late.push(r.snrs)), null);
+  const frame = radio.sent.find((f) => f[0] === Cmd.SendTracePath)!;
+  radio.push(new ByteWriter().u8(Push.TraceData).u8(0).u8(1).u8(0).bytes(frame.subarray(1, 5)).u32(0).bytes(new Uint8Array([0x3f])).i8(8).i8(12).toBytes());
+  await tick();
+  assert.deepEqual(late, [[2, 3]]);
+  await session.disconnect();
+});
+
 test("a trace that does not come back resolves with nothing", async () => {
   const radio = new ScriptedRadio();
   const session = new MeshSession({ traceWaitMs: () => 30 });
