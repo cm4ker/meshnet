@@ -1611,6 +1611,17 @@ test("a trace goes out and back along the path, and resolves with every hop's SN
   await session.disconnect();
 });
 
+test("a trace can come home another way than it went", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ traceWaitMs: () => 30 });
+  await session.connect(radio);
+  // Out through 3f and a1, home through 5c and 3f; two-byte hashes are traced at the shortest size given.
+  await session.traceRoute(["3f01", "a102"], ["5c", "3f"]);
+  const frame = radio.sent.find((f) => f[0] === Cmd.SendTracePath)!;
+  assert.deepEqual([...frame.subarray(9)], [0, 0x3f, 0xa1, 0x5c, 0x3f]);
+  await session.disconnect();
+});
+
 test("a trace that does not come back resolves with nothing", async () => {
   const radio = new ScriptedRadio();
   const session = new MeshSession({ traceWaitMs: () => 30 });

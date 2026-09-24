@@ -2349,16 +2349,20 @@ export class MeshSession {
   }
 
   /**
-   * One trace out along `hashes` and back the same way. Resolves with how it
-   * came back, or null when it did not within the time the radio estimated.
+   * One trace out along `hashes` and back: the same way, or through
+   * `homeVia`, the relays from the last of `hashes` home, nearest it first. The radio
+   * does not care which way a trace comes back, only that it ends in range.
+   * Resolves with how it came back, or null when it did not within the time
+   * the radio estimated.
    */
-  async traceRoute(hashes: string[]): Promise<TraceResult | null> {
+  async traceRoute(hashes: string[], homeVia?: string[]): Promise<TraceResult | null> {
     if (hashes.length === 0) throw new Error("nothing to trace");
     const client = this.need();
+    const home = homeVia ?? hashes.slice(0, -1).reverse();
     // A trace sizes its hashes in powers of two; a three-byte route is traced on two.
-    const shortest = Math.min(...hashes.map((h) => h.length / 2));
+    const shortest = Math.min(...[...hashes, ...home].map((h) => h.length / 2));
     const size = shortest >= 4 ? 4 : shortest >= 2 ? 2 : 1;
-    const path = [...hashes, ...hashes.slice(0, -1).reverse()].map((h) => h.slice(0, size * 2));
+    const path = [...hashes, ...home].map((h) => h.slice(0, size * 2));
     const tag = randomU32();
     let arrive: (frame: Extract<PushFrame, { kind: "traceData" }>) => void = () => undefined;
     const back = new Promise<Extract<PushFrame, { kind: "traceData" }>>((resolve) => (arrive = resolve));
