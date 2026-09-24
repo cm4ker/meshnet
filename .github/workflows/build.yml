@@ -109,6 +109,8 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
+      - name: Relay checks
+        run: bash apps/mobile/android/tests/run.sh
       - run: pnpm install --frozen-lockfile
       - run: node scripts/release.mjs prepare
       - run: pnpm --filter @meshnet/mobile android:apk

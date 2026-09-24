@@ -14,6 +14,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(MeshTcpPlugin.class);
         registerPlugin(SystemTextPlugin.class);
         registerPlugin(NoticesPlugin.class);
+        registerPlugin(MeshRelayPlugin.class);
         super.onCreate(savedInstanceState);
 
         // The page draws its text at the system's size itself (SystemTextPlugin); the WebView scaling

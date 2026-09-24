@@ -72,11 +72,16 @@ class CapacitorBleTransport extends BaseTransport {
 
   protected async shutdown(): Promise<void> {
     void unwatchRadio(this.deviceId);
-    await this.relay?.close();
-    try {
-      await this.client.stopNotifications(this.deviceId, BLE.service, BLE.tx);
-    } catch {
-      // Already gone.
+    if (this.relay) {
+      // Not unsubscribed: Android shares the subscription with the relay's own
+      // client on the same link, and the computer would stop hearing the radio.
+      await this.relay.close();
+    } else {
+      try {
+        await this.client.stopNotifications(this.deviceId, BLE.service, BLE.tx);
+      } catch {
+        // Already gone.
+      }
     }
     try {
       await this.client.disconnect(this.deviceId);

@@ -1,13 +1,15 @@
 /**
- * Sharing the radio with a computer, from an iPhone (`MeshRelay.swift`). The
+ * Sharing the radio with a computer, from a phone (`MeshRelay.swift` on iOS,
+ * `MeshRelay.java` on Android, alike but for the name a computer sees). The
  * phone serves the radio's own Bluetooth service, so a computer nearby
  * connects to the phone as if it were the radio, and uses it through the
  * phone, in the background too.
  *
  * Both use the radio at once: while sharing is on, the page's frames go
  * through the relay as well, and the relay takes turns between the two and
- * keeps each a copy of every message (see `MeshRelayMux.swift`). The BLE
- * transport opens the relay (`openRelay`) when the switch is on.
+ * keeps each a copy of every message (see `MeshRelayMux.swift` and
+ * `RelayMux.java`). The BLE transport opens the relay (`openRelay`) when the
+ * switch is on.
  */
 
 import { useSyncExternalStore } from "react";
@@ -39,7 +41,8 @@ let state: RelayState = { on: false, computer: false };
 const listeners = new Set<() => void>();
 
 export function relayAvailable(): boolean {
-  return shell() === "capacitor" && nativePlatform() === "ios";
+  const platform = nativePlatform();
+  return shell() === "capacitor" && (platform === "ios" || platform === "android");
 }
 
 /** Whether the page should reach its BLE radio through the relay. */
