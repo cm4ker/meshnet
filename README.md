@@ -89,7 +89,7 @@ Download the [rolling development build](https://github.com/cm4ker/meshnet/relea
 
 | Platform | Bluetooth LE | USB serial | Wi-Fi / TCP | Build availability |
 | :--- | :---: | :---: | :---: | :--- |
-| Windows | ✓ | ✓ | ✓ | CI installers for x64 and ARM64 |
+| Windows | ✓ | ✓ | ✓ | CI installers for x64, 32-bit x86 and ARM64 |
 | macOS / Linux | ✓ | ✓ | ✓ | Build the Tauri shell from source |
 | Android | ✓ | — | ✓ | CI debug APK; mobile app name: Ommesh |
 | iOS | ✓ | — | ✓ | Build with Xcode on a Mac; see [mobile guide](apps/mobile/README.md) |

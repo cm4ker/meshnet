@@ -89,7 +89,7 @@
 
 | Платформа | Bluetooth LE | USB serial | Wi-Fi / TCP | Доступные сборки |
 | :--- | :---: | :---: | :---: | :--- |
-| Windows | ✓ | ✓ | ✓ | Установщики x64 и ARM64 из CI |
+| Windows | ✓ | ✓ | ✓ | Установщики x64, x86 (32 бита) и ARM64 из CI |
 | macOS / Linux | ✓ | ✓ | ✓ | Сборка оболочки Tauri из исходников |
 | Android | ✓ | — | ✓ | Отладочный APK из CI; имя приложения — Ommesh |
 | iOS | ✓ | — | ✓ | Сборка в Xcode на Mac; [мобильная документация](apps/mobile/README.md) |

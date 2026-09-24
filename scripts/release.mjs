@@ -22,7 +22,7 @@ export function releaseInfo(base, env) {
 export function makeManifest({ version, tag, repository, files, signature, date = new Date().toISOString() }) {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error("Invalid GitHub repository");
   const platforms = {};
-  for (const [arch, target] of [["x64", "windows-x86_64"], ["arm64", "windows-aarch64"]]) {
+  for (const [arch, target] of [["x64", "windows-x86_64"], ["arm64", "windows-aarch64"], ["x86", "windows-i686"]]) {
     const matches = files.filter((name) => name.endsWith(`_${arch}-setup.exe`));
     if (matches.length !== 1) throw new Error(`Expected exactly one ${arch} installer`);
     const name = matches[0];

@@ -1,5 +1,5 @@
 # Every push to master is checked and built for every home the client has:
-# Windows installers for x64 and ARM64, a debug Android APK and the web
+# Windows installers for x64, 32-bit x86 and ARM64, a debug Android APK and the web
 # bundle. Each push gets an immutable pre-release; `dev/latest.json` points
 # to the newest one. A matching `vX.Y.Z` tag makes a stable release. PRs get
 # workflow artifacts. iOS is left out: it is built on a Mac and uploaded to
@@ -60,6 +60,10 @@ jobs:
           - arch: arm64
             target: aarch64-pc-windows-msvc
             vc-arch: amd64_arm64
+          # 32-bit Windows, for older machines; WebView2 and WinRT Bluetooth both run there.
+          - arch: x86
+            target: i686-pc-windows-msvc
+            vc-arch: amd64_x86
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -143,6 +147,7 @@ jobs:
           mkdir out
           cp artifacts/meshnet-windows-x64/*.exe* out/
           cp artifacts/meshnet-windows-arm64/*.exe* out/
+          cp artifacts/meshnet-windows-x86/*.exe* out/
           cp artifacts/meshnet-android/app-debug.apk out/Meshnet_android-debug.apk
           (cd artifacts/meshnet-web && zip -qr ../../out/Meshnet_web.zip .)
           ls -l out
