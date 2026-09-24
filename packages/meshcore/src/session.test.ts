@@ -353,6 +353,37 @@ test("connecting queries the radio, reads its contacts and channels, and drains 
   assert.ok(radio.sent.some((f) => f[0] === Cmd.SetDeviceTime));
 });
 
+test("a resync asks for everything again in order on the same link, and counts what is new", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  radio.contacts.push(contactFrame(fromHex("11".repeat(32)), "Carol", 5));
+  radio.queue.push(dmFrame(BOB, "while nobody asked"));
+  radio.sent = [];
+  const steps: string[] = [];
+  const summary = await session.resync((step) => steps.push(step));
+  assert.deepEqual(steps, ["device", "self", "clock", "contacts", "channels", "autoAdd", "messages", "battery"]);
+  assert.deepEqual(summary, { contacts: 1, messages: 1 });
+  // Carol's lastMod is older than the cursor: only a full read finds her.
+  assert.equal(Object.keys(session.getState().contacts).length, 2);
+  assert.equal(radio.sent[0]?.[0], Cmd.DeviceQuery);
+  assert.equal(session.getState().status, "ready");
+});
+
+test("a resync that fails names the step and keeps what came before it", async () => {
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  radio.contacts.push(contactFrame(fromHex("11".repeat(32)), "Carol", 5));
+  const send = radio.send.bind(radio);
+  radio.send = async (frame) => {
+    if (frame[0] === Cmd.GetChannel) throw new Error("gone quiet");
+    return send(frame);
+  };
+  await assert.rejects(session.resync(), (e: Error & { step?: string }) => e.step === "channels" && /gone quiet/.test(e.message));
+  assert.equal(Object.keys(session.getState().contacts).length, 2);
+});
+
 test("a message-waiting push drains the queue again, and a focused conversation stays read", async () => {
   const radio = new ScriptedRadio();
   const session = new MeshSession({ now: () => 1_700_000_000_000 });

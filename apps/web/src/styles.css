@@ -1731,6 +1731,32 @@ details.more .kv-grid {
 
 /* ---- the radio ---- */
 
+.resync-bar {
+  flex: none;
+  height: 2px;
+  margin: 0 var(--space-3);
+  background: var(--border);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.resync-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+.pull-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding-bottom: var(--space-2);
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
 .radio-card {
   margin: var(--space-2) var(--space-3) 0;
   border-radius: 12px;

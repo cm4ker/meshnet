@@ -542,6 +542,24 @@ export class NoReplyError extends Error {
   }
 }
 
+/** What `resync` asks the radio for, in the order it asks. */
+export const RESYNC_STEPS = ["device", "self", "clock", "contacts", "channels", "autoAdd", "messages", "battery"] as const;
+export type ResyncStep = (typeof RESYNC_STEPS)[number];
+
+/** What a resync brought that was not here before it. */
+export interface ResyncSummary {
+  contacts: number;
+  messages: number;
+}
+
+/** A resync stopped at `step`. */
+export class ResyncError extends Error {
+  constructor(readonly step: ResyncStep, message: string) {
+    super(message);
+    this.name = "ResyncError";
+  }
+}
+
 /** A node answered a console command with an error of its own. */
 export class NodeCommandError extends Error {
   constructor(readonly reply: string) {
@@ -1055,6 +1073,50 @@ export class MeshSession {
       await this.saveNow();
     }
     await client.close();
+  }
+
+  /**
+   * Asks the radio again for all it was asked at connect, on the link as it
+   * is. A step that fails stops the rest, and the error names the step; what
+   * came in before it is kept. Contacts are read in full, not from the cursor.
+   */
+  async resync(onStep?: (step: ResyncStep, index: number) => void): Promise<ResyncSummary> {
+    const client = this.need();
+    const contactsBefore = new Set(Object.keys(this.state.contacts));
+    const messagesBefore = new Set(this.state.messages.filter((m) => m.direction === "in").map((m) => m.id));
+    const run: Record<ResyncStep, () => Promise<unknown>> = {
+      device: async () => this.set({ device: await client.deviceQuery() }),
+      self: async () => {
+        const { publicKey, ...rest } = await client.appStart(this.appName);
+        const key = toHex(publicKey);
+        this.set({ self: { ...rest, key, prefix: key.slice(0, PUB_KEY_PREFIX_SIZE * 2) } });
+      },
+      clock: () => this.syncClock(),
+      contacts: () => this.refreshContacts(true),
+      channels: () => this.refreshChannels(),
+      autoAdd: () => this.readAutoAdd(client),
+      messages: () => this.syncMessages(),
+      battery: async () => {
+        const { batteryMv } = await client.getBattAndStorage();
+        this.set({ battery: { mv: batteryMv, at: this.now() } });
+      },
+    };
+    for (const [index, step] of RESYNC_STEPS.entries()) {
+      onStep?.(step, index);
+      try {
+        await run[step]();
+      } catch (error) {
+        const message = (error as Error).message;
+        this.log("error", `refresh stopped at ${step}: ${message}`);
+        throw new ResyncError(step, message);
+      }
+    }
+    const summary = {
+      contacts: Object.keys(this.state.contacts).filter((k) => !contactsBefore.has(k)).length,
+      messages: this.state.messages.filter((m) => m.direction === "in" && !messagesBefore.has(m.id)).length,
+    };
+    this.log("link", `refreshed from the radio: ${summary.contacts} new contacts, ${summary.messages} new messages`);
+    return summary;
   }
 
   /** The radio's clock is set from ours when it lags; it refuses to go back, so a lead is left. */
