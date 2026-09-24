@@ -307,27 +307,36 @@ pub async fn winble_stop_scan(state: State<'_, WinBle>) -> Result<(), String> {
     Ok(())
 }
 
-/// Looks up the UART service in Windows' cache first, querying the device
-/// when it is missing. A UUID filter limits the results, but does not stop
-/// Windows from discovering other apps' services on an Android phone. An
+/// Looks up the UART service in Windows' cache first, then queries the device
+/// if the cached list has no UART service. A UUID filter limits the results,
+/// but does not stop Windows from discovering other apps' services on an Android phone. An
 /// unresponsive vendor service can stall that discovery, so do not force it
 /// again on every connection once Windows has found the UART service.
 fn find_service(device: &BluetoothLEDevice) -> Result<GattDeviceService, String> {
-    let result = wait(
-        device
-            .GetGattServicesForUuidWithCacheModeAsync(SERVICE, BluetoothCacheMode::Cached)
-            .map_err(|e| err("services", e))?,
-        "service discovery",
-    )?;
-    let status = result.Status().map_err(|e| err("services", e))?;
-    if status != GattCommunicationStatus::Success {
-        return Err(format!("service discovery: {status:?}"));
+    find_service_with(|mode| {
+        let result = wait(
+            device
+                .GetGattServicesForUuidWithCacheModeAsync(SERVICE, mode)
+                .map_err(|e| err("services", e))?,
+            "service discovery",
+        )?;
+        let status = result.Status().map_err(|e| err("services", e))?;
+        if status != GattCommunicationStatus::Success {
+            return Err(format!("service discovery: {status:?}"));
+        }
+        let list = result.Services().map_err(|e| err("services", e))?;
+        Ok(list.into_iter().next())
+    })
+}
+
+fn find_service_with<T>(mut query: impl FnMut(BluetoothCacheMode) -> Result<Option<T>, String>) -> Result<T, String> {
+    if let Some(service) = query(BluetoothCacheMode::Cached)? {
+        return Ok(service);
     }
-    let list = result.Services().map_err(|e| err("services", e))?;
-    match list.into_iter().next() {
-        Some(service) => Ok(service),
-        None => Err("this device has no MeshCore UART service".into()),
-    }
+    // Windows may have cached the phone before its app published the UART
+    // service. A successful but empty cached result is not proof of absence.
+    log::debug!("winble: UART absent from cached services; discovering on the device");
+    query(BluetoothCacheMode::Uncached)?.ok_or_else(|| "this device has no MeshCore UART service".into())
 }
 
 fn characteristics_in(
@@ -593,6 +602,53 @@ pub async fn winble_disconnect(state: State<'_, WinBle>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cached_uart_does_not_query_the_device_again() {
+        let service = find_service_with(|mode| {
+            assert_eq!(mode, BluetoothCacheMode::Cached);
+            Ok(Some("Android UART"))
+        })
+        .unwrap();
+        assert_eq!(service, "Android UART");
+    }
+
+    #[test]
+    fn a_uart_published_after_the_cached_list_is_discovered_on_the_device() {
+        let mut modes = Vec::new();
+        let service = find_service_with(|mode| {
+            modes.push(mode);
+            Ok(if mode == BluetoothCacheMode::Uncached { Some("iPhone UART") } else { None })
+        })
+        .unwrap();
+        assert_eq!(service, "iPhone UART");
+        assert_eq!(modes, [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached]);
+    }
+
+    #[test]
+    fn a_missing_uart_is_reported_only_after_uncached_discovery() {
+        let mut modes = Vec::new();
+        let result = find_service_with::<()>(|mode| {
+            modes.push(mode);
+            Ok(None)
+        });
+        assert_eq!(result.unwrap_err(), "this device has no MeshCore UART service");
+        assert_eq!(modes, [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached]);
+    }
+
+    #[test]
+    fn discovery_errors_are_preserved_without_an_extra_query() {
+        for fail_at in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
+            let mut modes = Vec::new();
+            let result = find_service_with::<()>(|mode| {
+                modes.push(mode);
+                if mode == fail_at { Err("service discovery: unavailable".into()) } else { Ok(None) }
+            });
+            assert_eq!(result.unwrap_err(), "service discovery: unavailable");
+            let expected = if fail_at == BluetoothCacheMode::Cached { 1 } else { 2 };
+            assert_eq!(modes.len(), expected);
+        }
+    }
 
     #[test]
     fn temporary_gatt_failures_do_not_request_bond_repair() {

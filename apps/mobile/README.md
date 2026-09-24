@@ -47,6 +47,10 @@ as its characteristics, so it can reuse a completed discovery. As described in
 [Microsoft's cache documentation](https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothcachemode),
 a cache miss still queries the device; this does not fix a first discovery
 blocked by the vendor service.
+An existing cached list can also omit a service that the iPhone app published
+later. When the cached UART lookup succeeds but returns nothing, the desktop
+explicitly repeats discovery with `Uncached` before reporting that the service
+is missing. A cached UART match still avoids that extra query on Android.
 The cached service is explicitly granted access and opened for shared reading
 and writing in each process, then retained until disconnect. Without that,
 restarting the Windows app could immediately return `AccessDenied` while
