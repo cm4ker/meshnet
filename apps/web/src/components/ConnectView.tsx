@@ -8,6 +8,8 @@ import { Input, Toggle } from "../ui/Field.js";
 import { LinkIcon } from "./Icons.js";
 import { UpdateButton } from "./Updates.js";
 import { PrivacyButton } from "./Privacy.js";
+import { t } from "../i18n/index.js";
+import { errorText } from "../i18n/errors.js";
 
 export function ConnectView() {
   const list = useMemo(connectors, []);
@@ -25,7 +27,7 @@ export function ConnectView() {
           <img src="./icon.svg" alt="" width={40} height={40} />
           <div>
             <h1>{shell() === "capacitor" ? "Ommesh" : "Meshnet"}</h1>
-            <p className="muted">A MeshCore companion.</p>
+            <p className="muted">{t("connect.tagline")}</p>
           </div>
         </header>
 
@@ -56,13 +58,18 @@ export function ConnectView() {
 
         {link.phase === "connecting" ? (
           <p className="connect-status">
-            <span className="spinner" /> {link.retrying ? `Reconnecting · attempt ${link.attempt}` : link.attempt > 1 ? `Connecting · attempt ${link.attempt} of ${CONNECT_TRIES}` : "Connecting…"}
+            <span className="spinner" />{" "}
+            {link.retrying
+              ? t("connect.status.reconnectingAttempt", { attempt: link.attempt })
+              : link.attempt > 1
+                ? t("connect.status.connectingAttempt", { attempt: link.attempt, tries: CONNECT_TRIES })
+                : t("connect.status.connecting")}
           </p>
         ) : null}
         {link.error && link.phase === "failed" ? <p className="connect-error">{link.error}</p> : null}
 
         <Toggle
-          label="Reconnect at launch"
+          label={t("connect.autoConnect")}
           checked={auto}
           onChange={(v) => {
             setAuto(v);
@@ -91,8 +98,8 @@ function AddressForm({ busy, onConnect }: { busy: boolean; onConnect: (device: F
       <Input
         value={text}
         onChange={(event) => setText(event.target.value)}
-        placeholder="192.168.1.50 or radio.local:5000"
-        aria-label="The radio's address"
+        placeholder={t("connect.address.placeholder")}
+        aria-label={t("connect.address.label")}
         inputMode="url"
         autoCapitalize="off"
         autoCorrect="off"
@@ -100,7 +107,7 @@ function AddressForm({ busy, onConnect }: { busy: boolean; onConnect: (device: F
         enterKeyHint="go"
       />
       <Button type="submit" variant="primary" busy={busy} disabled={!device}>
-        Connect
+        {t("connect.address.connect")}
       </Button>
     </form>
   );
@@ -110,7 +117,7 @@ function AddressForm({ busy, onConnect }: { busy: boolean; onConnect: (device: F
 function SignalBars({ rssi }: { rssi: number }) {
   const lit = rssi >= -60 ? 4 : rssi >= -75 ? 3 : rssi >= -90 ? 2 : 1;
   return (
-    <span className="signal-bars" title={`${rssi} dBm`} aria-label={`Signal ${lit} of 4`}>
+    <span className="signal-bars" title={t("connect.signal.dbm", { value: rssi })} aria-label={t("connect.signal.bars", { level: lit })}>
       {[1, 2, 3, 4].map((n) => (
         <i key={n} className={n <= lit ? "on" : ""} style={{ height: `${n * 25}%` }} />
       ))}
@@ -122,11 +129,9 @@ function NoLink() {
   const where = shell();
   return (
     <div className="stack">
-      <p>This browser cannot reach a radio: it has neither Web Bluetooth nor Web Serial.</p>
+      <p>{t("connect.noLink.title")}</p>
       <p className="muted">
-        {where === "browser"
-          ? "Chrome or Edge can. Or use the desktop or phone application, which carry their own Bluetooth and USB."
-          : "The shell offered no link; this is a bug."}
+        {where === "browser" ? t("connect.noLink.browser") : t("connect.noLink.shell")}
       </p>
     </div>
   );
@@ -158,7 +163,7 @@ function ConnectorPanel({ connector, lastDevice }: { connector: Connector; lastD
     setScanError(null);
     connector
       .scan((devices) => setFound(devices), abort.signal)
-      .catch((error: Error) => setScanError(error.message))
+      .catch((error: unknown) => setScanError(errorText(error)))
       .finally(() => setScanning(false));
     return () => abort.abort();
   }, [connector, scanRun]);
@@ -183,7 +188,7 @@ function ConnectorPanel({ connector, lastDevice }: { connector: Connector; lastD
     try {
       await connector.pair(device, pin);
     } catch (error) {
-      setPinError((error as Error).message);
+      setPinError(errorText(error));
       return;
     }
     setPinFor(null);
@@ -207,7 +212,7 @@ function ConnectorPanel({ connector, lastDevice }: { connector: Connector; lastD
               <button type="button" className="device" disabled={busy} onClick={() => connect(d)}>
                 <span className="device-text">
                   <span className="device-name">{d.name}</span>
-                  <span className="device-detail">{d.id === lastDevice?.id ? "last used" : d.detail}</span>
+                  <span className="device-detail">{d.id === lastDevice?.id ? t("connect.device.lastUsed") : d.detail}</span>
                 </span>
                 {d.rssi !== null ? <SignalBars rssi={d.rssi} /> : null}
               </button>
@@ -215,17 +220,17 @@ function ConnectorPanel({ connector, lastDevice }: { connector: Connector; lastD
           ))}
         </ul>
       ) : connector.mode === "scan" ? (
-        <p className="muted">{scanning ? "Looking for radios…" : "No radios found."}</p>
+        <p className="muted">{scanning ? t("connect.scan.looking") : t("connect.scan.none")}</p>
       ) : null}
 
       {scanError ? <p className="connect-error">{scanError}</p> : null}
 
       <Prompt
         open={pinFor !== null}
-        title={`Pair with ${pinFor?.name ?? "the radio"}`}
-        label="PIN on the radio's screen, or any digits for a phone"
-        placeholder="6 digits"
-        submitLabel="Pair"
+        title={pinFor ? t("connect.pair.titleWith", { name: pinFor.name }) : t("connect.pair.titleRadio")}
+        label={t("connect.pair.label")}
+        placeholder={t("connect.pair.placeholder")}
+        submitLabel={t("connect.pair.submit")}
         onCancel={() => {
           setPinFor(null);
           setPinError(null);
@@ -239,11 +244,11 @@ function ConnectorPanel({ connector, lastDevice }: { connector: Connector; lastD
           <AddressForm busy={busy} onConnect={connect} />
         ) : connector.mode === "picker" ? (
           <Button variant="primary" busy={busy} onClick={() => connect(null)}>
-            Choose {connector.kind === "ble" ? "a radio" : "a port"}…
+            {connector.kind === "ble" ? t("connect.choose.radio") : t("connect.choose.port")}
           </Button>
         ) : (
           <Button busy={scanning} onClick={() => setScanRun((n) => n + 1)}>
-            {scanning ? "Scanning…" : "Scan again"}
+            {scanning ? t("connect.scan.scanning") : t("connect.scan.again")}
           </Button>
         )}
       </div>

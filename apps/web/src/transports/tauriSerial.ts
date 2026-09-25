@@ -5,6 +5,7 @@
 
 import { BaseTransport, frameForStream, SERIAL_BAUD, StreamFrameDecoder } from "@meshnet/meshcore";
 import type { Connector, FoundDevice } from "./types.js";
+import { t } from "../i18n/index.js";
 
 type SerialModule = typeof import("tauri-plugin-serialplugin-api");
 
@@ -54,7 +55,7 @@ export class TauriSerialTransport extends BaseTransport {
   }
 
   async send(frame: Uint8Array): Promise<void> {
-    if (this.isClosed) throw new Error("port closed");
+    if (this.isClosed) throw new Error(t("connect.error.portClosed"));
     await this.port.writeBinary(frameForStream(frame));
   }
 
@@ -70,8 +71,12 @@ export class TauriSerialTransport extends BaseTransport {
 export const tauriSerialConnector: Connector = {
   id: "tauri-serial",
   kind: "serial",
-  title: "USB",
-  description: "Serial ports on this machine.",
+  get title() {
+    return t("connect.transport.usb");
+  },
+  get description() {
+    return t("connect.describe.shellSerial");
+  },
   mode: "scan",
 
   async scan(onFound, signal) {
@@ -97,7 +102,7 @@ export const tauriSerialConnector: Connector = {
   },
 
   async connect(device) {
-    if (!device) throw new Error("pick a port from the list");
+    if (!device) throw new Error(t("connect.error.pickPort"));
     const { SerialPort } = await serial();
     const port = new SerialPort({ path: device.id, baudRate: SERIAL_BAUD });
     const transport = new TauriSerialTransport(port, device.name);

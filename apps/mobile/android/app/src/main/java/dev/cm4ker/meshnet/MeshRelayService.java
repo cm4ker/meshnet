@@ -74,7 +74,7 @@ public class MeshRelayService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         State state = intent == null
-            ? new State("the radio", false, false, false)
+            ? new State(null, false, false, false)
             : new State(
                 intent.getStringExtra(EXTRA_NAME),
                 intent.getBooleanExtra(EXTRA_UP, false),
@@ -105,24 +105,27 @@ public class MeshRelayService extends Service {
     private static Notification notice(Context context, State state) {
         NotificationManager notices = context.getSystemService(NotificationManager.class);
         if (notices != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && notices.getNotificationChannel(CHANNEL) == null) {
-            NotificationChannel channel = new NotificationChannel(CHANNEL, "Radio connection", NotificationManager.IMPORTANCE_LOW);
-            channel.setDescription("Shown while the app keeps the radio connected in the background.");
-            channel.setShowBadge(false);
-            notices.createNotificationChannel(channel);
             notices.deleteNotificationChannel(OLD_CHANNEL);
         }
-        String name = state.name == null || state.name.isEmpty() ? "the radio" : state.name;
+        // Made again each time: the same id keeps the reader's settings, and takes the name in the language now.
+        if (notices != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(CHANNEL, Words.get(context, "relayChannel", "Radio connection"), NotificationManager.IMPORTANCE_LOW);
+            channel.setDescription(Words.get(context, "relayChannelHint", "Shown while the app keeps the radio connected in the background."));
+            channel.setShowBadge(false);
+            notices.createNotificationChannel(channel);
+        }
+        String name = state.name == null || state.name.isEmpty() ? Words.get(context, "relayTheRadio", "the radio") : state.name;
         String title;
         String text;
         if (!state.up) {
-            title = "Reconnecting to " + name;
-            text = "Waiting for the radio";
+            title = Words.get(context, "relayReconnecting", "Reconnecting to {name}", name);
+            text = Words.get(context, "relayWaitingRadio", "Waiting for the radio");
         } else if (state.sharing) {
-            title = "Sharing " + name;
-            text = state.computer ? "A computer is connected" : "Waiting for a computer";
+            title = Words.get(context, "relaySharing", "Sharing {name}", name);
+            text = state.computer ? Words.get(context, "relayComputer", "A computer is connected") : Words.get(context, "relayWaitingComputer", "Waiting for a computer");
         } else {
-            title = "Connected to " + name;
-            text = "Messages arrive with the app closed";
+            title = Words.get(context, "relayConnected", "Connected to {name}", name);
+            text = Words.get(context, "relayAppClosed", "Messages arrive with the app closed");
         }
         Intent open = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
         PendingIntent tap = open == null ? null : PendingIntent.getActivity(context, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);

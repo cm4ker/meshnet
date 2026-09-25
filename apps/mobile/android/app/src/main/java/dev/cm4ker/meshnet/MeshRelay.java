@@ -274,6 +274,11 @@ final class MeshRelay {
         return client == Client.COMPUTER ? "computer" : "page";
     }
 
+    /** The page's last settings for the core, words included (see {@link Words}); null before the page has said. */
+    static String savedWatch(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(WATCH_KEY, null);
+    }
+
     private SharedPreferences prefs() {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }

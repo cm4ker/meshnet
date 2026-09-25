@@ -1,26 +1,58 @@
 import { useState } from "react";
-import { lppTypeName, NoReplyError, type ContactRecord, type SeriesSummary } from "@meshnet/meshcore";
+import { lppTypeName, NoReplyError, type ContactRecord, type LppReading, type SeriesSummary } from "@meshnet/meshcore";
+import { errorText } from "../../i18n/errors.js";
+import { t, type Key } from "../../i18n/index.js";
 import { ago } from "../../lib/format.js";
 import { session, useSession } from "../../lib/session.js";
 import { Button } from "../../ui/Button.js";
 import { Section } from "../../ui/Field.js";
 import { RefreshIcon } from "../Icons.js";
 
-const WINDOWS = [
-  { secs: 3600, label: "Last hour" },
-  { secs: 86_400, label: "24 hours" },
-  { secs: 7 * 86_400, label: "7 days" },
+const WINDOWS: { secs: number; label: Key }[] = [
+  { secs: 3600, label: "node.history.lastHour" },
+  { secs: 86_400, label: "node.history.day" },
+  { secs: 7 * 86_400, label: "node.history.week" },
 ];
 
 /** A scale that fits the usual range of each kind of reading; a value outside it widens it. */
-const SCALES: Record<string, { lo: number; hi: number; unit: string; digits: number }> = {
-  temperature: { lo: -20, hi: 40, unit: "°C", digits: 1 },
-  humidity: { lo: 0, hi: 100, unit: "%", digits: 0 },
-  barometer: { lo: 950, hi: 1050, unit: "hPa", digits: 1 },
-  voltage: { lo: 3, hi: 4.3, unit: "V", digits: 2 },
-  current: { lo: 0, hi: 1, unit: "A", digits: 3 },
-  luminosity: { lo: 0, hi: 1000, unit: "lx", digits: 0 },
-  percentage: { lo: 0, hi: 100, unit: "%", digits: 0 },
+const SCALES: Record<string, { lo: number; hi: number; unit: Key; digits: number }> = {
+  temperature: { lo: -20, hi: 40, unit: "node.unit.celsius", digits: 1 },
+  humidity: { lo: 0, hi: 100, unit: "node.unit.percent", digits: 0 },
+  barometer: { lo: 950, hi: 1050, unit: "node.unit.hectopascal", digits: 1 },
+  voltage: { lo: 3, hi: 4.3, unit: "node.unit.volt", digits: 2 },
+  current: { lo: 0, hi: 1, unit: "node.unit.ampere", digits: 3 },
+  luminosity: { lo: 0, hi: 1000, unit: "node.unit.lux", digits: 0 },
+  percentage: { lo: 0, hi: 100, unit: "node.unit.percent", digits: 0 },
+};
+
+/** What each kind of reading is called. */
+const KINDS: Record<Exclude<LppReading["type"], "unknown">, Key> = {
+  digitalIn: "node.history.kind.digitalIn",
+  digitalOut: "node.history.kind.digitalOut",
+  analogIn: "node.history.kind.analogIn",
+  analogOut: "node.history.kind.analogOut",
+  genericSensor: "node.history.kind.genericSensor",
+  luminosity: "node.history.kind.luminosity",
+  presence: "node.history.kind.presence",
+  temperature: "node.history.kind.temperature",
+  humidity: "node.history.kind.humidity",
+  accelerometer: "node.history.kind.accelerometer",
+  barometer: "node.history.kind.barometer",
+  voltage: "node.history.kind.voltage",
+  current: "node.history.kind.current",
+  frequency: "node.history.kind.frequency",
+  percentage: "node.history.kind.percentage",
+  altitude: "node.history.kind.altitude",
+  concentration: "node.history.kind.concentration",
+  power: "node.history.kind.power",
+  distance: "node.history.kind.distance",
+  energy: "node.history.kind.energy",
+  direction: "node.history.kind.direction",
+  unixTime: "node.history.kind.unixTime",
+  gyrometer: "node.history.kind.gyrometer",
+  colour: "node.history.kind.colour",
+  gps: "node.history.kind.gps",
+  switch: "node.history.kind.switch",
 };
 
 export function History({ contact }: { contact: ContactRecord }) {
@@ -38,7 +70,7 @@ export function History({ contact }: { contact: ContactRecord }) {
     try {
       await session.requestSeries(key, secs);
     } catch (e) {
-      setError(e instanceof NoReplyError ? `${e.message}. The sensor may be out of range; try again.` : (e as Error).message);
+      setError(e instanceof NoReplyError ? t("node.history.noReply", { seconds: /(\d+) s$/.exec(e.message)?.[1] ?? "?" }) : errorText(e));
     } finally {
       setBusy(false);
     }
@@ -49,27 +81,27 @@ export function History({ contact }: { contact: ContactRecord }) {
   return (
     <div className="card-scroll">
       <div className="toolbar">
-        <div className="segmented" role="group" aria-label="Window">
+        <div className="segmented" role="group" aria-label={t("node.history.window")}>
           {WINDOWS.map((w) => (
             <button key={w.secs} type="button" className={windowSecs === w.secs ? "on" : ""} disabled={busy} onClick={() => setWindowSecs(w.secs)}>
-              {w.label}
+              {t(w.label)}
             </button>
           ))}
         </div>
         <span className="row-actions">
-          <span className="muted small">{shown ? `answered ${ago(shown.at)}` : "not asked yet"}</span>
+          <span className="muted small">{shown ? t("node.history.answered", { time: ago(shown.at) }) : t("node.notAskedYet")}</span>
           <Button size="sm" busy={busy} disabled={!online} onClick={() => void ask(windowSecs)}>
             <RefreshIcon size={13} />
-            Ask the sensor
+            {t("node.history.ask")}
           </Button>
         </span>
       </div>
       {error ? <p className="connect-error">{error}</p> : null}
       {shown ? (
         shown.series.length === 0 ? (
-          <p className="muted">The sensor has nothing recorded for this window.</p>
+          <p className="muted">{t("node.history.nothing")}</p>
         ) : (
-          <Section title="Min, average, max">
+          <Section title={t("node.history.ranges")}>
             <div className="ranges">
               {shown.series.map((s, i) => (
                 <RangeRow key={i} summary={s} />
@@ -78,16 +110,18 @@ export function History({ contact }: { contact: ContactRecord }) {
           </Section>
         )
       ) : (
-        <p className="muted">One request brings back, for each series the sensor records, its lowest, highest and mean value over the window.</p>
+        <p className="muted">{t("node.history.intro")}</p>
       )}
-      <p className="field-hint">The bar spans min to max and the tick is the mean. Each row has its own scale, labelled at both ends. One window is one request.</p>
+      <p className="field-hint">{t("node.history.hint")}</p>
     </div>
   );
 }
 
 function RangeRow({ summary }: { summary: SeriesSummary }) {
   const kind = lppTypeName(summary.lppType);
-  const scale = SCALES[kind] ?? { lo: summary.min, hi: summary.max, unit: "", digits: 2 };
+  const known = SCALES[kind];
+  const scale = known ?? { lo: summary.min, hi: summary.max, digits: 2 };
+  const unit = known ? t(known.unit) : "";
   let lo = Math.min(scale.lo, summary.min);
   let hi = Math.max(scale.hi, summary.max);
   if (hi - lo < 1e-9) {
@@ -96,17 +130,14 @@ function RangeRow({ summary }: { summary: SeriesSummary }) {
   }
   const p = (v: number) => ((v - lo) / (hi - lo)) * 100;
   const d = scale.digits;
-  const label = kind === "unknown" ? `type ${summary.lppType}` : kind.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
+  const label = kind === "unknown" ? t("node.history.unknownType", { type: summary.lppType }) : t(KINDS[kind]);
   return (
     <div className="range">
       <span className="range-name">
         <span>{label}</span>
-        <span className="muted small">
-          ch {summary.channel}
-          {scale.unit ? ` · ${scale.unit}` : ""}
-        </span>
+        <span className="muted small">{unit ? t("node.history.channelUnit", { channel: summary.channel, unit }) : t("node.history.channel", { channel: summary.channel })}</span>
       </span>
-      <span className="range-plot" title={`min ${summary.min} · mean ${summary.avg} · max ${summary.max} ${scale.unit}`}>
+      <span className="range-plot" title={t("node.history.rangeTitle", { min: summary.min, mean: summary.avg, max: summary.max, unit })}>
         <span className="range-track">
           <span className="range-band" style={{ left: `${p(summary.min)}%`, width: `${Math.max(0.8, p(summary.max) - p(summary.min))}%` }} />
           <span className="range-avg" style={{ left: `${p(summary.avg)}%` }} />
@@ -117,7 +148,7 @@ function RangeRow({ summary }: { summary: SeriesSummary }) {
         </span>
       </span>
       <span className="range-values">
-        <b>{summary.avg.toFixed(d)}</b> <span className="muted">mean</span>
+        <b>{summary.avg.toFixed(d)}</b> <span className="muted">{t("node.history.mean")}</span>
         <br />
         <span className="muted small">
           {summary.min.toFixed(d)} – {summary.max.toFixed(d)}

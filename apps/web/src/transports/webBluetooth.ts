@@ -5,6 +5,7 @@
 
 import { BaseTransport, BLE } from "@meshnet/meshcore";
 import type { Connector, FoundDevice } from "./types.js";
+import { t } from "../i18n/index.js";
 
 class WebBluetoothTransport extends BaseTransport {
   readonly kind = "ble" as const;
@@ -66,7 +67,7 @@ class WebBluetoothTransport extends BaseTransport {
 
 async function attach(device: BluetoothDevice): Promise<WebBluetoothTransport> {
   const gatt = device.gatt;
-  if (!gatt) throw new Error("this device has no GATT server");
+  if (!gatt) throw new Error(t("connect.error.noGatt"));
   const server = await gatt.connect();
   const service = await server.getPrimaryService(BLE.service);
   const rx = await service.getCharacteristic(BLE.rx);
@@ -82,8 +83,12 @@ function found(device: BluetoothDevice): FoundDevice {
 export const webBluetoothConnector: Connector = {
   id: "web-ble",
   kind: "ble",
-  title: "Bluetooth",
-  description: "The browser's device chooser.",
+  get title() {
+    return t("connect.transport.bluetooth");
+  },
+  get description() {
+    return t("connect.describe.browserBle");
+  },
   mode: "picker",
 
   async remembered() {

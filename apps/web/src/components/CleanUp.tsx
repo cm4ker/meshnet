@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AdvType, type ContactRecord } from "@meshnet/meshcore";
+import { t, type Key } from "../i18n/index.js";
+import { tx } from "../i18n/rich.js";
 import { closeCleanUp, removeNodes, useCleanUpOpen } from "../lib/cleanUp.js";
 import { ago } from "../lib/format.js";
 import { useSavedPasswords } from "../lib/secrets.js";
@@ -11,26 +13,26 @@ import { Group, LinkRow, SelectRow } from "../ui/List.js";
 import { Sheet } from "../ui/Sheet.js";
 import { Avatar } from "./Avatar.js";
 
-const KIND_NAMES: [number, string, string][] = [
-  [AdvType.Chat, "person", "people"],
-  [AdvType.Repeater, "repeater", "repeaters"],
-  [AdvType.Room, "room", "rooms"],
-  [AdvType.Sensor, "sensor", "sensors"],
+const KIND_NAMES: [number, Key][] = [
+  [AdvType.Chat, "contacts.count.people"],
+  [AdvType.Repeater, "contacts.count.repeaters"],
+  [AdvType.Room, "contacts.count.rooms"],
+  [AdvType.Sensor, "contacts.count.sensors"],
 ];
 
 function byKind(list: ContactRecord[]): string {
-  return KIND_NAMES.map(([type, one, many]) => {
+  return KIND_NAMES.map(([type, key]) => {
     const n = list.filter((c) => c.type === type).length;
-    return n ? `${n} ${n === 1 ? one : many}` : null;
+    return n ? t(key, { count: n }) : null;
   })
     .filter(Boolean)
     .join(" · ");
 }
 
-const KEEP_WHY: Record<KeepReason, string> = {
-  favourite: "favourites",
-  yours: "yours",
-  chat: "chats",
+const KEEP_WHY: Record<KeepReason, Key> = {
+  favourite: "contacts.keepWhy.favourite",
+  yours: "contacts.keepWhy.yours",
+  chat: "contacts.keepWhy.chat",
 };
 
 /** One sheet for the whole mesh: the nodes not heard for a while, one number, one button; the list behind a tap. */
@@ -66,39 +68,39 @@ function CleanUpSheet() {
     void removeNodes(keys);
   };
 
-  const title = n ? `Remove ${n} ${n === 1 ? "node" : "nodes"}` : "Clean up";
-  const keptWhy = [...new Set(plan.kept.map((k) => KEEP_WHY[k.reason]))];
+  const title = n ? t("contacts.cleanUp.removeNodes", { count: n }) : t("contacts.cleanUp.title");
+  const keptWhy = [...new Set(plan.kept.map((k) => t(KEEP_WHY[k.reason])))];
   return (
     <Sheet open onClose={closeCleanUp} title={title}>
       <p className="group-note cleanup-note">
         {plan.remove.length || plan.kept.length
-          ? `Not heard for over ${days} days. You can put any of them back from Radio › Contacts › Removed.`
-          : `Every node was heard in the last ${days} days.`}
+          ? t("contacts.cleanUp.notHeardOver", { count: days })
+          : t("contacts.cleanUp.allHeard", { count: days })}
       </p>
       {plan.remove.length ? <p className="group-note cleanup-kinds">{byKind(plan.remove)}</p> : null}
       <Group>
-        <SelectRow label="Not heard for" value={String(days)} options={TIDY_DAYS.map((d) => ({ value: String(d), label: `${d} days` }))} onChange={(v) => setDays(Number(v))} />
-        {plan.remove.length || plan.kept.length ? <LinkRow label={review ? "Hide the list" : "Review the list"} value={plan.remove.length + plan.kept.length} onClick={() => setReview(!review)} /> : null}
+        <SelectRow label={t("contacts.cleanUp.notHeardFor")} value={String(days)} options={TIDY_DAYS.map((d) => ({ value: String(d), label: t("contacts.days", { count: d }) }))} onChange={(v) => setDays(Number(v))} />
+        {plan.remove.length || plan.kept.length ? <LinkRow label={review ? t("contacts.cleanUp.hide") : t("contacts.cleanUp.review")} value={plan.remove.length + plan.kept.length} onClick={() => setReview(!review)} /> : null}
       </Group>
       {review ? (
         <>
-          {plan.remove.length ? <PickList title={`Not heard ${days}+ days`} rows={plan.remove.map((c) => ({ contact: c, reason: null }))} picked={picked} onToggle={toggle} /> : null}
-          {plan.kept.length ? <PickList title="Kept" rows={plan.kept} picked={picked} onToggle={toggle} /> : null}
+          {plan.remove.length ? <PickList title={t("contacts.cleanUp.notHeardDays", { count: days })} rows={plan.remove.map((c) => ({ contact: c, reason: null }))} picked={picked} onToggle={toggle} /> : null}
+          {plan.kept.length ? <PickList title={t("contacts.cleanUp.kept")} rows={plan.kept} picked={picked} onToggle={toggle} /> : null}
         </>
       ) : null}
       {plan.kept.length ? (
         <p className="group-note">
-          <b className="cleanup-kept">{plan.kept.length} kept</b> {keptWhy.join(", ")}
+          {tx("contacts.cleanUp.keptWhy", { kept: <b className="cleanup-kept">{t("contacts.cleanUp.keptCount", { count: plan.kept.length })}</b>, why: keptWhy.join(", ") })}
         </p>
       ) : null}
       {pickedChats.length ? (
         <p className="group-note danger">
-          {pickedChats.length === 1 ? `${pickedChats[0]!.contact.name || pickedChats[0]!.contact.prefix}'s direct messages` : "Direct messages from the chats picked"} won't reach you until they advertise again.
+          {pickedChats.length === 1 ? t("contacts.cleanUp.chatWarnOne", { name: pickedChats[0]!.contact.name || pickedChats[0]!.contact.prefix }) : t("contacts.cleanUp.chatWarnMany")}
         </p>
       ) : null}
       <div className="sheet-form cleanup-actions">
         <Button variant="danger" size="lg" disabled={!n || !online || !!state.removing} onClick={go}>
-          {n ? `Remove ${n}` : "Nothing to remove"}
+          {n ? t("contacts.cleanUp.removeCount", { count: n }) : t("contacts.cleanUp.nothing")}
         </Button>
       </div>
     </Sheet>
@@ -120,7 +122,7 @@ function PickList({ title, rows, picked, onToggle }: { title: string; rows: { co
                   <span className="row-title">{c.name || c.prefix}</span>
                   <span className="row-when muted">{ago(heardAt(c) || null)}</span>
                 </span>
-                <span className="row-sub muted">{reason ? `${kindLabel(c.type)} · ${KEEP_LABELS[reason]}` : kindLabel(c.type)}</span>
+                <span className="row-sub muted">{reason ? `${kindLabel(c.type)} · ${t(KEEP_LABELS[reason])}` : kindLabel(c.type)}</span>
               </span>
             </label>
           </li>

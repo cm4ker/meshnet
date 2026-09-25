@@ -12,11 +12,12 @@
 
 import { AdvType, contactRoute, isConversationType, type ContactRecord, type SessionState } from "@meshnet/meshcore";
 import { useState, type ReactNode } from "react";
+import { t } from "../../i18n/index.js";
 import { discover, forgetDiscovery, undoDiscovery, useDiscovery, type Discovery } from "../../lib/discovery.js";
 import { nameOfHash } from "../../lib/echoes.js";
 import { agoPhrase } from "../../lib/format.js";
 import { legId, useLegVerdicts } from "../../lib/legVerdicts.js";
-import { formatSnr, quality, QUALITY_WORDS, type LinkRadio } from "../../lib/los.js";
+import { formatSnr, quality, qualityWord, type LinkRadio } from "../../lib/los.js";
 import { contactEnd, defaultHeight, relayOf, sameRelays, selfEnd } from "../../lib/mapOverlay.js";
 import { setMeshTool, type LosEnd, type RouteTool } from "../../lib/meshTool.js";
 import { keepLooking, measuredLegs, ping, ROUNDS, settlePing, stopPing, undoFound, usePing, weakestLeg, type Ping } from "../../lib/ping.js";
@@ -34,8 +35,8 @@ export function QualityChip({ snr, numbers = true }: { snr: number; numbers?: bo
   const q = quality(snr);
   return (
     <span className={`quality ${q}`}>
-      {QUALITY_WORDS[q]}
-      {numbers ? <small>{formatSnr(snr)} dB</small> : null}
+      {qualityWord(q)}
+      {numbers ? <small>{t("tools.unit.db", { value: formatSnr(snr) })}</small> : null}
     </span>
   );
 }
@@ -48,7 +49,7 @@ export function RouteLink({ contactKey }: { contactKey: string }) {
   const contact = state.contacts[contactKey];
   if (!contact) return null;
   const status = routeStatus(contact, p, d);
-  return <LinkRow label="Route" value={<span className={`route-${status.tone}`}>{status.text}</span>} onClick={() => openRoute(contactKey)} />;
+  return <LinkRow label={t("tools.route.title")} value={<span className={`route-${status.tone}`}>{status.text}</span>} onClick={() => openRoute(contactKey)} />;
 }
 
 /** The relays a ping went through, and the contact when it passes nothing on. */
@@ -58,14 +59,14 @@ function relaysOf(p: Ping): string[] {
 
 /** Each node along the route, this radio first, by name where the hash names one contact. */
 function namesAlong(p: Ping, contact: ContactRecord, state: SessionState): string[] {
-  return ["You", ...relaysOf(p).map((h) => nameOfHash(h, state.contacts) ?? h), contact.name || contact.prefix];
+  return [t("tools.you"), ...relaysOf(p).map((h) => nameOfHash(h, state.contacts) ?? h), contact.name || contact.prefix];
 }
 
 /** Where along a chain it broke: after the node before the leg, or at the first hop. */
 export function breakWords(p: Ping, state: SessionState): string | null {
   if (!p.broken) return null;
   const { chain, at } = p.broken;
-  return at === 0 ? "at the first hop" : `after ${nameOfHash(chain[at - 1]!, state.contacts) ?? chain[at - 1]}`;
+  return at === 0 ? t("tools.break.first") : t("tools.break.after", { name: nameOfHash(chain[at - 1]!, state.contacts) ?? chain[at - 1]! });
 }
 
 /** The two ends of leg `index` of the route, when both are on the map. */
@@ -107,7 +108,7 @@ export function RouteSheet({ tool, onClose }: { tool: RouteTool; onClose: () => 
   if (!contact) {
     return (
       <div className="tool">
-        <SheetHead title="Route" sub="This contact is no longer on the radio." onBack={onClose} />
+        <SheetHead title={t("tools.route.title")} sub={t("tools.contactGone")} onBack={onClose} />
       </div>
     );
   }
@@ -147,7 +148,7 @@ export function RouteSheet({ tool, onClose }: { tool: RouteTool; onClose: () => 
   const flood = () => (needsSignIn ? setSigningIn(true) : void discover(key));
   const save = async () => {
     setSaving(true);
-    const ok = await act(() => session.setRoute(key, hashes), "Route saved");
+    const ok = await act(() => session.setRoute(key, hashes), t("tools.route.saved"));
     setSaving(false);
     if (!ok) return;
     settlePing(key, hashes);
@@ -159,12 +160,12 @@ export function RouteSheet({ tool, onClose }: { tool: RouteTool; onClose: () => 
   // ---- what it says about the route ----
 
   let sub: string;
-  if (editing) sub = "Not saved yet";
-  else if (flooding) sub = "Every message floods";
-  else if (held === null) sub = relaysItself ? "None written: a check follows its adverts" : governed ? "None known: messages flood" : "None known: requests to it flood";
+  if (editing) sub = t("tools.route.notSaved");
+  else if (flooding) sub = t("tools.route.everyFloods");
+  else if (held === null) sub = relaysItself ? t("tools.route.noneWritten") : governed ? t("tools.route.noneKnown") : t("tools.route.noneKnownRequests");
   else {
-    const bits = [byHand ? "set by hand" : contact.pathSince ? `learned ${agoPhrase(contact.pathSince)}` : null, expires !== null ? `forgotten ${inMinutes(expires - now)}` : null].filter(Boolean).join(" · ");
-    sub = bits ? bits[0]!.toUpperCase() + bits.slice(1) : held.length === 0 ? "Heard direct" : "Kept until the radio learns another";
+    const bits = [byHand ? t("tools.route.byHand") : contact.pathSince ? t("tools.route.learned", { time: agoPhrase(contact.pathSince) }) : null, expires !== null ? t("tools.route.forgotten", { when: inMinutes(expires - now) }) : null].filter(Boolean).join(" · ");
+    sub = bits ? bits[0]!.toUpperCase() + bits.slice(1) : held.length === 0 ? t("tools.route.heardDirect") : t("tools.route.keptUntil");
   }
 
   const relayName = (k: string) => nodeOf(k)?.name || (state.contacts[k] ? k.slice(0, 8) : (nameOfHash(k, state.contacts) ?? k));
@@ -188,67 +189,67 @@ export function RouteSheet({ tool, onClose }: { tool: RouteTool; onClose: () => 
   if (editing) {
     const cameBack = !!draftPing && !draftPing.running && draftPing.runs.some((r) => r.ok);
     primary = running
-      ? { label: "Stop", onClick: () => stopPing(key), plain: true }
+      ? { label: t("tools.stop"), onClick: () => stopPing(key), plain: true }
       : cameBack
-        ? { label: "Save route", onClick: () => void save(), busy: saving, disabled: !online }
-        : { label: "Check", onClick: () => void ping(key, hashes), disabled: !online || !(relaysItself || hashes.length > 0) };
-    if (!running) links.push({ label: "Cancel", onClick: cancelRouteEdit });
+        ? { label: t("tools.route.save"), onClick: () => void save(), busy: saving, disabled: !online }
+        : { label: t("tools.check"), onClick: () => void ping(key, hashes), disabled: !online || !(relaysItself || hashes.length > 0) };
+    if (!running) links.push({ label: t("common.cancel"), onClick: cancelRouteEdit });
   } else if (running) {
-    primary = { label: "Stop", onClick: () => stopPing(key), plain: true };
+    primary = { label: t("tools.stop"), onClick: () => stopPing(key), plain: true };
   } else if (flooded) {
-    primary = { label: "Asking the whole mesh…", onClick: () => undefined, busy: true };
+    primary = { label: t("tools.route.askingMesh"), onClick: () => undefined, busy: true };
   } else if (!flooding) {
     // A search that found nothing goes on from where it stopped; the flood is the last resort.
     const gaveUp = !shownFlood && !!heldPing?.search?.done && !heldPing.search.found;
     primary = gaveUp
-      ? { label: "Keep looking", onClick: () => void keepLooking(key), disabled: !online }
-      : { label: held === null && !relaysItself ? "Find a way" : "Check", onClick: () => void ping(key), disabled: !online };
-    if (gaveUp) links.push({ label: "Ask the whole mesh", onClick: flood, disabled: !online, cost: needsSignIn ? "sign in first" : "floods" });
+      ? { label: t("tools.keepLooking"), onClick: () => void keepLooking(key), disabled: !online }
+      : { label: held === null && !relaysItself ? t("tools.route.findWay") : t("tools.check"), onClick: () => void ping(key), disabled: !online };
+    if (gaveUp) links.push({ label: t("tools.route.askMesh"), onClick: flood, disabled: !online, cost: needsSignIn ? t("tools.route.signInFirst") : t("tools.route.floods") });
   }
 
   const idle = !running && !shownFlood && !shownPing;
   const hint = editing
-    ? "Drag a point, or tap repeaters in order. Saving writes it to the radio and sends nothing."
+    ? t("tools.route.hintEditing")
     : flooding
-      ? "Always flood is on: turn it off in ⋯ to use routes again."
+      ? t("tools.route.hintFlooding")
       : !idle
         ? null
         : placed
-          ? "Drag a point on the map to change the route."
-          : `${name} shares no position: tap repeaters on the map, in order, to set a route.`;
+          ? t("tools.route.hintDrag")
+          : t("tools.route.hintNoPosition", { name });
 
   const settings = () => {
     const items: MenuItem[] = [
       {
-        label: "Ask the whole mesh",
-        hint: needsSignIn ? "Floods a request. It answers only a radio signed in to it." : "Floods a request; the way it finds becomes the route.",
+        label: t("tools.route.askMesh"),
+        hint: needsSignIn ? t("tools.route.askMeshSignIn") : t("tools.route.askMeshHint"),
         disabled: !online || flooded || running,
         onSelect: flood,
       },
     ];
-    if (relaysItself) items.push({ label: "Check from here to…", hint: "How this repeater and another you tap hear each other.", disabled: !online, onSelect: () => openSpan(key) });
+    if (relaysItself) items.push({ label: t("tools.route.checkFrom"), hint: t("tools.route.checkFromHint"), disabled: !online, onSelect: () => openSpan(key) });
     if (governed) {
       items.push({
-        label: flooding ? "Use learned routes again" : "Always flood",
-        hint: flooding ? undefined : "Ignore learned routes. Handy on the move; costs a flood per message.",
+        label: flooding ? t("tools.route.useLearned") : t("tools.route.alwaysFlood"),
+        hint: flooding ? undefined : t("tools.route.alwaysFloodHint"),
         disabled: !online,
-        onSelect: () => void act(() => session.setFloodPinned(key, !flooding), flooding ? "Learned routes again" : "Every message to it floods"),
+        onSelect: () => void act(() => session.setFloodPinned(key, !flooding), flooding ? t("tools.route.learnedAgain") : t("tools.route.everyToItFloods")),
       });
       if (!flooding) {
         const own = state.routing.contacts[key]?.resetAfterMin;
-        items.push({ label: `Forget learned routes after: ${own === undefined ? "default" : limitLabel(own).toLowerCase()}`, onSelect: () => forgetAfter(key, own, state.routing.resetAfterMin) });
+        items.push({ label: t("tools.route.forgetAfterValue", { value: own === undefined ? t("tools.route.default") : limitLabel(own).toLowerCase() }), onSelect: () => forgetAfter(key, own, state.routing.resetAfterMin) });
       }
     }
-    items.push({ label: "Forget the route now", danger: true, disabled: !online || held === null || flooding, onSelect: () => void act(() => session.resetPath(key), "Route forgotten: the next message floods") });
-    showMenu(items, { title: `Route to ${name}` });
+    items.push({ label: t("tools.route.forgetNow"), danger: true, disabled: !online || held === null || flooding, onSelect: () => void act(() => session.resetPath(key), t("tools.route.forgottenToast")) });
+    showMenu(items, { title: t("tools.route.to", { name }) });
   };
 
   return (
     <div className="tool route-sheet">
-      <SheetHead title={`Route to ${name}`} sub={sub} onBack={onClose} onMore={settings} />
+      <SheetHead title={t("tools.route.to", { name })} sub={sub} onBack={onClose} onMore={settings} />
       {chain ? (
         <p className="tool-line chain">
-          <span className="muted">You</span>
+          <span className="muted">{t("tools.you")}</span>
           {chain.map((n, i) => (
             <span key={`${i}:${n}`}>
               <span className="sep">›</span>
@@ -265,14 +266,14 @@ export function RouteSheet({ tool, onClose }: { tool: RouteTool; onClose: () => 
             .map((l) => (
               <p key={legId(l.a, l.b)} className="tool-warn">
                 <AlertIcon size={16} />
-                {l.a.name} → {l.b.name} is blocked by terrain.
+                {t("tools.route.legBlocked", { from: l.a.name, to: l.b.name })}
               </p>
             ))
         : null}
       {shownFlood ? (
         <SearchResult d={shownFlood} contact={contact} state={state} />
       ) : shownPing ? (
-        <CheckResult p={shownPing} names={namesAlong(shownPing, contact, state)} reach={shownPing.targetInChain ? null : relaysOf(shownPing).length ? namesAlong(shownPing, contact, state).at(-2)! : null} placed={placed} onLeg={openLeg} onUndo={() => void act(() => undoFound(key), "Route put back")} />
+        <CheckResult p={shownPing} names={namesAlong(shownPing, contact, state)} reach={shownPing.targetInChain ? null : relaysOf(shownPing).length ? namesAlong(shownPing, contact, state).at(-2)! : null} placed={placed} onLeg={openLeg} onUndo={() => void act(() => undoFound(key), t("tools.route.putBack"))} />
       ) : null}
 
       {primary ? (
@@ -298,7 +299,7 @@ export function RouteSheet({ tool, onClose }: { tool: RouteTool; onClose: () => 
         onClose={() => setSigningIn(false)}
         onSignedIn={() => {
           setSigningIn(false);
-          toast(`Signed in to ${name}`);
+          toast(t("tools.signedIn", { name }));
           void discover(key);
         }}
       />
@@ -309,7 +310,7 @@ export function RouteSheet({ tool, onClose }: { tool: RouteTool; onClose: () => 
 export function SheetHead({ title, sub, onBack, onMore }: { title: string; sub: ReactNode; onBack: () => void; onMore?: () => void }) {
   return (
     <div className="tool-head">
-      <IconButton label="Back" onClick={onBack}>
+      <IconButton label={t("common.back")} onClick={onBack}>
         <BackIcon size={18} />
       </IconButton>
       <span className="row-main">
@@ -317,7 +318,7 @@ export function SheetHead({ title, sub, onBack, onMore }: { title: string; sub: 
         <span className="row-sub muted">{sub}</span>
       </span>
       {onMore ? (
-        <IconButton label="Route settings" onClick={onMore}>
+        <IconButton label={t("tools.route.settings")} onClick={onMore}>
           <MoreIcon size={18} />
         </IconButton>
       ) : null}
@@ -330,10 +331,10 @@ function forgetAfter(key: string, own: number | null | undefined, fallback: numb
   const mark = (on: boolean) => <CheckIcon size={17} style={{ visibility: on ? "visible" : "hidden" }} />;
   showMenu(
     [
-      { label: `Default (${limitLabel(fallback).toLowerCase()})`, icon: mark(own === undefined), onSelect: () => session.setRouteReset(key, undefined) },
+      { label: t("tools.route.defaultValue", { value: limitLabel(fallback).toLowerCase() }), icon: mark(own === undefined), onSelect: () => session.setRouteReset(key, undefined) },
       ...ROUTE_LIMITS.map((m) => ({ label: limitLabel(m), icon: mark(own === m), onSelect: () => session.setRouteReset(key, m) })),
     ],
-    { title: "Forget learned routes after" },
+    { title: t("tools.route.forgetAfter") },
   );
 }
 
@@ -348,7 +349,7 @@ function SearchResult({ d, contact, state }: { d: Discovery; contact: ContactRec
     const total = job?.until && job.startedAt ? Math.round((job.until - job.startedAt) / 1000) : null;
     return (
       <div className="disc">
-        <p className="disc-line">{total ? `Flooding… an answer takes up to ${total} s` : "Waiting for the radio…"}</p>
+        <p className="disc-line">{total ? t("tools.search.flooding", { seconds: total }) : t("tools.search.waiting")}</p>
         {job?.until ? (
           <span className="disc-bar" aria-hidden="true">
             <i key={job.id} style={{ animationDuration: `${job.until - (job.startedAt ?? job.until)}ms` }} />
@@ -360,25 +361,25 @@ function SearchResult({ d, contact, state }: { d: Discovery; contact: ContactRec
   if (d.found) {
     const f = d.found;
     const flooding = isConversationType(contact.type) && session.routePolicy(contact.key).flood;
-    const head = f.out.length === 0 ? "Heard direct, no relays" : f.changed ? `Found a way via ${f.out.length} relay${f.out.length === 1 ? "" : "s"}` : "Same way as the route";
+    const head = f.out.length === 0 ? t("tools.search.direct") : f.changed ? t("tools.search.found", { count: f.out.length }) : t("tools.search.same");
     return (
       <div className="disc">
         <p className="disc-line">
-          <b>{head}</b> · {flooding ? "it still floods" : f.changed ? "now the route" : "it still works"}
+          <b>{head}</b> · {flooding ? t("tools.search.stillFloods") : f.changed ? t("tools.search.nowRoute") : t("tools.search.stillWorks")}
           {f.changed && !flooding ? (
             <>
               {" · "}
-              <button type="button" className="check-link" disabled={state.status !== "ready"} onClick={() => void act(() => undoDiscovery(d.key), "Route put back")}>
-                Undo
+              <button type="button" className="check-link" disabled={state.status !== "ready"} onClick={() => void act(() => undoDiscovery(d.key), t("tools.route.putBack"))}>
+                {t("common.undo")}
               </button>
             </>
           ) : null}
         </p>
         {contactEnd(contact) ? (
           <span className="disc-key">
-            <span><i className="found" />there</span>
-            <span><i className="back" />back</span>
-            {f.changed && d.before ? <span><i className="was" />was</span> : null}
+            <span><i className="found" />{t("tools.there")}</span>
+            <span><i className="back" />{t("tools.back")}</span>
+            {f.changed && d.before ? <span><i className="was" />{t("tools.was")}</span> : null}
           </span>
         ) : null}
       </div>
@@ -388,7 +389,7 @@ function SearchResult({ d, contact, state }: { d: Discovery; contact: ContactRec
   const needsSignIn = (contact.type === AdvType.Repeater || contact.type === AdvType.Room) && !state.logins[contact.key]?.ok;
   return (
     <p className="disc-line bad">
-      <b>No answer in {d.waitedS} s.</b> {needsSignIn ? `${contact.name || contact.prefix} answers only a radio signed in to it.` : "It may be out of range right now."}
+      <b>{t("tools.search.noAnswer", { seconds: d.waitedS })}</b> {needsSignIn ? t("tools.search.signedOnly", { name: contact.name || contact.prefix }) : t("tools.search.outOfRange")}
     </p>
   );
 }
@@ -421,7 +422,7 @@ export function CheckResult({ p, names, reach, placed, onLeg, onUndo }: { p: Pin
       return (
         <div className="check-result">
           <Dots marks={p.runs.map((r) => r.ok)} total={ROUNDS} live={false} />
-          <span className="muted">No answer twice · finding where it breaks…</span>
+          <span className="muted">{t("tools.check.locating")}</span>
         </div>
       );
     }
@@ -430,14 +431,12 @@ export function CheckResult({ p, names, reach, placed, onLeg, onUndo }: { p: Pin
         <>
           {broke ? (
             <p className="disc-line bad">
-              <b>Breaks {broke}</b>
+              <b>{t("tools.check.breaks", { where: broke })}</b>
             </p>
           ) : null}
           <div className="check-result">
             <Dots marks={p.search.tries} total={p.search.total} live />
-            <span className="muted">
-              {p.broken ? "Trying another way" : "Looking for a way"} {Math.min(p.search.tries.length + 1, p.search.total)} of {p.search.total}…
-            </span>
+            <span className="muted">{t(p.broken ? "tools.check.tryingOther" : "tools.check.looking", { n: Math.min(p.search.tries.length + 1, p.search.total), total: p.search.total })}</span>
           </div>
         </>
       );
@@ -446,9 +445,7 @@ export function CheckResult({ p, names, reach, placed, onLeg, onUndo }: { p: Pin
     return (
       <div className="check-result">
         <Dots marks={p.runs.map((r) => r.ok)} total={ROUNDS} live />
-        <span className="muted">
-          Check {Math.min(done + 1, ROUNDS)} of {ROUNDS}…
-        </span>
+        <span className="muted">{t("tools.check.round", { n: Math.min(done + 1, ROUNDS), total: ROUNDS })}</span>
       </div>
     );
   }
@@ -459,8 +456,8 @@ export function CheckResult({ p, names, reach, placed, onLeg, onUndo }: { p: Pin
       <button type="button" className="check-row warn" onClick={() => onLeg(weakest.index)}>
         <AlertIcon size={18} />
         <span className="grow">
-          Weakest: {names[weakest.index]} ↔ {names[weakest.index + 1]}
-          <small>{formatSnr(weakest.snr)} dB · tap for the line of sight</small>
+          {t("tools.check.weakest", { a: names[weakest.index] ?? "", b: names[weakest.index + 1] ?? "" })}
+          <small>{t("tools.check.weakHint", { snr: formatSnr(weakest.snr) })}</small>
         </span>
         <ChevronRightIcon size={14} className="line-chev" />
       </button>
@@ -473,28 +470,31 @@ export function CheckResult({ p, names, reach, placed, onLeg, onUndo }: { p: Pin
       return (
         <>
           <div className="check-result">
-            <b className="found-head">{p.broken ? "Found another way" : "Found a way"}</b>
-            <span className="muted">
-              via {relays} relay{relays === 1 ? "" : "s"}
-              {rtt ? ` · back in ${(rtt / 1000).toFixed(1)} s` : ""}
-            </span>
+            <b className="found-head">{p.broken ? t("tools.check.foundOther") : t("tools.check.found")}</b>
+            <span className="muted">{rtt ? t("tools.check.backIn", { via: t("tools.viaRelays", { count: relays }), seconds: (rtt / 1000).toFixed(1) }) : t("tools.viaRelays", { count: relays })}</span>
             {weakest ? <QualityChip snr={weakest.snr} numbers={false} /> : null}
           </div>
           <p className="check-note">
-            {p.search.tries.length > 1 ? `On try ${p.search.tries.length} · ${p.broken ? `the old one broke ${broke}` : "now the route"}` : p.broken ? `The old one broke ${broke}` : "Now the route"}
+            {p.search.tries.length > 1
+              ? p.broken
+                ? t("tools.check.onTryBroke", { n: p.search.tries.length, where: broke ?? "" })
+                : t("tools.check.onTryRoute", { n: p.search.tries.length })
+              : p.broken
+                ? t("tools.check.oldBroke", { where: broke ?? "" })
+                : t("tools.check.nowRoute")}
             {p.search.before && onUndo ? (
               <>
                 {" · "}
                 <button type="button" className="check-link" onClick={onUndo}>
-                  Undo
+                  {t("common.undo")}
                 </button>
               </>
             ) : null}
           </p>
           {p.search.back && placed ? (
             <span className="disc-key">
-              <span><i className="found" />there</span>
-              <span><i className="back" />back</span>
+              <span><i className="found" />{t("tools.there")}</span>
+              <span><i className="back" />{t("tools.back")}</span>
             </span>
           ) : null}
           {weakRow(0)}
@@ -504,8 +504,8 @@ export function CheckResult({ p, names, reach, placed, onLeg, onUndo }: { p: Pin
     const silent = p.search.tries.length;
     return (
       <p className="disc-line bad">
-        <b>No way found.</b> {broke ? `It breaks ${broke}. ` : ""}
-        {silent ? `${silent} other way${silent === 1 ? "" : "s"} stayed silent.` : broke ? "Nothing the radio has heard goes round it." : "The radio has not heard enough of the mesh around it yet."}
+        <b>{t("tools.check.noWay")}</b> {broke ? `${t("tools.check.itBreaks", { where: broke })} ` : ""}
+        {silent ? t("tools.check.silentWays", { count: silent }) : broke ? t("tools.check.nothingRound") : t("tools.check.notEnough")}
       </p>
     );
   }
@@ -515,8 +515,8 @@ export function CheckResult({ p, names, reach, placed, onLeg, onUndo }: { p: Pin
       <button type="button" className="check-row bad" onClick={() => onLeg(p.broken!.at)}>
         <AlertIcon size={18} />
         <span className="grow">
-          No answer · breaks {broke}
-          <small>tap for the line of sight</small>
+          {t("tools.check.noAnswerBreaks", { where: broke ?? "" })}
+          <small>{t("tools.check.tapLos")}</small>
         </span>
         <ChevronRightIcon size={14} className="line-chev" />
       </button>
@@ -529,10 +529,8 @@ export function CheckResult({ p, names, reach, placed, onLeg, onUndo }: { p: Pin
   if (good.length === 0) {
     return (
       <div className="check-result">
-        <b className="bad">No answer</b>
-        <span className="muted">
-          0 of {done} came back{reach ? ` from ${reach}` : ""}
-        </span>
+        <b className="bad">{t("tools.check.noAnswer")}</b>
+        <span className="muted">{reach ? t("tools.check.noneBackFrom", { total: done, name: reach }) : t("tools.check.noneBack", { total: done })}</span>
       </div>
     );
   }
@@ -540,10 +538,8 @@ export function CheckResult({ p, names, reach, placed, onLeg, onUndo }: { p: Pin
   return (
     <>
       <div className="check-result">
-        <b className="mono">{Math.round(avg)} ms</b>
-        <span className="muted">
-          {good.length} of {done} came back{reach ? ` · as far as ${reach}` : ""}
-        </span>
+        <b className="mono">{t("tools.unit.ms", { value: Math.round(avg) })}</b>
+        <span className="muted">{reach ? t("tools.check.cameBackReach", { good: good.length, total: done, name: reach }) : t("tools.check.cameBack", { good: good.length, total: done })}</span>
         {weakest ? <QualityChip snr={weakest.snr} numbers={false} /> : null}
       </div>
       {weakRow(done - good.length)}

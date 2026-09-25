@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { t } from "../i18n/index.js";
 import { useBackLayer } from "../lib/back.js";
 import { summarize } from "../lib/conversations.js";
 import { disconnect } from "../lib/link.js";
@@ -10,7 +11,7 @@ import { act } from "../lib/toast.js";
 import { Avatar } from "./Avatar.js";
 import { NEW_CHAT_EVENT } from "./ChatList.js";
 import { AirIcon, PlusIcon, RefreshIcon, SearchIcon, SlidersIcon, LinkOffIcon } from "./Icons.js";
-import { RADIO_TITLES } from "./RadioPages.js";
+import { RADIO_TITLES, radioTitle } from "./RadioPages.js";
 
 interface Item {
   group: string;
@@ -41,19 +42,19 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
 
   const items = useMemo<Item[]>(() => {
     const online = state.status === "ready";
-    const chats: Item[] = summarize(state).map((row) => ({ group: "Chats", label: row.title, hint: row.preview ?? undefined, icon: <Avatar name={row.title} type={row.contact?.type} channel={row.kind === "channel"} size={22} />, run: () => openConversation(row.id) }));
-    const nodes: Item[] = Object.values(state.contacts).map((c) => ({ group: "Mesh", label: c.name || c.prefix, hint: kindLabel(c.type), icon: <Avatar name={c.name || c.prefix} type={c.type} size={22} />, run: () => openProfile(c.key, true) }));
-    const pages: Item[] = (Object.keys(RADIO_TITLES) as RadioPage[]).map((page) => ({ group: "Radio", label: RADIO_TITLES[page], icon: <SlidersIcon size={16} />, run: () => openRadioPage(page) }));
+    const chats: Item[] = summarize(state).map((row) => ({ group: t("app.palette.group.chats"), label: row.title, hint: row.preview ?? undefined, icon: <Avatar name={row.title} type={row.contact?.type} channel={row.kind === "channel"} size={22} />, run: () => openConversation(row.id) }));
+    const nodes: Item[] = Object.values(state.contacts).map((c) => ({ group: t("app.palette.group.mesh"), label: c.name || c.prefix, hint: kindLabel(c.type), icon: <Avatar name={c.name || c.prefix} type={c.type} size={22} />, run: () => openProfile(c.key, true) }));
+    const pages: Item[] = (Object.keys(RADIO_TITLES) as RadioPage[]).map((page) => ({ group: t("app.palette.group.radio"), label: radioTitle(page), icon: <SlidersIcon size={16} />, run: () => openRadioPage(page) }));
     const commands: Item[] = [
-      { group: "Commands", label: "New chat", icon: <PlusIcon size={16} />, run: () => { goSection("chats"); setTimeout(() => window.dispatchEvent(new Event(NEW_CHAT_EVENT))); } },
+      { group: t("app.palette.group.commands"), label: t("app.palette.newChat"), icon: <PlusIcon size={16} />, run: () => { goSection("chats"); setTimeout(() => window.dispatchEvent(new Event(NEW_CHAT_EVENT))); } },
       ...(online
         ? [
-            { group: "Commands", label: "Advertise nearby", hint: "zero hop", icon: <AirIcon size={16} />, run: () => void act(() => session.sendAdvert(false), "Advert sent to the neighbours") },
-            { group: "Commands", label: "Advertise across the mesh", hint: "flood", icon: <AirIcon size={16} />, run: () => void act(() => session.sendAdvert(true), "Advert flooded across the mesh") },
-            { group: "Commands", label: "Fetch every contact from the radio", icon: <RefreshIcon size={16} />, run: () => void act(() => session.refreshContacts(true), "Contacts fetched from the radio") },
+            { group: t("app.palette.group.commands"), label: t("app.palette.advertNearby"), hint: t("app.palette.zeroHop"), icon: <AirIcon size={16} />, run: () => void act(() => session.sendAdvert(false), t("app.palette.advertSentNearby")) },
+            { group: t("app.palette.group.commands"), label: t("app.palette.advertFlood"), hint: t("app.palette.flood"), icon: <AirIcon size={16} />, run: () => void act(() => session.sendAdvert(true), t("app.palette.advertFlooded")) },
+            { group: t("app.palette.group.commands"), label: t("app.palette.fetchContacts"), icon: <RefreshIcon size={16} />, run: () => void act(() => session.refreshContacts(true), t("app.palette.contactsFetched")) },
           ]
         : []),
-      { group: "Commands", label: "Disconnect", icon: <LinkOffIcon size={16} />, run: () => void disconnect() },
+      { group: t("app.palette.group.commands"), label: t("app.palette.disconnect"), icon: <LinkOffIcon size={16} />, run: () => void disconnect() },
     ];
     return [...chats, ...nodes, ...pages, ...commands];
   }, [state]);
@@ -77,14 +78,14 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
   let group = "";
   return createPortal(
     <div className="palette-layer" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="palette" role="dialog" aria-label="Jump to">
+      <div className="palette" role="dialog" aria-label={t("app.palette.jumpTo")}>
         <label className="palette-field">
           <SearchIcon size={16} />
           <input
             ref={field}
             value={query}
-            placeholder="Jump to a chat, a node, a setting, or run a command"
-            aria-label="Jump to"
+            placeholder={t("app.palette.placeholder")}
+            aria-label={t("app.palette.jumpTo")}
             onChange={(e) => {
               setQuery(e.target.value);
               setAt(0);
@@ -108,7 +109,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
           />
         </label>
         <div className="palette-list" ref={list} role="listbox">
-          {shown.length === 0 ? <div className="empty muted">Nothing by that name.</div> : null}
+          {shown.length === 0 ? <div className="empty muted">{t("app.palette.nothing")}</div> : null}
           {shown.map((item, i) => {
             const head = item.group !== group ? ((group = item.group), <div className="palette-group">{item.group}</div>) : null;
             return (

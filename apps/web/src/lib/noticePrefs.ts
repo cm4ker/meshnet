@@ -17,6 +17,7 @@
 
 import { useSyncExternalStore } from "react";
 import { AdvType, type MessageRecord, type SessionState } from "@meshnet/meshcore";
+import { t, type Key } from "../i18n/index.js";
 import { readSetting, writeSetting } from "./storage.js";
 
 /** How much of a chat rings: a person's chat takes "all" or "off" only. */
@@ -29,12 +30,13 @@ export type Corner = "br" | "bl" | "tr" | "tl";
 /** The app's signal (`public/sounds/signal_<id>.wav`, drawn by `scripts/sound-synth.mjs`), or none. */
 export type Signal = "chirp" | "roger" | "hop" | "sonar" | "none";
 
-export const SIGNALS: { id: Signal; label: string; hint: string }[] = [
-  { id: "chirp", label: "Chirp", hint: "A LoRa preamble, slowed down: two up, one down." },
-  { id: "roger", label: "Roger", hint: "R in Morse, di-dah-dit: received." },
-  { id: "hop", label: "Hop", hint: "Three hops up the mesh, the last one relayed." },
-  { id: "sonar", label: "Sonar", hint: "A ping, and an answer." },
-  { id: "none", label: "None", hint: "Notices arrive quietly." },
+/** Each signal's name and what it sounds like, as keys: the view says them in the reader's language. */
+export const SIGNALS: { id: Signal; label: Key; hint: Key }[] = [
+  { id: "chirp", label: "radio.signals.chirp", hint: "radio.signals.chirpHint" },
+  { id: "roger", label: "radio.signals.roger", hint: "radio.signals.rogerHint" },
+  { id: "hop", label: "radio.signals.hop", hint: "radio.signals.hopHint" },
+  { id: "sonar", label: "radio.signals.sonar", hint: "radio.signals.sonarHint" },
+  { id: "none", label: "radio.signals.none", hint: "radio.signals.noneHint" },
 ];
 
 export interface NoticePrefs {
@@ -133,8 +135,8 @@ export function anyMessageWanted(p: NoticePrefs): boolean {
 
 /** One word for the Radio screen's row. */
 export function summaryOf(p: NoticePrefs): string {
-  if (!anyMessageWanted(p) && p.nodes === "off") return "Off";
-  if (p.direct && p.chats === "all" && p.nodes !== "off") return "On";
-  if (p.direct && p.chats === "mentions") return "Mentions";
-  return "Custom";
+  if (!anyMessageWanted(p) && p.nodes === "off") return t("common.off");
+  if (p.direct && p.chats === "all" && p.nodes !== "off") return t("common.on");
+  if (p.direct && p.chats === "mentions") return t("radio.notifications.mentions");
+  return t("radio.notifications.custom");
 }

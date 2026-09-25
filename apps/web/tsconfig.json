@@ -12,6 +12,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
     "types": ["vite/client", "web-bluetooth", "w3c-web-serial"]
   },
   "include": ["src", "vite.config.ts"]

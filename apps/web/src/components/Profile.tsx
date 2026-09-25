@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { AdvType, aclRoleName, contactConversation, isConversationType, isFavourite, isNodeType, NoReplyError } from "@meshnet/meshcore";
+import { AclRole, AdvType, contactConversation, isConversationType, isFavourite, isNodeType, NoReplyError } from "@meshnet/meshcore";
+import { t, type Key } from "../i18n/index.js";
 import { ago, agoPhrase } from "../lib/format.js";
 import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "../lib/geo.js";
 import { useWide } from "../lib/layout.js";
@@ -23,13 +24,27 @@ import { NotOnRadio } from "./ContactsPages.js";
 import { Gone, ScreenHead, type Chrome } from "./ScreenHead.js";
 import { RouteLink } from "./tools/RouteSheet.js";
 
-const PAGES: Record<NodePage, { label: string; icon: React.ReactNode; admin: boolean }> = {
-  neighbours: { label: "Neighbours", icon: <UsersIcon size={17} />, admin: false },
-  history: { label: "History", icon: <ChartIcon size={17} />, admin: false },
-  settings: { label: "Settings", icon: <SlidersIcon size={17} />, admin: true },
-  access: { label: "Access", icon: <ShieldIcon size={17} />, admin: true },
-  console: { label: "Console", icon: <TerminalIcon size={17} />, admin: true },
+const PAGES: Record<NodePage, { label: Key; icon: React.ReactNode; admin: boolean }> = {
+  neighbours: { label: "mesh.tab.neighbours", icon: <UsersIcon size={17} />, admin: false },
+  history: { label: "mesh.tab.history", icon: <ChartIcon size={17} />, admin: false },
+  settings: { label: "mesh.tab.settings", icon: <SlidersIcon size={17} />, admin: true },
+  access: { label: "mesh.tab.access", icon: <ShieldIcon size={17} />, admin: true },
+  console: { label: "mesh.tab.console", icon: <TerminalIcon size={17} />, admin: true },
 };
+
+/** A sign-in's role, as the firmware's ACL has it (`aclRoleName`), in the reader's words. */
+function roleName(role: number): string {
+  switch (role & 3) {
+    case AclRole.Admin:
+      return t("mesh.role.admin");
+    case AclRole.ReadWrite:
+      return t("mesh.role.readWrite");
+    case AclRole.ReadOnly:
+      return t("mesh.role.readOnly");
+    default:
+      return t("mesh.role.guest");
+  }
+}
 
 export function nodePages(type: number): NodePage[] {
   if (type === AdvType.Repeater) return ["neighbours", "settings", "access", "console"];
@@ -56,7 +71,7 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
 
   if (!contact) {
     const removed = state.removed[contactKey]?.contact;
-    if (!removed) return <Gone chrome={chrome} title="Contact" text="This contact is no longer on the radio." />;
+    if (!removed) return <Gone chrome={chrome} title={t("mesh.profile.contact")} text={t("mesh.profile.gone")} />;
     const name = removed.name || removed.prefix;
     return (
       <div className="screen">
@@ -65,14 +80,12 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
           <div className="hero">
             <Avatar name={name} type={removed.type} size={68} />
             <h1>{name}</h1>
-            <span className="muted">
-              {kindLabel(removed.type)} · heard {agoPhrase(heardAt(removed) || null)}
-            </span>
+            <span className="muted">{t("mesh.profile.kindHeard", { kind: kindLabel(removed.type), time: agoPhrase(heardAt(removed) || null) })}</span>
           </div>
           <NotOnRadio contactKey={contactKey} />
           {isConversationType(removed.type) && state.messages.some((m) => m.conversation === contactConversation(contactKey)) ? (
             <Group>
-              <LinkRow icon={<ChatIcon size={17} />} label="Open the chat" onClick={() => openConversation(contactConversation(contactKey))} />
+              <LinkRow icon={<ChatIcon size={17} />} label={t("mesh.profile.openChat")} onClick={() => openConversation(contactConversation(contactKey))} />
             </Group>
           ) : null}
         </div>
@@ -90,7 +103,12 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
   const managed = login !== undefined || state.statusHistory[key] !== undefined || saved.includes(key);
   const self = state.self;
   const placed = hasPosition(contact.lat, contact.lon);
-  const where = self && placed && hasPosition(self.lat, self.lon) ? `${formatDistance(distanceKm(self.lat, self.lon, contact.lat, contact.lon))} ${compass(bearingDeg(self.lat, self.lon, contact.lat, contact.lon))} of you` : placed ? "" : "No position shared";
+  const where =
+    self && placed && hasPosition(self.lat, self.lon)
+      ? t("mesh.profile.whereOfYou", { distance: formatDistance(distanceKm(self.lat, self.lon, contact.lat, contact.lon)), direction: compass(bearingDeg(self.lat, self.lon, contact.lat, contact.lon)) })
+      : placed
+        ? ""
+        : t("mesh.profile.noPosition");
   const heard = heardAt(contact) || null;
   const telemetry = state.telemetry[key];
   const owner = state.ownerInfo[key];
@@ -107,31 +125,31 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
 
   const more = () => {
     const items: MenuItem[] = [
-      { label: "Rename", icon: <EditIcon size={17} />, onSelect: () => setAsk("rename"), disabled: !online },
-      { label: "Share on the air", icon: <AirIcon size={17} />, air: true, disabled: !online, onSelect: () => void act(() => session.shareContact(key), `${name} shared on the air`) },
-      { label: "Copy the public key", icon: <CopyIcon size={17} />, onSelect: () => void navigator.clipboard?.writeText(key).then(() => toast("Copied")) },
+      { label: t("common.rename"), icon: <EditIcon size={17} />, onSelect: () => setAsk("rename"), disabled: !online },
+      { label: t("mesh.profile.shareOnAir"), icon: <AirIcon size={17} />, air: true, disabled: !online, onSelect: () => void act(() => session.shareContact(key), t("mesh.profile.shared", { name })) },
+      { label: t("mesh.profile.copyKey"), icon: <CopyIcon size={17} />, onSelect: () => void navigator.clipboard?.writeText(key).then(() => toast(t("common.copied"))) },
     ];
     if (admin) {
       items.push(
-        { label: "Advertise across the mesh", icon: <AirIcon size={17} />, air: true, disabled: !online, onSelect: cli("advert", `${name} advertised`) },
-        { label: "Advertise to its neighbours", icon: <AirIcon size={17} />, air: true, disabled: !online, onSelect: cli("advert.zerohop", `${name} advertised nearby`) },
+        { label: t("mesh.profile.advertMesh"), icon: <AirIcon size={17} />, air: true, disabled: !online, onSelect: cli("advert", t("mesh.profile.advertised", { name })) },
+        { label: t("mesh.profile.advertNear"), icon: <AirIcon size={17} />, air: true, disabled: !online, onSelect: cli("advert.zerohop", t("mesh.profile.advertisedNearby", { name })) },
       );
-      if (contact.type !== AdvType.Sensor) items.push({ label: "Clear its statistics", icon: <AirIcon size={17} />, air: true, disabled: !online, onSelect: cli("clear stats", "Statistics cleared") });
-      if (contact.type === AdvType.Repeater) items.push({ label: owner ? "Ask for firmware and owner again" : "Ask for firmware and owner", icon: <AirIcon size={17} />, air: true, disabled: !online, onSelect: () => void act(() => session.requestOwnerInfo(key)) });
-      items.push({ label: `Reboot ${name}`, icon: <PowerIcon size={17} />, danger: true, disabled: !online, onSelect: () => setAsk("reboot") });
+      if (contact.type !== AdvType.Sensor) items.push({ label: t("mesh.profile.clearStats"), icon: <AirIcon size={17} />, air: true, disabled: !online, onSelect: cli("clear stats", t("mesh.profile.statsCleared")) });
+      if (contact.type === AdvType.Repeater) items.push({ label: owner ? t("mesh.profile.askOwnerAgain") : t("mesh.profile.askOwner"), icon: <AirIcon size={17} />, air: true, disabled: !online, onSelect: () => void act(() => session.requestOwnerInfo(key)) });
+      items.push({ label: t("mesh.profile.rebootName", { name }), icon: <PowerIcon size={17} />, danger: true, disabled: !online, onSelect: () => setAsk("reboot") });
     }
-    if (node && managed) items.push({ label: "Forget this node", icon: <CloseIcon size={17} />, danger: true, onSelect: () => setAsk("forget") });
-    items.push({ label: contact.unsaved ? "Remove from the list" : "Remove the contact", icon: <TrashIcon size={17} />, danger: true, disabled: !online && !contact.unsaved, onSelect: () => setAsk("remove") });
+    if (node && managed) items.push({ label: t("mesh.profile.forgetNode"), icon: <CloseIcon size={17} />, danger: true, onSelect: () => setAsk("forget") });
+    items.push({ label: contact.unsaved ? t("mesh.profile.removeFromList") : t("mesh.profile.removeContact"), icon: <TrashIcon size={17} />, danger: true, disabled: !online && !contact.unsaved, onSelect: () => setAsk("remove") });
     showMenu(items, { title: name });
   };
 
   const signedMenu = () =>
     showMenu(
       [
-        { label: admin ? "Sign in again" : "Sign in as admin", icon: <LockIcon size={17} />, air: true, disabled: !online, onSelect: () => setAsk("signin") },
-        { label: "Sign out", icon: <CloseIcon size={17} />, air: true, disabled: !online, onSelect: () => void act(() => session.logout(key), "Signed out") },
+        { label: admin ? t("mesh.profile.signInAgain") : t("mesh.profile.signInAdmin"), icon: <LockIcon size={17} />, air: true, disabled: !online, onSelect: () => setAsk("signin") },
+        { label: t("mesh.profile.signOut"), icon: <CloseIcon size={17} />, air: true, disabled: !online, onSelect: () => void act(() => session.logout(key), t("mesh.profile.signedOut")) },
       ],
-      { title: `${name} · ${login?.role === null || login?.role === undefined ? "signed in" : `signed in as ${aclRoleName(login.role)}`}` },
+      { title: login?.role === null || login?.role === undefined ? t("mesh.profile.signedInTitle", { name }) : t("mesh.profile.signedInAsTitle", { name, role: roleName(login.role) }) },
     );
 
   return (
@@ -141,7 +159,7 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
         actions={
           <>
             {node ? <QueuePill nodeKey={key} /> : null}
-            <IconButton label={isFavourite(contact) ? "Remove from favourites" : "Add to favourites"} disabled={!online} onClick={() => void act(() => session.setFavourite(key, !isFavourite(contact)))}>
+            <IconButton label={isFavourite(contact) ? t("mesh.profile.unfavourite") : t("mesh.profile.favourite")} disabled={!online} onClick={() => void act(() => session.setFavourite(key, !isFavourite(contact)))}>
               {isFavourite(contact) ? <StarFilledIcon size={19} className="star" /> : <StarIcon size={19} />}
             </IconButton>
           </>
@@ -151,9 +169,7 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
         <div className="hero">
           <Avatar name={name} type={contact.type} size={68} />
           <h1>{name}</h1>
-          <span className="muted">
-            {kindLabel(contact.type)} · heard {agoPhrase(heard)}
-          </span>
+          <span className="muted">{t("mesh.profile.kindHeard", { kind: kindLabel(contact.type), time: agoPhrase(heard) })}</span>
           {where ? <span className="muted">{where}</span> : null}
         </div>
 
@@ -163,31 +179,31 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
           {routed ? (
             <button type="button" className="hero-act primary" onClick={() => openConversation(contactConversation(key))}>
               <ChatIcon size={20} />
-              Message
+              {t("mesh.message")}
             </button>
           ) : null}
           {node ? (
             signedIn ? (
               <button type="button" className="hero-act" onClick={signedMenu}>
                 <CheckIcon size={20} />
-                {admin ? "Admin" : "Signed in"}
+                {admin ? t("mesh.profile.admin") : t("mesh.profile.signedIn")}
               </button>
             ) : (
               <button type="button" className={["hero-act", routed ? "" : "primary"].join(" ")} disabled={!online} onClick={() => setAsk("signin")}>
                 <LockIcon size={20} />
-                Sign in
+                {t("mesh.profile.signIn")}
               </button>
             )
           ) : null}
           {mapBeside ? null : (
             <button type="button" className="hero-act" disabled={!placed} onClick={() => showOnMap(key)}>
               <MapIcon size={20} />
-              On map
+              {t("mesh.profile.onMap")}
             </button>
           )}
           <button type="button" className="hero-act" onClick={more}>
             <MoreIcon size={20} />
-            More
+            {t("common.more")}
           </button>
         </div>
 
@@ -200,14 +216,14 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
         {node && (managed || signedIn) ? <NodeStatus contact={contact} /> : null}
 
         {node ? (
-          <Group title="Manage" note={signedIn ? (admin ? undefined : "Settings, access and the console need the admin password.") : "Sign in to see what it hears. Settings, access and the console need the admin password."}>
+          <Group title={t("mesh.profile.manage")} note={signedIn ? (admin ? undefined : t("mesh.profile.needAdmin")) : t("mesh.profile.signInToSee")}>
             {nodePages(contact.type).map((page) => {
               const locked = !signedIn || (PAGES[page].admin && !admin);
               return (
                 <LinkRow
                   key={page}
                   icon={PAGES[page].icon}
-                  label={PAGES[page].label}
+                  label={t(PAGES[page].label)}
                   disabled={locked}
                   trailing={locked ? <LockIcon size={14} className="line-chev" /> : undefined}
                   onClick={() => openNodePage(key, page)}
@@ -216,38 +232,38 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
             })}
           </Group>
         ) : (
-          <Group title={telemetry ? `Readings · ${ago(telemetry.at)}` : "Readings"} note={telemetry ? undefined : "Its radio answers only if its owner lets this one read it."}>
+          <Group title={telemetry ? t("mesh.profile.readingsAgo", { time: ago(telemetry.at) }) : t("mesh.profile.readings")} note={telemetry ? undefined : t("mesh.profile.readingsNote")}>
             {telemetry ? <Readings readings={telemetry.readings} /> : null}
-            <ActionRow label="Request telemetry" air disabled={!online} onClick={() => void act(() => session.requestTelemetry(key))} />
+            <ActionRow label={t("mesh.profile.requestTelemetry")} air disabled={!online} onClick={() => void act(() => session.requestTelemetry(key))} />
           </Group>
         )}
 
-        <Group title="Details">
-          <LinkRow label="Public key" value={<span className="mono">{key.slice(0, 16)}…</span>} trailing={<CopyIcon size={14} className="line-chev" />} onClick={() => void navigator.clipboard?.writeText(key).then(() => toast("Copied"))} />
+        <Group title={t("mesh.profile.details")}>
+          <LinkRow label={t("mesh.profile.publicKey")} value={<span className="mono">{key.slice(0, 16)}…</span>} trailing={<CopyIcon size={14} className="line-chev" />} onClick={() => void navigator.clipboard?.writeText(key).then(() => toast(t("common.copied")))} />
           {placed ? (
-            <InfoRow label="Position" mono>
+            <InfoRow label={t("mesh.profile.position")} mono>
               {contact.lat.toFixed(5)}, {contact.lon.toFixed(5)}
             </InfoRow>
           ) : null}
           {owner ? (
             <>
-              <InfoRow label="Firmware" mono>
+              <InfoRow label={t("mesh.profile.firmware")} mono>
                 {owner.firmware}
               </InfoRow>
-              <InfoRow label="Owner">{owner.owner ? <span className="multiline">{owner.owner}</span> : "not set"}</InfoRow>
+              <InfoRow label={t("mesh.profile.owner")}>{owner.owner ? <span className="multiline">{owner.owner}</span> : t("mesh.profile.notSet")}</InfoRow>
             </>
           ) : null}
-          {login?.firmwareLevel != null ? <InfoRow label="Firmware level">{login.firmwareLevel}</InfoRow> : null}
+          {login?.firmwareLevel != null ? <InfoRow label={t("mesh.profile.firmwareLevel")}>{login.firmwareLevel}</InfoRow> : null}
         </Group>
       </div>
 
-      <SignIn open={ask === "signin"} nodeKey={key} onClose={() => setAsk(null)} onSignedIn={() => { setAsk(null); toast(`Signed in to ${name}`); }} />
+      <SignIn open={ask === "signin"} nodeKey={key} onClose={() => setAsk(null)} onSignedIn={() => { setAsk(null); toast(t("mesh.profile.signedInTo", { name })); }} />
       <Prompt
         open={ask === "rename"}
-        title="Rename"
-        label="Name on your radio; the node keeps its own"
+        title={t("common.rename")}
+        label={t("mesh.profile.renameLabel")}
         initial={contact.name}
-        submitLabel="Save"
+        submitLabel={t("common.save")}
         onCancel={() => setAsk(null)}
         onSubmit={async (value) => {
           if (value.trim()) await act(() => session.renameContact(key, value.trim()));
@@ -256,32 +272,21 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
       />
       <Confirm
         open={ask === "remove"}
-        title={`Remove ${name}?`}
-        body={
-          contact.unsaved ? (
-            <p>The radio never kept it; it only leaves this list, and shows up again on its next advert.</p>
-          ) : (
-            <p>The radio forgets it, and its direct messages won't reach you until it advertises again. Its chat stays here, and you can put it back from Radio › Contacts › Removed.</p>
-          )
-        }
-        confirmLabel="Remove"
+        title={t("mesh.profile.removeTitle", { name })}
+        body={contact.unsaved ? <p>{t("mesh.profile.removeUnsaved")}</p> : <p>{t("mesh.profile.removeBody")}</p>}
+        confirmLabel={t("mesh.profile.remove")}
         danger
         onCancel={() => setAsk(null)}
         onConfirm={async () => {
           setAsk(null);
-          if (await act(() => session.removeContact(key), "Removed")) (chrome.onClose ?? chrome.onBack)?.();
+          if (await act(() => session.removeContact(key), t("mesh.profile.removed"))) (chrome.onClose ?? chrome.onBack)?.();
         }}
       />
       <Confirm
         open={ask === "forget"}
-        title={`Forget ${name}?`}
-        body={
-          <p>
-            It leaves your nodes, {hasSavedPassword(key) ? "its saved password is deleted, " : ""}and its status history goes. The contact stays, and the node keeps its own record of
-            this radio, so a later sign-in may need no password.
-          </p>
-        }
-        confirmLabel="Forget"
+        title={t("mesh.profile.forgetTitle", { name })}
+        body={<p>{hasSavedPassword(key) ? t("mesh.profile.forgetBodyPassword") : t("mesh.profile.forgetBody")}</p>}
+        confirmLabel={t("mesh.profile.forget")}
         danger
         onCancel={() => setAsk(null)}
         onConfirm={async () => {
@@ -289,19 +294,19 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
           await forgetPassword(key).catch(() => undefined);
           await session.logout(key).catch(() => undefined);
           session.forgetNode(key);
-          toast("Forgotten");
+          toast(t("mesh.profile.forgotten"));
         }}
       />
       <Confirm
         open={ask === "reboot"}
-        title={`Reboot ${name}?`}
-        body={<p>The node goes off the air for a few seconds and forgets its neighbours. It sends no reply.</p>}
-        confirmLabel="Reboot"
+        title={t("mesh.profile.rebootTitle", { name })}
+        body={<p>{t("mesh.profile.rebootBody")}</p>}
+        confirmLabel={t("mesh.profile.reboot")}
         danger
         onCancel={() => setAsk(null)}
         onConfirm={() => {
           setAsk(null);
-          cli("reboot", `${name} was told to reboot`)();
+          cli("reboot", t("mesh.profile.rebootSent", { name }))();
         }}
       />
     </div>

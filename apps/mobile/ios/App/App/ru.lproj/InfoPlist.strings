@@ -1,0 +1,5 @@
+/* What iOS asks the reader in Russian; the English is in Info.plist. */
+"NSBluetoothAlwaysUsageDescription" = "Ommesh связывается с вашим радио MeshCore по Bluetooth.";
+"NSBluetoothPeripheralUsageDescription" = "Ommesh связывается с вашим радио MeshCore по Bluetooth.";
+"NSLocalNetworkUsageDescription" = "Ommesh связывается с радио MeshCore в вашей сети Wi-Fi.";
+"NSLocationWhenInUseUsageDescription" = "Ommesh задаёт местоположение радио по геопозиции телефона, когда вы об этом просите.";

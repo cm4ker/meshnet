@@ -21,6 +21,8 @@ import { session, useSession } from "../lib/session.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
 import { ClockIcon, CloseIcon, ReplyIcon, SendIcon, TextIcon, WavesIcon } from "./Icons.js";
+import { t } from "../i18n/index.js";
+import { tx } from "../i18n/rich.js";
 
 /** A message being answered: on the air, only its author's name before the text. */
 export interface Reply {
@@ -157,11 +159,11 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
   const press = usePress((at) => {
     if (empty) return;
     const items: MenuItem[] = [];
-    if (target.kind === "contact") items.push({ label: "Send by flood", icon: <WavesIcon size={17} />, air: true, hint: "Drops the route first", onSelect: () => void send({ flood: true }) });
+    if (target.kind === "contact") items.push({ label: t("chats.composer.sendFlood"), icon: <WavesIcon size={17} />, air: true, hint: t("chats.composer.sendFloodHint"), onSelect: () => void send({ flood: true }) });
     const extra = cost.typed - cost.used;
     if (extra > 0) {
       const fits = utf8Length(body) <= cost.budget;
-      items.push({ label: "Send as typed", icon: <TextIcon size={17} />, air: true, disabled: !fits, hint: fits ? `Without lookalike letters, ${extra} B more` : "Too long without lookalike letters", onSelect: () => void send({ raw: true }) });
+      items.push({ label: t("chats.composer.sendAsTyped"), icon: <TextIcon size={17} />, air: true, disabled: !fits, hint: fits ? t("chats.composer.asTypedHint", { bytes: extra }) : t("chats.composer.asTypedTooLong"), onSelect: () => void send({ raw: true }) });
     }
     if (items.length > 0) showMenu(items, { at });
   });
@@ -209,24 +211,24 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
   };
 
   if (target.kind === "prefix") {
-    return <footer className="compose compose-note muted">Not in the contacts yet: add the sender to write back.</footer>;
+    return <footer className="compose compose-note muted">{t("chats.composer.notContact")}</footer>;
   }
 
   const saved = cost.typed - cost.used;
   const button = empty
-    ? { cls: "idle", label: "Send", icon: <SendIcon size={18} />, disabled: true, act: () => undefined }
+    ? { cls: "idle", label: t("common.send"), icon: <SendIcon size={18} />, disabled: true, act: () => undefined }
     : over
-      ? { cls: "over", label: "Too long to send", icon: <SendIcon size={18} />, disabled: true, act: () => undefined }
+      ? { cls: "over", label: t("chats.composer.tooLongToSend"), icon: <SendIcon size={18} />, disabled: true, act: () => undefined }
       : online
-        ? { cls: "ready", label: "Send", icon: <SendIcon size={18} />, disabled: false, act: () => void send() }
-        : { cls: "queue", label: "Send when the radio is back", icon: <ClockIcon size={18} />, disabled: false, act: () => void send() };
+        ? { cls: "ready", label: t("common.send"), icon: <SendIcon size={18} />, disabled: false, act: () => void send() }
+        : { cls: "queue", label: t("chats.composer.sendWhenBack"), icon: <ClockIcon size={18} />, disabled: false, act: () => void send() };
   const translitCost = over && hasCyrillic(text) ? utf8Length(pack(translit(text))) : null;
   const parts = over ? splitParts(pack(body), cost.budget).length : 0;
 
   return (
     <footer className={["compose", focused ? "focus" : "", text || reply ? "has" : "", online ? "" : "waiting", shake ? "shake" : ""].join(" ")} onAnimationEnd={() => setShake(false)}>
       {matches.length > 0 && pick ? (
-        <div className="compose-pop" role="listbox" aria-label="Mention">
+        <div className="compose-pop" role="listbox" aria-label={t("chats.composer.mention")}>
           {matches.map((who, i) => (
             <button
               key={who}
@@ -239,7 +241,7 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
             >
               <Avatar name={who} size={24} />
               <span className="compose-pop-name">{who}</span>
-              <span className="compose-cost">{utf8Length(mentionOf(who))} B</span>
+              <span className="compose-cost">{t("chats.composer.bytes", { bytes: utf8Length(mentionOf(who)) })}</span>
             </button>
           ))}
         </div>
@@ -248,13 +250,14 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
         {!empty && !(pick && matches.length > 0) ? (
           <span className={["compose-tag", tone].join(" ")} id={`cost-${conversation}`}>
             {over ? (
-              `${cost.over} B over`
+              t("chats.composer.bytesOver", { bytes: cost.over })
             ) : tone === "warn" ? (
-              `${cost.used} / ${cost.budget} B`
+              t("chats.composer.usedOf", { used: cost.used, budget: cost.budget })
             ) : (
               <>
-                {cost.used} B{saved > 0 ? <span className="saved"> −{saved}</span> : null}
-                {cost.airMs !== null ? ` · ${(cost.airMs / 1000).toFixed(2)} s` : ""}
+                {t("chats.composer.bytes", { bytes: cost.used })}
+                {saved > 0 ? <span className="saved"> −{saved}</span> : null}
+                {cost.airMs !== null ? ` · ${t("chats.composer.seconds", { value: (cost.airMs / 1000).toFixed(2) })}` : ""}
               </>
             )}
           </span>
@@ -265,23 +268,21 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
             <span className="compose-bar-text">
               <b>{reply.name}</b> · {reply.text}
             </span>
-            <span className="compose-cost">+{utf8Length(mention)} B</span>
-            <button type="button" className="compose-bar-close" aria-label="Cancel the reply" onMouseDown={(e) => e.preventDefault()} onClick={onReplyDone}>
+            <span className="compose-cost">{t("chats.composer.plusBytes", { bytes: utf8Length(mention) })}</span>
+            <button type="button" className="compose-bar-close" aria-label={t("chats.composer.cancelReply")} onMouseDown={(e) => e.preventDefault()} onClick={onReplyDone}>
               <CloseIcon size={14} />
             </button>
           </div>
         ) : null}
         {over ? (
           <div className="compose-bar compose-over">
-            <span className="compose-over-text">
-              <b>{cost.over} B</b> too long · the radio takes {cost.budget}
-            </span>
+            <span className="compose-over-text">{tx("chats.composer.tooLong", { over: <b>{t("chats.composer.bytes", { bytes: cost.over })}</b>, max: cost.budget })}</span>
             <button type="button" className="chip" onMouseDown={(e) => e.preventDefault()} onClick={() => void sendSplit()}>
-              Send in {parts}
+              {t("chats.composer.sendIn", { count: parts })}
             </button>
             {translitCost !== null ? (
               <button type="button" className="chip" onMouseDown={(e) => e.preventDefault()} onClick={() => replace(0, text.length, translit(text))}>
-                Translit <span className="compose-cost">{translitCost <= cost.budget ? "fits" : `−${cost.used - translitCost} B`}</span>
+                {t("chats.composer.translit")} <span className="compose-cost">{translitCost <= cost.budget ? t("chats.composer.fits") : t("chats.composer.minusBytes", { bytes: cost.used - translitCost })}</span>
               </button>
             ) : null}
           </div>
@@ -300,7 +301,7 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
               ref={field}
               rows={1}
               value={text}
-              aria-label={`Message ${title}`}
+              aria-label={t("chats.composer.field", { name: title })}
               aria-describedby={empty ? undefined : `cost-${conversation}`}
               enterKeyHint={touch ? "enter" : "send"}
               autoCapitalize="sentences"

@@ -9,6 +9,7 @@ import type { Connector, FoundDevice } from "./types.js";
 import { nativePlatform } from "../lib/platform.js";
 import { openRelay, type RelayLink } from "../lib/relay.js";
 import { readSetting, writeSetting } from "../lib/storage.js";
+import { t } from "../i18n/index.js";
 
 type BleModule = typeof import("@capacitor-community/bluetooth-le");
 
@@ -106,8 +107,12 @@ function remember(device: FoundDevice): void {
 export const capacitorBleConnector: Connector = {
   id: "cap-ble",
   kind: "ble",
-  title: "Bluetooth",
-  description: "Radios in range.",
+  get title() {
+    return t("connect.transport.bluetooth");
+  },
+  get description() {
+    return t("connect.describe.phoneBle");
+  },
   mode: "scan",
 
   async scan(onFound, signal) {
@@ -119,7 +124,7 @@ export const capacitorBleConnector: Connector = {
     // connection, watches and headphones included, so it is not asked.
     const connected = nativePlatform() === "ios" ? await client.getConnectedDevices([BLE.service]).catch(() => []) : [];
     for (const device of connected) {
-      seen.set(device.deviceId, { id: device.deviceId, name: device.name ?? "MeshCore", detail: "connected to this phone", rssi: null });
+      seen.set(device.deviceId, { id: device.deviceId, name: device.name ?? "MeshCore", detail: t("connect.device.connectedToPhone"), rssi: null });
     }
     if (seen.size > 0) onFound([...seen.values()]);
     if (signal.aborted) return;
@@ -151,7 +156,7 @@ export const capacitorBleConnector: Connector = {
   },
 
   async connect(device) {
-    if (!device) throw new Error("pick a radio from the list");
+    if (!device) throw new Error(t("connect.error.pickRadio"));
     const client = await ble();
     // iOS connects only to a peripheral the plugin has met since launch. A
     // remembered radio, or the one "Reconnect at launch" reaches for, is met

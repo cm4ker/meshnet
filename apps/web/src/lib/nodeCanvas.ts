@@ -18,6 +18,7 @@
 
 import * as L from "leaflet";
 import { AdvType, type ContactRecord } from "@meshnet/meshcore";
+import { t } from "../i18n/index.js";
 import { clusterPoints } from "./cluster.js";
 import { ago, hue, trailingEmoji } from "./format.js";
 import { freshness } from "./geo.js";
@@ -396,6 +397,9 @@ export class NodeCanvas extends L.Renderer {
     const pal = palette();
     const nowSec = Date.now() / 1000;
     const nameFont = `500 11px ${pal.font}`;
+    // Read once a paint, in the language of the moment: a change of language paints anew, and no label outlives it.
+    const justNow = t("common.justNow");
+    const now = t("mesh.map.now");
 
     // Only what falls on the canvas, with room for a name reaching in from the left.
     const x0 = min.x - 240;
@@ -439,7 +443,7 @@ export class NodeCanvas extends L.Renderer {
       const state = freshness(c.type, age);
       const name = c.name || c.prefix;
       const heard = Number.isFinite(age) ? ago(c.lastAdvert * 1000) : "";
-      const when = heard ? ` · ${heard === "just now" ? "now" : heard}` : "";
+      const when = heard ? ` · ${heard === justNow ? now : heard}` : "";
       const left = d.x + (numbers[c.key] ? 19 : 15);
       const box = { x0: left, y0: d.y - 8, x1: left + this.width(ctx, name) + this.width(ctx, when), y1: d.y + 8 };
       if (c.key !== selected && taken.hits(box)) continue;

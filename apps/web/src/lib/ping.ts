@@ -14,6 +14,8 @@
 
 import { useSyncExternalStore } from "react";
 import { AdvType, contactRoute, isConversationType, traceLegs, type SessionState, type TraceResult } from "@meshnet/meshcore";
+import { errorText } from "../i18n/errors.js";
+import { t } from "../i18n/index.js";
 import { buildGraph, findWay, isUnresolved, linkId, locateBreak, planWay, resolver, SELF, tracedLegs, wayLinks, type Graph, type PlannedWay, type WayOptions } from "./linkGraph.js";
 import { linkBook, noteBreak, noteTrace } from "./links.js";
 import { session } from "./session.js";
@@ -220,7 +222,7 @@ export async function ping(key: string, via: string[] | null = null): Promise<vo
       const found = spanPath(span[0], span[1], buildGraph(linkBook(), session.getState(), Date.now()));
       if (!found) {
         p.running = false;
-        p.error = "Nothing the radio has heard links them yet. It learns who hears whom from the packets it hears.";
+        p.error = t("tools.ping.notLinked");
         return publish(p);
       }
       path = { relays: found.chain, target: null };
@@ -231,7 +233,7 @@ export async function ping(key: string, via: string[] | null = null): Promise<vo
     if (!path) {
       if (via) {
         p.running = false;
-        p.error = "This contact is no longer on the radio.";
+        p.error = t("tools.contactGone");
         return publish(p);
       }
       // No route known: look for one.
@@ -242,7 +244,7 @@ export async function ping(key: string, via: string[] | null = null): Promise<vo
     p.targetInChain = path.target !== null || span !== null;
     if (p.chain.length === 0) {
       p.running = false;
-      p.error = "Heard direct: there is nobody between you to check.";
+      p.error = t("tools.ping.direct");
       return publish(p);
     }
     p.stage = "rounds";
@@ -267,7 +269,7 @@ export async function ping(key: string, via: string[] | null = null): Promise<vo
     if (stopped.has(key) || via) return finish(p);
     await search(p, p.broken, heard);
   } catch (error) {
-    p.error = (error as Error).message;
+    p.error = errorText(error);
   }
   finish(p);
 }
@@ -343,7 +345,7 @@ export async function keepLooking(key: string): Promise<void> {
   try {
     await goOn(p, look);
   } catch (error) {
-    p.error = (error as Error).message;
+    p.error = errorText(error);
   }
   finish(p);
 }

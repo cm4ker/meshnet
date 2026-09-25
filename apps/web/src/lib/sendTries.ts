@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { t } from "../i18n/index.js";
 import { session } from "./session.js";
 import { readSetting, writeSetting } from "./storage.js";
 
@@ -48,5 +49,5 @@ export function triesSpanMs(n: number): number {
 /** What `n` tries come to, said in a few words. */
 export function triesPhrase(n: number): string {
   const span = triesSpanMs(n);
-  return span < 60_000 ? `${n} tries within a minute` : `${n} tries over ~${Math.round(span / 60_000)} min`;
+  return span < 60_000 ? t("chats.tries.withinMinute", { count: n }) : t("chats.tries.over", { count: n, minutes: Math.round(span / 60_000) });
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import type { ConsoleEntry, ContactRecord } from "@meshnet/meshcore";
+import { t } from "../../i18n/index.js";
 import { suggest } from "../../lib/cli.js";
 import { timeOfDay } from "../../lib/format.js";
 import { session, useSession } from "../../lib/session.js";
@@ -64,9 +65,7 @@ export function Console({ contact }: { contact: ContactRecord }) {
     <>
       <div className="console" ref={log} aria-live="polite">
         {entries.length === 0 ? (
-          <p className="muted">
-            Commands go to {contact.name || "the node"} over the air and wait their turn; replies land here, never in the chat. The node answers admins only.
-          </p>
+          <p className="muted">{contact.name ? t("node.console.intro", { name: contact.name }) : t("node.console.introUnnamed")}</p>
         ) : null}
         {entries.map((entry) => (
           <Entry key={entry.id} entry={entry} onRetry={() => send(entry.command)} />
@@ -89,7 +88,7 @@ export function Console({ contact }: { contact: ContactRecord }) {
           ))}
           {entries.length > 0 ? (
             <button type="button" className="chip" onClick={() => session.clearConsole(key)}>
-              Clear
+              {t("common.clear")}
             </button>
           ) : null}
         </div>
@@ -101,34 +100,34 @@ export function Console({ contact }: { contact: ContactRecord }) {
           <input
             ref={input}
             className="input mono"
-            aria-label="Console command"
+            aria-label={t("node.console.command")}
             autoComplete="off"
             autoCapitalize="off"
             spellCheck={false}
-            placeholder={online ? "Command, e.g. get tx" : "Disconnected"}
+            placeholder={online ? t("node.console.placeholder") : t("node.console.disconnected")}
             value={draft}
             disabled={!online}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKey}
           />
           <Button type="submit" variant="primary" disabled={!online || !typed}>
-            Send
+            {t("common.send")}
           </Button>
         </div>
       </form>
       <Confirm
         open={confirming !== null}
-        title={`Send “${confirming ?? ""}”?`}
+        title={t("node.console.sendTitle", { command: confirming ?? "" })}
         body={
           <p>
             {confirming?.startsWith("set radio")
-              ? "This moves the node off your channel from its next reboot. tempradio tries new settings for a while first."
+              ? t("node.console.radioWarn")
               : confirming?.startsWith("password") || confirming?.startsWith("set guest.password")
-                ? "Whoever signs in with the old password is refused from now on. The Settings tab changes the admin password and keeps the saved one in step."
-                : `${contact.name} acts on it at once.`}
+                ? t("node.console.passwordWarn")
+                : t("node.console.actsAtOnce", { name: contact.name })}
           </p>
         }
-        confirmLabel="Send"
+        confirmLabel={t("common.send")}
         danger
         onCancel={() => setConfirming(null)}
         onConfirm={() => {
@@ -148,7 +147,7 @@ function Entry({ entry, onRetry }: { entry: ConsoleEntry; onRetry: () => void })
         <div className="c-cmd">
           <span className="c-prompt">›</span>
           <span>{entry.command}</span>
-          <span className="c-tag" title="The tag the node echoes back">
+          <span className="c-tag" title={t("node.console.tag")}>
             {entry.tag}|
           </span>
           <span className="c-time">{timeOfDay(entry.at / 1000)}</span>
@@ -156,25 +155,25 @@ function Entry({ entry, onRetry }: { entry: ConsoleEntry; onRetry: () => void })
       ) : (
         <div className="c-cmd muted">
           <span className="c-prompt">‹</span>
-          <span>unasked</span>
+          <span>{t("node.console.unasked")}</span>
           <span className="c-time">{timeOfDay(entry.at / 1000)}</span>
         </div>
       )}
       {entry.status === "queued" ? (
-        <div className="c-out c-wait">queued</div>
+        <div className="c-out c-wait">{t("node.console.queued")}</div>
       ) : entry.status === "waiting" ? (
         <div className="c-out c-wait">
-          <span className="spinner" aria-hidden="true" /> waiting for the reply…
+          <span className="spinner" aria-hidden="true" /> {t("node.console.waiting")}
         </div>
       ) : entry.status === "timeout" ? (
         <div className="c-out c-err">
-          no reply
+          {t("node.console.noReply")}
           {/* A masked command cannot be sent again: its text here is not the command. */}
           {entry.command.includes("••") ? null : (
             <>
               {" · "}
               <button type="button" className="link" onClick={onRetry}>
-                Send again
+                {t("node.console.sendAgain")}
               </button>
             </>
           )}

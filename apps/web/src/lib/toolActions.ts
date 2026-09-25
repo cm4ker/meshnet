@@ -6,6 +6,7 @@
  */
 
 import { AdvType, contactRoute, type SessionState } from "@meshnet/meshcore";
+import { t } from "../i18n/index.js";
 import { askWhoHears } from "./hears.js";
 import { relayOf, selfEnd, type MapHandle } from "./mapOverlay.js";
 import { getMeshTool, setMeshTool, type LosEnd, type NeighboursTool, type RouteTool } from "./meshTool.js";
@@ -38,7 +39,7 @@ export function tapInSpan(key: string | null, state: SessionState): boolean {
   if (tool?.kind !== "span") return false;
   if (!key || key === tool.from || key === tool.to) return true;
   if (state.contacts[key]?.type !== AdvType.Repeater) {
-    if (state.contacts[key]) toast("Pick a repeater: only they pass a trace on.");
+    if (state.contacts[key]) toast(t("tools.pickRepeater"));
     return true;
   }
   if (tool.to) stopPing(spanKey(tool.from, tool.to));
@@ -59,13 +60,13 @@ export function openLineOfSight(from: LosEnd, to: LosEnd, back: string | null, h
 export function lineOfSightTo(lat: number, lon: number): void {
   const from = selfEnd(session.getState());
   if (!from) {
-    toast("Set this radio's position first: Radio › Name and position.");
+    toast(t("tools.setPositionFirst"));
     return;
   }
   // Held while a node's card was open, Back returns to the card.
   const tool = getMeshTool();
   const back = tool?.kind === "los" ? tool.back : getNav().meshFocus;
-  openLineOfSight(from, { lat, lon, name: "This spot", key: null }, back);
+  openLineOfSight(from, { lat, lon, name: t("tools.thisSpot"), key: null }, back);
 }
 
 /** The relays of the route the radio holds for a contact, as contact keys where a hash names one for sure. */
@@ -105,7 +106,7 @@ export function dropOnRoute(key: string, handle: MapHandle, onto: string): void 
     next = [...relays.slice(0, handle.index), onto, ...relays.slice(handle.index)];
   }
   if (!inRoute && state.contacts[onto]?.type !== AdvType.Repeater) {
-    toast("Only repeaters pass messages on.");
+    toast(t("tools.onlyRepeaters"));
     return;
   }
   editRoute(key, next);
@@ -118,7 +119,7 @@ export function tapInRoute(key: string | null, state: SessionState): boolean {
   if (!key || key === tool.key) return true;
   const c = state.contacts[key];
   if (!c || c.type !== AdvType.Repeater) {
-    if (c) toast("Only repeaters pass messages on.");
+    if (c) toast(t("tools.onlyRepeaters"));
     return true;
   }
   const relays = tool.draft ?? heldRelays(tool.key, state);

@@ -4,6 +4,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { t } from "../../i18n/index.js";
 import { asksLeft, askWhoHears, LISTEN_MS, useHears } from "../../lib/hears.js";
 import { formatSnr } from "../../lib/los.js";
 import { showOnMap } from "../../lib/nav.js";
@@ -30,10 +31,10 @@ export function WhoHears({ onClose }: { onClose: () => void }) {
     <div className="tool">
       <div className="tool-head">
         <span className="row-main">
-          <span className="row-title">Who hears me</span>
-          <span className="row-sub muted">{hears.listening ? `Listening · ${replies.length} answered` : `${replies.length} answered`}</span>
+          <span className="row-title">{t("tools.hears.title")}</span>
+          <span className="row-sub muted">{hears.listening ? t("tools.hears.listeningCount", { count: replies.length }) : t("tools.hears.answered", { count: replies.length })}</span>
         </span>
-        <IconButton label="Close" onClick={onClose}>
+        <IconButton label={t("common.close")} onClick={onClose}>
           <CloseIcon size={18} />
         </IconButton>
       </div>
@@ -60,8 +61,8 @@ export function WhoHears({ onClose }: { onClose: () => void }) {
                 >
                   <RadioIcon size={18} />
                   <span className="row-main">
-                    <span className="row-title">{c ? c.name || c.prefix : `Repeater ${r.key.slice(0, 8)}`}</span>
-                    <span className="row-sub muted">{c ? `you hear it at ${formatSnr(r.heardThem)} dB` : "not among your contacts"}</span>
+                    <span className="row-title">{c ? c.name || c.prefix : t("tools.hears.repeater", { id: r.key.slice(0, 8) })}</span>
+                    <span className="row-sub muted">{c ? t("tools.hears.youHear", { snr: formatSnr(r.heardThem) }) : t("tools.hears.notContact")}</span>
                   </span>
                   <QualityChip snr={r.heardUs} />
                 </button>
@@ -70,15 +71,15 @@ export function WhoHears({ onClose }: { onClose: () => void }) {
           })}
         </ul>
       ) : !hears.listening ? (
-        <p className="tool-note muted">No repeater answered. Try higher up, or outside.</p>
+        <p className="tool-note muted">{t("tools.hears.none")}</p>
       ) : null}
       <Button variant={hears.listening ? "default" : "primary"} size="lg" disabled={!online || hears.listening || left <= 0} onClick={() => void askWhoHears()}>
         <WavesIcon size={18} />
-        {hears.listening ? "Listening…" : left <= 0 ? `Again in ${Math.max(1, Math.ceil(((nextAt ?? now) - now) / 1000))} s` : "Ask again"}
+        {hears.listening ? t("tools.hears.listening") : left <= 0 ? t("tools.hears.againIn", { seconds: Math.max(1, Math.ceil(((nextAt ?? now) - now) / 1000)) }) : t("tools.askAgain")}
       </Button>
       <div className="check-cost">
         <WavesIcon size={13} />
-        One short packet from you · each repeater answers up to 4 times in 2 minutes
+        {t("tools.hears.cost")}
       </div>
     </div>
   );

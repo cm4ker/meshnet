@@ -7,6 +7,7 @@
 
 import { useSyncExternalStore } from "react";
 import type { DiscoverReply } from "@meshnet/meshcore";
+import { errorText } from "../i18n/errors.js";
 import { noteHeardUs } from "./links.js";
 import { session } from "./session.js";
 
@@ -57,7 +58,7 @@ export async function askWhoHears(): Promise<void> {
     });
     set({ replies });
   } catch (error) {
-    set({ error: (error as Error).message });
+    set({ error: errorText(error) });
   } finally {
     set({ listening: false });
   }

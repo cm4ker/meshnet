@@ -1,0 +1,63 @@
+{
+  "newContact": "Новый контакт: {name}",
+  "newRepeater": "Новый репитер: {name}",
+  "newRoom": "Новая комната: {name}",
+  "newSensor": "Новый датчик: {name}",
+  "newNode": "Новый узел: {name}",
+  "heardFirst": "Слышно впервые.",
+  "heardFirstAt": "Слышно впервые: {distance}, {direction}.",
+  "unknown": "Неизвестный {prefix}",
+  "channel": "Канал {index}",
+  "mentioned": "{who} упоминает вас",
+  "mentionedIn": "{who} упоминает вас в {chat}",
+  "inChat": "{sender} в {chat}",
+  "chatNew": {
+    "one": "{chat} · {count} новое",
+    "few": "{chat} · {count} новых",
+    "many": "{chat} · {count} новых",
+    "other": "{chat} · {count} новых"
+  },
+  "chatNewMentioned": {
+    "one": "{chat} · {count} новое, вас упомянули",
+    "few": "{chat} · {count} новых, вас упомянули",
+    "many": "{chat} · {count} новых, вас упомянули",
+    "other": "{chat} · {count} новых, вас упомянули"
+  },
+  "allChats": "{messages} в {chats}",
+  "newMessages": {
+    "one": "{count} новое сообщение",
+    "few": "{count} новых сообщения",
+    "many": "{count} новых сообщений",
+    "other": "{count} нового сообщения"
+  },
+  "inChats": {
+    "one": "{count} чате",
+    "few": "{count} чатах",
+    "many": "{count} чатах",
+    "other": "{count} чата"
+  },
+  "dismiss": "Скрыть",
+  "reply": "Ответить…",
+  "markRead": "Прочитано",
+  "tray.open": "Открыть Meshnet",
+  "tray.quit": "Выйти",
+  "tray.people": "{count} от людей",
+  "tray.chats": "{count} в чатах",
+  "tray.both": "{people} от людей, {chats} в чатах",
+  "android.relayChannel": "Связь с радио",
+  "android.relayChannelHint": "Видно, пока приложение держит радио подключённым в фоне.",
+  "android.relayTheRadio": "радио",
+  "android.relayReconnecting": "Переподключение к {name}",
+  "android.relayWaitingRadio": "Ждём радио",
+  "android.relaySharing": "Общий доступ к {name}",
+  "android.relayComputer": "Компьютер подключён",
+  "android.relayWaitingComputer": "Ждём компьютер",
+  "android.relayConnected": "Подключено к {name}",
+  "android.relayAppClosed": "Сообщения приходят и при закрытом приложении",
+  "android.channelDirect": "Личные сообщения",
+  "android.channelDirectHint": "Сообщение от человека вам.",
+  "android.channelChats": "Каналы и комнаты",
+  "android.channelChatsHint": "Сообщения в каналах и комнатах или только те, где вас упоминают.",
+  "android.channelNodes": "Новые узлы",
+  "android.channelNodesHint": "Узел, услышанный впервые."
+}

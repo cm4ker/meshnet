@@ -4,7 +4,7 @@ import { GEO, MENTION } from "../lib/composer.js";
 import { messagesIn, shownAt, titleOf } from "../lib/conversations.js";
 import { nameOfHash, relaysOf } from "../lib/echoes.js";
 import { getOpenAtUnread, takeUnread } from "../lib/firstUnread.js";
-import { agoPhrase, dayLabel, plural, timeOfDay } from "../lib/format.js";
+import { agoPhrase, dayLabel, timeOfDay } from "../lib/format.js";
 import { openChannel, openMessage, openProfile } from "../lib/nav.js";
 import { heardAt, hopsLabel, kindLabel } from "../lib/nodes.js";
 import { openRoute } from "../lib/toolActions.js";
@@ -39,6 +39,7 @@ import {
   WavesIcon,
 } from "./Icons.js";
 import { ScreenHead, type Chrome } from "./ScreenHead.js";
+import { t } from "../i18n/index.js";
 
 export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversation: string; chrome: Chrome; infoOpen?: boolean | undefined; onInfo?: () => void }) {
   const state = useSession();
@@ -68,11 +69,11 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
       if (found.length > 1) {
         showMenu(
           found.map((c) => ({ label: c.name, hint: nodeLine(c), icon: <Avatar name={c.name} type={c.type} size={28} />, onSelect: () => openProfile(c.key) })),
-          { title: `${found.length} nodes named ${name}` },
+          { title: t("chats.chat.sameName", { count: found.length, name }) },
         );
         return;
       }
-      showMenu([{ label: "Reply", icon: <ReplyIcon size={17} />, onSelect: () => answer(message) }], { title: `${name} · no advert heard yet` });
+      showMenu([{ label: t("chats.message.reply"), icon: <ReplyIcon size={17} />, onSelect: () => answer(message) }], { title: t("chats.chat.noAdvert", { name }) });
     },
     [answer],
   );
@@ -163,13 +164,13 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
         chrome={chrome}
         actions={
           onInfo ? (
-            <IconButton label="Details · Ctrl+I" className={infoOpen ? "on" : ""} aria-pressed={infoOpen} onClick={onInfo}>
+            <IconButton label={t("chats.chat.details")} className={infoOpen ? "on" : ""} aria-pressed={infoOpen} onClick={onInfo}>
               <InfoIcon size={18} />
             </IconButton>
           ) : undefined
         }
       >
-        <button type="button" className="chat-who" onClick={details} disabled={!details} aria-label={`About ${title}`}>
+        <button type="button" className="chat-who" onClick={details} disabled={!details} aria-label={t("chats.chat.about", { name: title })}>
           <Avatar name={title} type={contact?.type} channel={target.kind === "channel"} size={32} />
         </button>
         <span className="screen-name-stack">
@@ -183,7 +184,7 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
               <ChevronRightIcon size={11} />
             </button>
           ) : target.kind === "contact" && (!contact || contact.unsaved) ? (
-            <span className="chat-route">not on your radio</span>
+            <span className="chat-route">{t("chats.chat.notOnRadio")}</span>
           ) : null}
         </span>
       </ScreenHead>
@@ -198,7 +199,7 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
         }}
       >
         <div className="chat-inner" ref={inner}>
-          {messages.length === 0 ? <div className="empty muted">{target.kind === "channel" ? "Write first: everyone on the channel hears it." : "Nothing here yet."}</div> : null}
+          {messages.length === 0 ? <div className="empty muted">{target.kind === "channel" ? t("chats.chat.emptyChannel") : t("chats.chat.empty")}</div> : null}
           {messages.map((m, i) => {
             const prev = messages[i - 1];
             const next = messages[i + 1];
@@ -210,7 +211,7 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
             return (
               <div key={m.id} data-id={m.id}>
                 {newDay ? <div className="day">{dayLabel(shownAt(m))}</div> : null}
-                {opens && unread ? <div className="unread-line">{plural(unread.count, "new message")}</div> : null}
+                {opens && unread ? <div className="unread-line">{t("chats.chat.newMessages", { count: unread.count })}</div> : null}
                 <Message
                   message={m}
                   lead={many && first && !newDay && !opens}
@@ -232,7 +233,7 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
         <button
           type="button"
           className={["chat-jump", away ? "" : "off"].join(" ")}
-          aria-label={below ? `Latest message, ${plural(below, "new message")} below` : "Latest message"}
+          aria-label={below ? t("chats.chat.latestBelow", { count: below }) : t("chats.chat.latest")}
           onClick={toLatest}
         >
           {below ? <span className="badge">{below}</span> : null}
@@ -247,7 +248,7 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
       ) : locked && contact ? (
         <footer className="compose">
           <button type="button" className="compose-login" onClick={() => openProfile(contact.key)}>
-            <LockIcon size={16} /> Log in to {title} to post
+            <LockIcon size={16} /> {t("chats.chat.logInToPost", { name: title })}
           </button>
         </footer>
       ) : (
@@ -298,11 +299,11 @@ function richText(text: string, me: string | null): ReactNode {
 function techOf(message: MessageRecord): string {
   if (message.direction === "in") {
     const bits = [];
-    if (message.snr !== null) bits.push(`${message.snr > 0 ? "+" : ""}${message.snr.toFixed(1)} dB`);
-    if (message.hops !== null) bits.push(message.hops === 0 ? "direct" : `${message.hops} hop${message.hops === 1 ? "" : "s"}`);
+    if (message.snr !== null) bits.push(t("chats.chat.snr", { value: `${message.snr > 0 ? "+" : ""}${message.snr.toFixed(1)}` }));
+    if (message.hops !== null) bits.push(message.hops === 0 ? t("chats.chat.direct") : t("chats.chat.hops", { count: message.hops }));
     return bits.join(" · ");
   }
-  return message.flood ? "flood" : "";
+  return message.flood ? t("chats.chat.flood") : "";
 }
 
 /** Whether `b` goes on from `a` without a break: the same side and sender, the same day, within five minutes. */
@@ -313,7 +314,7 @@ function sameRun(a: MessageRecord, b: MessageRecord): boolean {
 /** A node among several of one name, told apart by what it is and when it was last heard. */
 function nodeLine(contact: ContactRecord): string {
   const at = heardAt(contact);
-  return [kindLabel(contact.type), at ? `heard ${agoPhrase(at)}` : "never heard", hopsLabel(contact)].join(" · ");
+  return [kindLabel(contact.type), at ? t("chats.chat.heardAgo", { time: agoPhrase(at) }) : t("chats.chat.neverHeard"), hopsLabel(contact)].join(" · ");
 }
 
 interface MessageProps {
@@ -374,17 +375,17 @@ const Message = memo(function Message({ message, lead, showSender, avatar, me, o
 
   const press = usePress((at) => {
     const items: (MenuItem | null)[] = [
-      onReply ? { label: "Reply", icon: <ReplyIcon size={17} />, onSelect: onReply } : null,
-      { label: "Copy the text", icon: <CopyIcon size={17} />, onSelect: () => void navigator.clipboard?.writeText(message.text).then(() => toast("Copied")) },
-      retryable && !looping ? { label: flood ? "Send again by flood" : "Send again", icon: <AlertIcon size={17} />, air: true, onSelect: () => void retry() } : null,
+      onReply ? { label: t("chats.message.reply"), icon: <ReplyIcon size={17} />, onSelect: onReply } : null,
+      { label: t("chats.message.copyText"), icon: <CopyIcon size={17} />, onSelect: () => void navigator.clipboard?.writeText(message.text).then(() => toast(t("common.copied"))) },
+      retryable && !looping ? { label: flood ? t("chats.message.sendAgainFlood") : t("chats.message.sendAgain"), icon: <AlertIcon size={17} />, air: true, onSelect: () => void retry() } : null,
       // A direct message has its tries from the settings; this is for one sent once.
       (message.status === "unheard" || message.status === "unconfirmed") && !looping && !(direct && plan)
-        ? { label: "Keep trying", hint: direct ? triesPhrase(session.retryLadder.length) : LOOP_HINT, icon: <RefreshIcon size={17} />, air: true, onSelect: () => void keepTrying() }
+        ? { label: t("chats.message.keepTrying"), hint: direct ? triesPhrase(session.retryLadder.length) : loopHint(), icon: <RefreshIcon size={17} />, air: true, onSelect: () => void keepTrying() }
         : null,
-      looping ? { label: "Stop trying", icon: <StopIcon size={17} />, onSelect: () => session.stopTrying(message.id) } : null,
-      message.status === "queued" ? { label: "Don't send", icon: <TrashIcon size={17} />, danger: true, onSelect: () => session.discardQueued(message.id) } : null,
-      retryable || looping ? { label: "Delete", icon: <TrashIcon size={17} />, danger: true, onSelect: () => session.discardFailed(message.id) } : null,
-      { label: "How it travelled", icon: <NodesIcon size={17} />, onSelect: () => openMessage(message.conversation, message.id) },
+      looping ? { label: t("chats.message.stopTrying"), icon: <StopIcon size={17} />, onSelect: () => session.stopTrying(message.id) } : null,
+      message.status === "queued" ? { label: t("chats.message.dontSend"), icon: <TrashIcon size={17} />, danger: true, onSelect: () => session.discardQueued(message.id) } : null,
+      retryable || looping ? { label: t("common.delete"), icon: <TrashIcon size={17} />, danger: true, onSelect: () => session.discardFailed(message.id) } : null,
+      { label: t("chats.message.travelled"), icon: <NodesIcon size={17} />, onSelect: () => openMessage(message.conversation, message.id) },
     ];
     showMenu(
       items.filter((x): x is MenuItem => x !== null),
@@ -392,7 +393,7 @@ const Message = memo(function Message({ message, lead, showSender, avatar, me, o
     );
   });
 
-  const relayTitle = relays.length && contacts ? `Relayed by ${relays.length}: ${relays.map((r) => nameOfHash(r.hash, contacts) ?? r.hash).join(", ")}` : undefined;
+  const relayTitle = relays.length && contacts ? t("chats.chat.relayedBy", { count: relays.length, names: relays.map((r) => nameOfHash(r.hash, contacts) ?? r.hash).join(", ") }) : undefined;
 
   return (
     <div className={["msg", out ? "out" : "in", lead ? "lead" : ""].join(" ")} data-reply={onReply ? message.id : undefined}>
@@ -402,7 +403,7 @@ const Message = memo(function Message({ message, lead, showSender, avatar, me, o
       {avatar ? (
         <span className="msg-avatar">
           {avatar === "show" && message.sender ? (
-            <button type="button" className="chat-who" aria-label={`Who is ${message.sender}`} onClick={() => onWho?.(message)}>
+            <button type="button" className="chat-who" aria-label={t("chats.chat.whoIs", { name: message.sender })} onClick={() => onWho?.(message)}>
               <Avatar name={message.sender} size={28} />
             </button>
           ) : null}
@@ -440,7 +441,7 @@ const Message = memo(function Message({ message, lead, showSender, avatar, me, o
         </div>
         {retryable && !bad && !trying ? (
           <button type="button" className={["msg-retry", message.status === "failed" ? "danger" : "warn"].join(" ")} disabled={busy} onClick={() => void retry()} title={message.error ?? undefined}>
-            <AlertIcon size={12} /> {message.status === "failed" ? "Failed · retry" : flood ? "Retry by flood" : "Retry"}
+            <AlertIcon size={12} /> {message.status === "failed" ? t("chats.message.failedRetry") : flood ? t("chats.message.retryFlood") : t("chats.message.retry")}
           </button>
         ) : null}
       </div>
@@ -456,11 +457,11 @@ const Message = memo(function Message({ message, lead, showSender, avatar, me, o
 });
 
 /** What "Keep trying" commits to, said before it is chosen. */
-const LOOP_HINT = (() => {
+function loopHint(): string {
   const ladder = session.retryLadder;
   const minutes = Math.round(ladder.reduce((sum, gap) => sum + gap, 0) / 60_000);
-  return `${ladder.length} tries over ~${minutes} min`;
-})();
+  return t("chats.tries.over", { count: ladder.length, minutes });
+}
 
 /** The clock, ticking once a second while `active`; a loop's countdown needs nothing finer. */
 function useClock(active: boolean): number {
@@ -493,16 +494,19 @@ function Unrelayed({ message, busy, onRetry }: { message: MessageRecord; busy: b
   let label: string;
   if (looping && plan.nextAt === null) {
     icon = <LinkOffIcon size={12} />;
-    label = `Waiting for the radio · ${plan.made}/${plan.total}`;
+    label = t("chats.strip.waiting", { made: plan.made, total: plan.total });
   } else if (looping) {
     icon = <RefreshIcon size={12} />;
-    label = message.status === "sending" ? `Trying ${plan.made}/${plan.total} · sending` : `Trying ${plan.made}/${plan.total} · next in ${countdown(plan.nextAt! - now)}`;
+    label =
+      message.status === "sending"
+        ? t("chats.strip.sending", { made: plan.made, total: plan.total })
+        : t("chats.strip.next", { made: plan.made, total: plan.total, time: countdown(plan.nextAt! - now) });
   } else if (isDirect(message)) {
     icon = <AlertIcon size={12} />;
-    label = `No answer to ${plural(plan?.made ?? 1, "try", "tries")} · Send again`;
+    label = t("chats.strip.noAnswer", { count: plan?.made ?? 1 });
   } else {
     icon = <AlertIcon size={12} />;
-    label = "Not relayed · Send again";
+    label = t("chats.strip.notRelayed");
   }
 
   return (
@@ -510,7 +514,7 @@ function Unrelayed({ message, busy, onRetry }: { message: MessageRecord; busy: b
       type="button"
       className="msg-strip"
       disabled={busy && !looping}
-      title={looping ? "Stop trying" : isDirect(message) ? "No try was acknowledged. Send it again" : "No repeater has been heard sending it on. Send it again"}
+      title={looping ? t("chats.message.stopTrying") : isDirect(message) ? t("chats.strip.noAck") : t("chats.strip.noRepeater")}
       // Its own target: a press here neither opens the message nor starts the long-press menu,
       // so letting go after a long press can never send by accident.
       onPointerDown={(e) => e.stopPropagation()}
@@ -535,7 +539,7 @@ function Status({ message, trying }: { message: MessageRecord; trying: boolean }
     return (
       <span
         className="tries"
-        title={waiting ? `Waiting for the radio to send it again: ${plan.made} of ${plan.total} tries made` : `Not acknowledged yet, so it goes again on its own: try ${plan.made} of ${plan.total}`}
+        title={waiting ? t("chats.status.waitingTries", { made: plan.made, total: plan.total }) : t("chats.status.tryingAgain", { made: plan.made, total: plan.total })}
       >
         {plan.made}/{plan.total}
         {waiting ? <LinkOffIcon size={11} /> : <RefreshIcon size={11} className="spin" />}
@@ -545,13 +549,13 @@ function Status({ message, trying }: { message: MessageRecord; trying: boolean }
   switch (message.status) {
     case "queued":
       return (
-        <span className="queued" title="Waiting for the radio; it goes as soon as the radio is back">
-          <ClockIcon size={12} /> queued
+        <span className="queued" title={t("chats.status.queuedTitle")}>
+          <ClockIcon size={12} /> {t("chats.status.queued")}
         </span>
       );
     case "sending":
       return (
-        <span title="Sending">
+        <span title={t("chats.status.sending")}>
           <ClockIcon size={12} />
         </span>
       );
@@ -561,20 +565,20 @@ function Status({ message, trying }: { message: MessageRecord; trying: boolean }
       if (message.echoes.length > 0) {
         const n = message.echoes.length;
         return (
-          <span className="ok heard" title={`Heard sent on ${n} time${n === 1 ? "" : "s"}`}>
+          <span className="ok heard" title={t("chats.status.heardSentOn", { count: n })}>
             <DoubleCheckIcon size={14} />
             {n}
           </span>
         );
       }
       return (
-        <span title={message.ackTag ? "Sent; waiting for the acknowledgement" : "Sent"}>
+        <span title={message.ackTag ? t("chats.status.sentWaiting") : t("chats.status.sent")}>
           <CheckIcon size={13} />
         </span>
       );
     case "delivered":
       return (
-        <span className="ok" title={message.roundTripMs ? `Acknowledged in ${(message.roundTripMs / 1000).toFixed(1)} s` : "Acknowledged"}>
+        <span className="ok" title={message.roundTripMs ? t("chats.status.ackIn", { seconds: (message.roundTripMs / 1000).toFixed(1) }) : t("chats.status.ack")}>
           <DoubleCheckIcon size={14} />
         </span>
       );

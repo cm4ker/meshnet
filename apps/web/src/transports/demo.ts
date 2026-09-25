@@ -11,6 +11,7 @@
 
 import { BaseTransport, ByteWriter, Cmd, fromHex, fromUtf8, groupTextPayload, heardGroupTextPayload, Push, ReqType, Resp, toHex, TxtType, type Transport } from "@meshnet/meshcore";
 import type { Connector } from "./types.js";
+import { t } from "../i18n/index.js";
 
 const SELF = fromHex("a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf");
 
@@ -909,11 +910,15 @@ class DemoRadio extends BaseTransport {
 export const demoConnector: Connector = {
   id: "demo",
   kind: "ble",
-  title: "Demo",
-  description: "A pretend radio, for a look around without hardware.",
+  get title() {
+    return t("connect.transport.demo");
+  },
+  get description() {
+    return t("connect.describe.demo");
+  },
   mode: "scan",
   async scan(onFound) {
-    onFound([{ id: "demo", name: "MeshCore-demo", detail: "no hardware", rssi: -42 }]);
+    onFound([{ id: "demo", name: "MeshCore-demo", detail: t("connect.device.noHardware"), rssi: -42 }]);
   },
   async remembered() {
     return [];

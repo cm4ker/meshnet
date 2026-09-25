@@ -6,6 +6,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "../i18n/index.js";
 import { isTauri } from "./platform.js";
 
 export function hasAutostart(): boolean {
@@ -14,7 +15,7 @@ export function hasAutostart(): boolean {
 
 /** What the switch is called on this system. */
 export function autostartLabel(): string {
-  return /Windows/i.test(navigator.userAgent) ? "Start with Windows" : "Start at login";
+  return /Windows/i.test(navigator.userAgent) ? t("radio.connection.startWithWindows") : t("radio.connection.startAtLogin");
 }
 
 export function autostartEnabled(): Promise<boolean> {

@@ -11,6 +11,7 @@
 
 import { useSyncExternalStore } from "react";
 import { isFavourite, isNodeType, type ContactRecord, type SessionState } from "@meshnet/meshcore";
+import type { Key } from "../i18n/index.js";
 import { heardAt } from "./nodes.js";
 import { readSetting, writeSetting } from "./storage.js";
 
@@ -24,10 +25,11 @@ export const MEMORY_WARN = 0.9;
 
 export type KeepReason = "favourite" | "yours" | "chat";
 
-export const KEEP_LABELS: Record<KeepReason, string> = {
-  favourite: "Favourite",
-  yours: "Yours",
-  chat: "Chat",
+/** Keys of the words for each reason, read with `t()` where they are shown. */
+export const KEEP_LABELS: Record<KeepReason, Key> = {
+  favourite: "contacts.keep.favourite",
+  yours: "contacts.keep.yours",
+  chat: "contacts.keep.chat",
 };
 
 /** Repeaters, rooms and sensors you have signed in to, asked for their status, or kept a password for. */

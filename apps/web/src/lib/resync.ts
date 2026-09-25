@@ -5,20 +5,26 @@
 
 import { RESYNC_STEPS, ResyncError, type ResyncStep } from "@meshnet/meshcore";
 import { useSyncExternalStore } from "react";
-import { plural } from "./format.js";
+import { errorText } from "../i18n/errors.js";
+import { t, type Key } from "../i18n/index.js";
 import { session } from "./session.js";
 import { toast } from "./toast.js";
 
-export const STEP_LABELS: Record<ResyncStep, string> = {
-  device: "Device",
-  self: "This radio",
-  clock: "Clock",
-  contacts: "Contacts",
-  channels: "Channels",
-  autoAdd: "Auto-add",
-  messages: "Waiting messages",
-  battery: "Battery",
+export const STEP_LABELS: Record<ResyncStep, Key> = {
+  device: "radio.steps.device",
+  self: "radio.steps.self",
+  clock: "radio.steps.clock",
+  contacts: "radio.steps.contacts",
+  channels: "radio.steps.channels",
+  autoAdd: "radio.steps.autoAdd",
+  messages: "radio.steps.messages",
+  battery: "radio.steps.battery",
 };
+
+/** A step's name in the reader's language. */
+export function stepLabel(step: ResyncStep): string {
+  return t(STEP_LABELS[step]);
+}
 
 export const STEP_COUNT = RESYNC_STEPS.length;
 
@@ -48,11 +54,11 @@ export async function resync(): Promise<void> {
   set({ step: RESYNC_STEPS[0], index: 0 });
   try {
     const { contacts, messages } = await session.resync((step, index) => set({ step, index }));
-    const news = [contacts ? plural(contacts, "new contact") : "", messages ? plural(messages, "message") : ""].filter(Boolean);
-    toast(news.length ? news.join(" · ") : "Nothing new on the radio");
+    const news = [contacts ? t("radio.resync.newContacts", { count: contacts }) : "", messages ? t("radio.resync.messages", { count: messages }) : ""].filter(Boolean);
+    toast(news.length ? news.join(" · ") : t("radio.resync.nothingNew"));
   } catch (error) {
-    const at = error instanceof ResyncError ? `Radio stopped answering at ${STEP_LABELS[error.step]}` : (error as Error).message;
-    toast(at, "error", { label: "Try again", run: () => void resync() });
+    const at = error instanceof ResyncError ? t("radio.resync.stoppedAt", { step: stepLabel(error.step) }) : errorText(error);
+    toast(at, "error", { label: t("common.tryAgain"), run: () => void resync() });
   } finally {
     set(null);
   }

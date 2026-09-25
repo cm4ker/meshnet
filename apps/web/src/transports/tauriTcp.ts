@@ -9,6 +9,7 @@ import { BaseTransport, frameForStream, StreamFrameDecoder } from "@meshnet/mesh
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { addressOf, knownAddresses, rememberAddress, TCP_CONNECT_TIMEOUT_S } from "./tcp.js";
 import type { Connector } from "./types.js";
+import { t } from "../i18n/index.js";
 
 class TauriTcpTransport extends BaseTransport {
   readonly kind = "tcp" as const;
@@ -31,7 +32,7 @@ class TauriTcpTransport extends BaseTransport {
   }
 
   async send(frame: Uint8Array): Promise<void> {
-    if (this.isClosed || this.id === null) throw new Error("connection closed");
+    if (this.isClosed || this.id === null) throw new Error(t("connect.error.connectionClosed"));
     await invoke("tcp_write", { id: this.id, data: Array.from(frameForStream(frame)) });
   }
 
@@ -44,8 +45,12 @@ class TauriTcpTransport extends BaseTransport {
 export const tauriTcpConnector: Connector = {
   id: "tauri-tcp",
   kind: "tcp",
-  title: "Wi-Fi",
-  description: "A radio on the network, by its address. Companion firmware built with Wi-Fi listens on port 5000.",
+  get title() {
+    return t("connect.transport.wifi");
+  },
+  get description() {
+    return t("connect.describe.tcp");
+  },
   mode: "address",
 
   async remembered() {
@@ -53,7 +58,7 @@ export const tauriTcpConnector: Connector = {
   },
 
   async connect(device) {
-    if (!device) throw new Error("type the radio's address");
+    if (!device) throw new Error(t("connect.error.typeAddress"));
     const { host, port } = addressOf(device);
     const transport = new TauriTcpTransport(device.name);
     try {

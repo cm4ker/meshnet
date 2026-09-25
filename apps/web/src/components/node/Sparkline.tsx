@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { locale, t } from "../../i18n/index.js";
+import { tx } from "../../i18n/rich.js";
 
 const W = 150;
 const H = 38;
@@ -40,7 +42,7 @@ export function Sparkline({ values, times, unit, digits }: { values: number[]; t
         className="spark"
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label={`${values.length} readings, from ${low.toFixed(digits)} to ${high.toFixed(digits)} ${unit}`}
+        aria-label={t("node.sparkline.label", { count: values.length, low: low.toFixed(digits), high: high.toFixed(digits), unit })}
         onPointerMove={onMove}
         onPointerLeave={() => setHover(null)}
       >
@@ -61,11 +63,9 @@ export function Sparkline({ values, times, unit, digits }: { values: number[]; t
             {stamp(times[hover]!)} · <b>{values[hover]!.toFixed(digits)} {unit}</b>
           </>
         ) : values.length === 1 ? (
-          "one reading so far"
+          t("node.sparkline.one")
         ) : (
-          <>
-            {values.length} readings: <b>{low.toFixed(digits)}</b> to <b>{high.toFixed(digits)}</b> {unit}
-          </>
+          tx("node.sparkline.range", { count: values.length, low: <b>{low.toFixed(digits)}</b>, high: <b>{high.toFixed(digits)}</b>, unit })
         )}
       </span>
     </>
@@ -73,5 +73,5 @@ export function Sparkline({ values, times, unit, digits }: { values: number[]; t
 }
 
 function stamp(ms: number): string {
-  return new Date(ms).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" });
+  return new Date(ms).toLocaleString(locale(), { weekday: "short", hour: "2-digit", minute: "2-digit" });
 }

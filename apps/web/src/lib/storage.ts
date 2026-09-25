@@ -9,6 +9,7 @@
  */
 
 import type { PersistedState, SessionStorage } from "@meshnet/meshcore";
+import { t } from "../i18n/index.js";
 
 const DB_NAME = "meshnet";
 const STORE = "radios";
@@ -31,7 +32,7 @@ function openDb(version?: number): Promise<IDBDatabase> {
       db.close();
       resolve(openDb(next));
     };
-    request.onerror = () => reject(request.error ?? new Error("could not open the database"));
+    request.onerror = () => reject(request.error ?? new Error(t("connect.error.dbOpen")));
   });
 }
 
@@ -41,8 +42,8 @@ function run<T>(db: IDBDatabase, mode: IDBTransactionMode, op: (store: IDBObject
     const request = op(tx.objectStore(STORE));
     // A successful request can still be rolled back. Installation must wait for the commit.
     tx.oncomplete = () => resolve(request.result);
-    tx.onabort = () => reject(tx.error ?? request.error ?? new Error("database transaction aborted"));
-    tx.onerror = () => reject(tx.error ?? request.error ?? new Error("database transaction failed"));
+    tx.onabort = () => reject(tx.error ?? request.error ?? new Error(t("connect.error.dbAborted")));
+    tx.onerror = () => reject(tx.error ?? request.error ?? new Error(t("connect.error.dbFailed")));
   });
 }
 

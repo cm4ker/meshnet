@@ -12,6 +12,8 @@ import { session } from "./lib/session.js";
 import { connectors } from "./transports/index.js";
 import { initTheme } from "./theme/store.js";
 import { initTextSize } from "./theme/textSize.js";
+import { initLanguage } from "./i18n/index.js";
+import "./i18n/languages.js";
 import "./styles.css";
 
 // For the console, and for driving the shell from a test rig: the session,
@@ -29,6 +31,8 @@ initSendTries();
 // into another.
 initTheme();
 initTextSize();
+// The words, in the reader's language, are loaded before anything is drawn in them.
+await initLanguage();
 
 // In the phone app the page is the whole app, laid out to the screen, and a
 // pinch that zooms it only leaves it scrolling sideways. The same cap stops

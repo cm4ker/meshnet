@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import type { Key } from "../i18n/index.js";
 import type { BatteryType } from "./format.js";
 import { readSetting, writeSetting } from "./storage.js";
 
@@ -11,9 +12,10 @@ import { readSetting, writeSetting } from "./storage.js";
 
 const KEY = "meshnet.batteryTypes";
 
-export const BATTERY_TYPES: { value: BatteryType; label: string; hint: string }[] = [
-  { value: "liion", label: "Li-ion / LiPo", hint: "3.0–4.2 V · most boards" },
-  { value: "lifepo4", label: "LiFePO4", hint: "2.5–3.65 V · solar builds" },
+/** The chemistries by their names, which read the same in every language; the hints are keys. */
+export const BATTERY_TYPES: { value: BatteryType; label: string; hint: Key }[] = [
+  { value: "liion", label: "Li-ion / LiPo", hint: "radio.battery.liionHint" },
+  { value: "lifepo4", label: "LiFePO4", hint: "radio.battery.lifepo4Hint" },
 ];
 
 function restore(saved: unknown): Record<string, BatteryType> {

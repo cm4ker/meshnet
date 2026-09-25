@@ -10,6 +10,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { NeedsPairingError, type Connector, type FoundDevice } from "./types.js";
 import { readSetting, writeSetting } from "../lib/storage.js";
+import { t } from "../i18n/index.js";
 
 interface Found {
   address: string;
@@ -67,8 +68,12 @@ function remember(device: FoundDevice): void {
 export const tauriWinBleConnector: Connector = {
   id: "tauri-winble",
   kind: "ble",
-  title: "Bluetooth",
-  description: "Radios in range, found by Windows.",
+  get title() {
+    return t("connect.transport.bluetooth");
+  },
+  get description() {
+    return t("connect.describe.windowsBle");
+  },
   mode: "scan",
 
   async scan(onFound, signal) {
@@ -88,7 +93,7 @@ export const tauriWinBleConnector: Connector = {
   },
 
   async connect(device) {
-    if (!device) throw new Error("pick a radio from the list");
+    if (!device) throw new Error(t("connect.error.pickRadio"));
     let transport: TauriWinBleTransport | null = null;
     const channel = new Channel<number[]>();
     channel.onmessage = (data) => transport?.receive(data);
@@ -108,7 +113,7 @@ export const tauriWinBleConnector: Connector = {
     } catch (error) {
       const text = String(error);
       if (/NEEDS_PAIRING/.test(text)) {
-        throw new NeedsPairingError(`${device.name} is not paired with this computer, or no longer trusts the pairing.`);
+        throw new NeedsPairingError(t("connect.error.notPaired", { name: device.name }));
       }
       throw new Error(text);
     }

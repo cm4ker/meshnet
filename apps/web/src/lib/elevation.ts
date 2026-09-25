@@ -7,6 +7,7 @@
  * surface that knows hills, not houses or trees.
  */
 
+import { t } from "../i18n/index.js";
 import type { Profile } from "./los.js";
 import { tileBlob } from "./tiles.js";
 
@@ -17,7 +18,10 @@ const SIZE = 256;
 /** Decoded tiles kept in memory: a quarter of a megabyte each. */
 const KEEP = 48;
 
-export const ELEVATION_ATTRIBUTION = "Terrain: Mapzen, AWS Open Data";
+/** The credit for the terrain, in the language of the moment. */
+export function elevationAttribution(): string {
+  return t("mesh.terrainAttribution");
+}
 
 const decoded = new Map<string, Promise<Float32Array>>();
 

@@ -7,6 +7,7 @@
 
 import { contactRoute, NoReplyError, type PathFound } from "@meshnet/meshcore";
 import { useSyncExternalStore } from "react";
+import { errorText } from "../i18n/errors.js";
 import { clearPing } from "./ping.js";
 import { session } from "./session.js";
 
@@ -70,7 +71,7 @@ export async function discover(key: string): Promise<Discovery> {
     publish(done);
     return done;
   } catch (error) {
-    const done = { ...base, running: false, silent: error instanceof NoReplyError, waitedS: Math.round((Date.now() - base.at) / 1000), error: (error as Error).message };
+    const done = { ...base, running: false, silent: error instanceof NoReplyError, waitedS: Math.round((Date.now() - base.at) / 1000), error: errorText(error) };
     publish(done);
     return done;
   }

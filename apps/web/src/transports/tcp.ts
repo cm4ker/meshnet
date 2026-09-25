@@ -8,6 +8,7 @@
 
 import type { FoundDevice } from "./types.js";
 import { readSetting, writeSetting } from "../lib/storage.js";
+import { t } from "../i18n/index.js";
 
 /** The port companion firmware listens on unless it was built with another. */
 export const DEFAULT_TCP_PORT = 5000;
@@ -34,7 +35,7 @@ export function parseAddress(text: string): { host: string; port: number } | nul
 /** The address a connector's `connect` was handed, checked, or the reason it cannot be used. */
 export function addressOf(device: FoundDevice): { host: string; port: number } {
   const address = parseAddress(device.id);
-  if (!address || address.port < 1 || address.port > 65535) throw new Error(`${device.id} is not an address`);
+  if (!address || address.port < 1 || address.port > 65535) throw new Error(t("connect.error.notAddress", { address: device.id }));
   return address;
 }
 

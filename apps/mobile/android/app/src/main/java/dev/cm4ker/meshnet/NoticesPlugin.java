@@ -65,7 +65,10 @@ import org.json.JSONObject;
  */
 @CapacitorPlugin(name = "Notices")
 public class NoticesPlugin extends Plugin {
-    /** The kinds, each one channel: id prefix, name, description. */
+    /**
+     * The kinds, each one channel: id prefix, name, description, in English; the page's words for
+     * them ({@link Words}) are {@code channel<Kind>} and {@code channel<Kind>Hint}.
+     */
     private static final String[][] KINDS = {
         {"direct", "Direct messages", "A message from a person to you."},
         {"chats", "Channels and rooms", "Messages in channels and rooms, or only the ones that mention you."},
@@ -251,9 +254,22 @@ public class NoticesPlugin extends Plugin {
         for (String[] kind : KINDS) {
             String id = channelId(kind[0], sound);
             wanted.add(id);
-            if (manager.getNotificationChannel(id) != null) continue;
-            NotificationChannel channel = new NotificationChannel(id, kind[1], NotificationManager.IMPORTANCE_HIGH);
-            channel.setDescription(kind[2]);
+            String word = "channel" + Character.toUpperCase(kind[0].charAt(0)) + kind[0].substring(1);
+            String name = Words.get(context, word, kind[1]);
+            String description = Words.get(context, word + "Hint", kind[2]);
+            NotificationChannel existing = manager.getNotificationChannel(id);
+            if (existing != null) {
+                // Renamed in the language now. Of a channel that is there Android takes only the name
+                // and the description, so the reader's settings for it stay.
+                if (!name.contentEquals(existing.getName()) || !description.equals(existing.getDescription())) {
+                    NotificationChannel renamed = new NotificationChannel(id, name, existing.getImportance());
+                    renamed.setDescription(description);
+                    manager.createNotificationChannel(renamed);
+                }
+                continue;
+            }
+            NotificationChannel channel = new NotificationChannel(id, name, NotificationManager.IMPORTANCE_HIGH);
+            channel.setDescription(description);
             channel.setLockscreenVisibility(NotificationCompat.VISIBILITY_PRIVATE);
             channel.setSound(uri, uri != null ? attributes() : null);
             manager.createNotificationChannel(channel);

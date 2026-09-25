@@ -1,4 +1,5 @@
 import { AdvType } from "@meshnet/meshcore";
+import { t } from "../i18n/index.js";
 
 /** A node that has not set a position advertises 0, 0; nobody's radio sits there. */
 export function hasPosition(lat: number, lon: number): boolean {
@@ -42,13 +43,15 @@ export function bearingDeg(lat1: number, lon1: number, lat2: number, lon2: numbe
   return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
 }
 
+const POINTS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
+
 export function compass(deg: number): string {
-  return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(deg / 45) % 8]!;
+  return t(`common.compass.${POINTS[Math.round(deg / 45) % 8]!}`);
 }
 
 export function formatDistance(km: number): string {
-  if (km < 1) return `${Math.round(km * 1000)} m`;
-  return km < 100 ? `${km.toFixed(1)} km` : `${Math.round(km)} km`;
+  if (km < 1) return t("common.meters", { value: Math.round(km * 1000) });
+  return t("common.kilometers", { value: km < 100 ? km.toFixed(1) : Math.round(km) });
 }
 
 export type Freshness = "fresh" | "aging" | "stale";

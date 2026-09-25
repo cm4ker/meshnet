@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { Fragment, useEffect } from "react";
 import { AdvType, type ContactRecord } from "@meshnet/meshcore";
 import { ConnectView } from "./components/ConnectView.js";
 import { Workspace } from "./components/Workspace.js";
@@ -6,6 +6,8 @@ import { UpdatesDialog } from "./components/Updates.js";
 import { NoticeBanner } from "./components/NoticeBanner.js";
 import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "./lib/geo.js";
 import { useLink } from "./lib/link.js";
+import { t, useLanguage, type Key } from "./i18n/index.js";
+import { errorText } from "./i18n/errors.js";
 import { ALL_CHATS, createAnnouncer } from "./lib/announce.js";
 import { getNoticePrefs, messageWanted, nodeWanted } from "./lib/noticePrefs.js";
 import { noteUnread } from "./lib/firstUnread.js";
@@ -19,11 +21,11 @@ import { startTidyRule } from "./lib/cleanUp.js";
 import { isWide, subscribeWide } from "./lib/layout.js";
 import { getNav, openConversation, openProfile, shownConversation, subscribeNav } from "./lib/nav.js";
 
-const KIND: Record<number, string> = {
-  [AdvType.Chat]: "contact",
-  [AdvType.Repeater]: "repeater",
-  [AdvType.Room]: "room",
-  [AdvType.Sensor]: "sensor",
+const NEW: Record<number, Key> = {
+  [AdvType.Chat]: "notices.newContact",
+  [AdvType.Repeater]: "notices.newRepeater",
+  [AdvType.Room]: "notices.newRoom",
+  [AdvType.Sensor]: "notices.newSensor",
 };
 
 /** "Heard for the first time", and how far and which way when both positions are known. */
@@ -32,9 +34,9 @@ function discoveredBody(contact: ContactRecord): string {
   if (self && hasPosition(self.lat, self.lon) && hasPosition(contact.lat, contact.lon)) {
     const km = distanceKm(self.lat, self.lon, contact.lat, contact.lon);
     const heading = compass(bearingDeg(self.lat, self.lon, contact.lat, contact.lon));
-    return `Heard for the first time, ${formatDistance(km)} ${heading}.`;
+    return t("notices.heardFirstAt", { distance: formatDistance(km), direction: heading });
   }
-  return "Heard for the first time.";
+  return t("notices.heardFirst");
 }
 
 export function App() {
@@ -42,6 +44,7 @@ export function App() {
   const status = useSelector((state) => state.status);
   const known = useSelector((state) => state.self !== null);
   const link = useLink();
+  const language = useLanguage();
 
   // The conversation on screen is read as its messages arrive. Behind another
   // window or app, or on a locked phone, it is not, and they are announced.
@@ -102,7 +105,7 @@ export function App() {
       session.onDiscovered((contact) => {
         if (!nodeWanted(getNoticePrefs(), contact.type)) return;
         const name = contact.name || contact.prefix;
-        void notify({ title: `New ${KIND[contact.type] ?? "node"}: ${name}`, body: discoveredBody(contact), tag: `n:${contact.key}`, kind: "nodes", face: { name, type: contact.type } });
+        void notify({ title: t(NEW[contact.type] ?? "notices.newNode", { name }), body: discoveredBody(contact), tag: `n:${contact.key}`, kind: "nodes", face: { name, type: contact.type } });
       }),
     [],
   );
@@ -125,7 +128,7 @@ export function App() {
       onCardAction((act) => {
         const conversation = act.tag.slice(2);
         if (act.action === "read") session.markRead(conversation);
-        else quickReply(conversation, act.text).catch((error: Error) => toast(error.message, "error"));
+        else quickReply(conversation, act.text).catch((error: Error) => toast(errorText(error), "error"));
       }),
     [],
   );
@@ -165,5 +168,6 @@ export function App() {
   // the session keeps the radio and its history while it connects again.
   const reconnecting = status === "closed" || (status === "connecting" && link.retrying);
   const showWorkspace = status === "ready" || (reconnecting && known && link.phase !== "idle");
-  return <>{showWorkspace ? <Workspace /> : <ConnectView />}<UpdatesDialog /><NoticeBanner /></>;
+  // A new language redraws every screen: a word made before the change would stay in the old one.
+  return <Fragment key={language}>{showWorkspace ? <Workspace /> : <ConnectView />}<UpdatesDialog /><NoticeBanner /></Fragment>;
 }

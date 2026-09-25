@@ -6,8 +6,9 @@
 
 import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AdvertLocPolicy, AdvType, contactConversation, isConversationType, isFavourite, isNodeType, type ContactRecord, type SessionState } from "@meshnet/meshcore";
+import { t, type Key } from "../i18n/index.js";
 import { useBackLayer } from "../lib/back.js";
-import { ago, agoPhrase } from "../lib/format.js";
+import { ago, agoPhrase, battery } from "../lib/format.js";
 import { bearingDeg, compass, distanceKm, formatDistance, formatLatLon, hasPosition } from "../lib/geo.js";
 import { useHears } from "../lib/hears.js";
 import { legId, useLegVerdicts } from "../lib/legVerdicts.js";
@@ -43,13 +44,13 @@ const MapView = lazy(() => import("./MapView.js"));
 
 type Kind = "all" | "yours" | "people" | "repeaters" | "rooms" | "sensors";
 
-const KINDS: { id: Kind; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "yours", label: "Yours" },
-  { id: "people", label: "People" },
-  { id: "repeaters", label: "Repeaters" },
-  { id: "rooms", label: "Rooms" },
-  { id: "sensors", label: "Sensors" },
+const KINDS: { id: Kind; label: Key }[] = [
+  { id: "all", label: "mesh.filter.all" },
+  { id: "yours", label: "mesh.filter.yours" },
+  { id: "people", label: "mesh.filter.people" },
+  { id: "repeaters", label: "mesh.filter.repeaters" },
+  { id: "rooms", label: "mesh.filter.rooms" },
+  { id: "sensors", label: "mesh.filter.sensors" },
 ];
 
 // ---- the filter, shared by the list and the map, and kept while the app lives ----
@@ -106,7 +107,7 @@ export function useMeshAttention(): boolean {
 function whereFrom(self: SessionState["self"], c: ContactRecord): string | null {
   if (!hasPosition(c.lat, c.lon)) return null;
   if (!self || !hasPosition(self.lat, self.lon)) return null;
-  return `${formatDistance(distanceKm(self.lat, self.lon, c.lat, c.lon))} ${compass(bearingDeg(self.lat, self.lon, c.lat, c.lon))}`;
+  return t("mesh.whereFrom", { distance: formatDistance(distanceKm(self.lat, self.lon, c.lat, c.lon)), direction: compass(bearingDeg(self.lat, self.lon, c.lat, c.lon)) });
 }
 
 // ---- the list ----
@@ -123,7 +124,7 @@ export function MeshList({ selected, onOpen, head = true, only }: { selected: st
 export function MeshListHead() {
   return (
     <header className="list-head">
-      <h1>Mesh</h1>
+      <h1>{t("mesh.title")}</h1>
       <FetchButton />
     </header>
   );
@@ -134,11 +135,11 @@ function FetchButton() {
   const [busy, setBusy] = useState(false);
   return (
     <IconButton
-      label="Fetch every contact from the radio"
+      label={t("mesh.fetch")}
       disabled={busy || !online}
       onClick={async () => {
         setBusy(true);
-        await act(() => session.refreshContacts(true), "Contacts fetched from the radio");
+        await act(() => session.refreshContacts(true), t("mesh.fetched"));
         setBusy(false);
       }}
     >
@@ -152,7 +153,7 @@ function MeshSearch() {
   return (
     <label className="search">
       <SearchIcon size={15} />
-      <input value={query} onChange={(e) => setFilter({ query: e.target.value })} placeholder="Find a node" aria-label="Find a node" data-find />
+      <input value={query} onChange={(e) => setFilter({ query: e.target.value })} placeholder={t("mesh.find")} aria-label={t("mesh.find")} data-find />
     </label>
   );
 }
@@ -197,32 +198,32 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
   return (
     <>
       {hideSearch ? null : <MeshSearch />}
-      <div className="chips" role="group" aria-label="Show" hidden={!!only}>
+      <div className="chips" role="group" aria-label={t("mesh.filter.show")} hidden={!!only}>
         {KINDS.map((k) => (
           <button key={k.id} type="button" className={["chip", kind === k.id ? "on" : ""].join(" ")} aria-pressed={kind === k.id} onClick={() => setFilter({ kind: k.id })}>
-            {k.label}
+            {t(k.label)}
           </button>
         ))}
       </div>
       {only ? null : (
         <button type="button" className="hears-row" disabled={state.status !== "ready"} onClick={whoHearsMe}>
           <WavesIcon size={17} />
-          <span className="grow">Who hears me</span>
+          <span className="grow">{t("mesh.whoHearsMe")}</span>
           <AirMark />
         </button>
       )}
       <div className="list mesh-list">
         {all.length === 0 ? (
-          <div className="empty muted">Nobody heard yet. Advertise from the Radio tab: neighbours answer with their own adverts.</div>
+          <div className="empty muted">{t("mesh.list.empty")}</div>
         ) : rows.length === 0 ? (
-          <div className="empty muted">{kind === "yours" && !query ? "Repeaters, rooms and sensors you sign in to gather here." : "Nothing matches."}</div>
+          <div className="empty muted">{kind === "yours" && !query ? t("mesh.list.emptyYours") : t("mesh.list.noMatch")}</div>
         ) : (
           <>
             {only ? null : <MemoryStrip state={state} />}
             <div className="list-summary muted">
               <span className="grow">
-                {all.length} {all.length === 1 ? "node" : "nodes"}
-                {unplaced ? ` · ${unplaced} without position` : ""}
+                {t("mesh.list.count", { count: all.length })}
+                {unplaced ? ` · ${t("mesh.list.unplaced", { count: unplaced })}` : ""}
               </span>
               {only ? null : <SortButton self={state.self} />}
             </div>
@@ -238,12 +239,12 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
 function SortButton({ self }: { self: SessionState["self"] }) {
   const { order, pinned } = useNodeOrder();
   const shown = orderInForce(order, self);
-  const label = NODE_ORDERS.find((o) => o.id === shown)!.label;
+  const label = t(NODE_ORDERS.find((o) => o.id === shown)!.label);
   return (
     <button
       type="button"
       className={["sort-btn", shown !== "heard" || !pinned ? "changed" : ""].join(" ")}
-      aria-label={`Sort nodes, now by ${label.toLowerCase()}`}
+      aria-label={t("mesh.sort.now", { order: label.toLowerCase() })}
       onClick={(e) => {
         const r = e.currentTarget.getBoundingClientRect();
         openSortMenu({ x: r.left, y: r.bottom + 4 }, self);
@@ -264,15 +265,15 @@ function openSortMenu(at: MenuAt, self: SessionState["self"]): void {
   showMenu(
     [
       ...NODE_ORDERS.map((o) => ({
-        label: o.label,
+        label: t(o.label),
         checked: o.id === shown,
         disabled: o.id === "near" && lost,
-        hint: o.id === "near" && lost ? "Your radio has no position" : undefined,
+        hint: o.id === "near" && lost ? t("mesh.sort.noPosition") : undefined,
         onSelect: () => setNodeOrder({ order: o.id }),
       })),
       {
-        label: "Yours and favourites on top",
-        hint: pinned ? "In their own groups above the rest" : "One list, in the order above",
+        label: t("mesh.sort.pinned"),
+        hint: pinned ? t("mesh.sort.pinnedOn") : t("mesh.sort.pinnedOff"),
         toggle: true,
         checked: pinned,
         group: true,
@@ -282,7 +283,7 @@ function openSortMenu(at: MenuAt, self: SessionState["self"]): void {
         },
       },
     ],
-    { title: "Sort nodes", at },
+    { title: t("mesh.sort.title"), at },
   );
 }
 
@@ -297,13 +298,13 @@ function MemoryStrip({ state }: { state: SessionState }) {
     return (
       <div className="memory-strip busy" role="status">
         <span className="grow">
-          Removing… {done} of {total}
+          {t("mesh.memory.removing", { done, total })}
           <span className="memory-bar">
             <i style={{ width: `${(done / Math.max(1, total)) * 100}%` }} />
           </span>
         </span>
         <button type="button" className="memory-act" onClick={() => session.stopRemoving()}>
-          Stop
+          {t("mesh.memory.stop")}
         </button>
       </div>
     );
@@ -314,13 +315,13 @@ function MemoryStrip({ state }: { state: SessionState }) {
   return (
     <div className={["memory-strip", full ? "full" : "warn"].join(" ")}>
       <span className="grow">
-        {full ? "Radio memory full · new nodes aren't kept" : `Radio memory ${use.used} of ${use.max}`}
+        {full ? t("mesh.memory.full") : t("mesh.memory.use", { used: use.used, max: use.max })}
         <span className="memory-bar">
           <i style={{ width: `${Math.min(100, (use.used / use.max) * 100)}%` }} />
         </span>
       </span>
       <button type="button" className="memory-act" disabled={state.status !== "ready"} onClick={openCleanUp}>
-        Clean up
+        {t("mesh.memory.cleanUp")}
       </button>
     </div>
   );
@@ -347,8 +348,8 @@ const NodeRow = memo(function NodeRow({ contact: c, selected, yours, onOpen, log
   // Most nodes have no route and flood, and many no position: said on every row it says nothing, so the profile says it.
   const route = yours ? null : routeWords(c);
   const bits = yours
-    ? [kindLabel(c.type), login?.ok ? "signed in" : "not signed in", last ? `${(last.batteryMv / 1000).toFixed(2)} V` : null]
-    : [kindLabel(c.type), c.unsaved ? "not on your radio" : whereFrom(self, c)];
+    ? [kindLabel(c.type), login?.ok ? t("mesh.row.signedIn") : t("mesh.row.notSignedIn"), last ? battery(last.batteryMv) : null]
+    : [kindLabel(c.type), c.unsaved ? t("mesh.row.notOnRadio") : whereFrom(self, c)];
   return (
     <li>
       <button type="button" className={["row", selected ? "selected" : ""].join(" ")} onClick={() => onOpen(c.key)}>
@@ -366,7 +367,7 @@ const NodeRow = memo(function NodeRow({ contact: c, selected, yours, onOpen, log
               {bits.filter(Boolean).join(" · ")}
               {route && route.tone !== "none" ? <span className={route.tone === "pinned" ? "" : "route-known"}> · {route.text}</span> : null}
             </span>
-            {yours ? <span className={["dot", low ? "warn" : last ? "on" : "stale"].join(" ")} title={low ? "Battery low" : last ? "Healthy at the last status" : "No status yet"} /> : null}
+            {yours ? <span className={["dot", low ? "warn" : last ? "on" : "stale"].join(" ")} title={low ? t("mesh.row.batteryLow") : last ? t("mesh.row.healthy") : t("mesh.row.noStatus")} /> : null}
           </span>
         </span>
       </button>
@@ -436,20 +437,20 @@ function openSpotMenu(lat: number, lon: number, at: MenuAt): void {
   showMenu(
     [
       {
-        label: "Line of sight from this radio",
+        label: t("mesh.spot.lineOfSight"),
         icon: <ChartIcon size={17} />,
         disabled: !self || !hasPosition(self.lat, self.lon),
-        hint: self && hasPosition(self.lat, self.lon) ? undefined : "This radio has no position yet",
+        hint: self && hasPosition(self.lat, self.lon) ? undefined : t("mesh.spot.noPosition"),
         onSelect: () => lineOfSightTo(lat, lon),
       },
       {
-        label: "Put this radio here",
+        label: t("mesh.spot.putHere"),
         icon: <LocationIcon size={17} />,
         disabled: !online || !self,
-        hint: online && self ? undefined : "Connect the radio to move it",
+        hint: online && self ? undefined : t("mesh.spot.connectToMove"),
         onSelect: () => void moveSelfTo(lat, lon),
       },
-      { label: "Copy the coordinates", icon: <CopyIcon size={17} />, group: true, onSelect: () => void navigator.clipboard?.writeText(here).then(() => toast("Copied", "", undefined, here)) },
+      { label: t("mesh.spot.copy"), icon: <CopyIcon size={17} />, group: true, onSelect: () => void navigator.clipboard?.writeText(here).then(() => toast(t("common.copied"), "", undefined, here)) },
     ],
     { title: here, at },
   );
@@ -461,8 +462,8 @@ async function moveSelfTo(lat: number, lon: number): Promise<void> {
   if (!self) return;
   const was = { lat: self.lat, lon: self.lon };
   if (!(await act(() => session.setLocation(Number(lat.toFixed(6)), Number(lon.toFixed(6)))))) return;
-  const detail = self.advertLocPolicy === AdvertLocPolicy.None ? "Not shared in adverts: Radio › Name and position." : "Others see it with its next advert.";
-  toast("This radio is here now", "", { label: "Undo", run: () => void act(() => session.setLocation(was.lat, was.lon), "Moved back") }, detail);
+  const detail = self.advertLocPolicy === AdvertLocPolicy.None ? t("mesh.spot.notShared") : t("mesh.spot.othersSee");
+  toast(t("mesh.spot.movedHere"), "", { label: t("common.undo"), run: () => void act(() => session.setLocation(was.lat, was.lon), t("mesh.spot.movedBack")) }, detail);
 }
 
 /** The map with the filter applied, the focus and the tool drawn, and taps handed up or to the tool. */
@@ -525,7 +526,7 @@ export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zo
   }, [hub, whole, hub ? state.neighbours[hub] : null]);
   const fit = hub ? { id: `${hub}:${whole ? "all" : "part"}`, points: fitPoints } : null;
   return (
-    <Suspense fallback={<div className="empty muted">Loading the map…</div>}>
+    <Suspense fallback={<div className="empty muted">{t("mesh.map.loading")}</div>}>
       <MapView selected={selected} onSelect={pick} onGroup={onGroup} filter={test} coverTop={coverTop} coverBottom={coverBottom} zoomButtons={zoomButtons} overlay={overlay} onLeg={leg} onHold={openSpotMenu} onHandleDrop={drop} fit={fit} />
     </Suspense>
   );
@@ -543,9 +544,9 @@ export function NodeCard({ contactKey, onClose }: { contactKey: string; onClose:
         <Avatar name={c.name || c.prefix} type={c.type} size={40} />
         <span className="row-main">
           <span className="row-title">{c.name || c.prefix}</span>
-          <span className="row-sub muted">{[kindLabel(c.type), where, c.lastAdvert > 0 ? `advert ${agoPhrase(c.lastAdvert * 1000)}` : null].filter(Boolean).join(" · ")}</span>
+          <span className="row-sub muted">{[kindLabel(c.type), where, c.lastAdvert > 0 ? t("mesh.card.advert", { time: agoPhrase(c.lastAdvert * 1000) }) : null].filter(Boolean).join(" · ")}</span>
         </span>
-        <IconButton label="Close the card" onClick={onClose}>
+        <IconButton label={t("mesh.card.close")} onClick={onClose}>
           <CloseIcon size={18} />
         </IconButton>
       </div>
@@ -556,12 +557,12 @@ export function NodeCard({ contactKey, onClose }: { contactKey: string; onClose:
         {isConversationType(c.type) ? (
           <button type="button" className="hero-act primary" onClick={() => openConversation(contactConversation(c.key))}>
             <ChatIcon size={20} />
-            Message
+            {t("mesh.message")}
           </button>
         ) : null}
         <button type="button" className="hero-act" onClick={() => openProfile(c.key)}>
           <InfoIcon size={20} />
-          Profile
+          {t("mesh.card.profile")}
         </button>
       </div>
     </div>
@@ -576,10 +577,10 @@ function GroupList({ keys, onPick, onClose }: { keys: string[]; onPick: (key: st
     <div className="node-card">
       <div className="node-card-head">
         <span className="row-main">
-          <span className="row-title">{members.length} nodes at one spot</span>
+          <span className="row-title">{t("mesh.atOneSpot", { count: members.length })}</span>
           <span className="row-sub muted">{members[0] ? whereFrom(state.self, members[0]) ?? "" : ""}</span>
         </span>
-        <IconButton label="Close" onClick={onClose}>
+        <IconButton label={t("common.close")} onClick={onClose}>
           <CloseIcon size={18} />
         </IconButton>
       </div>
@@ -903,7 +904,7 @@ function MeshSearchInline({ onFocus }: { onFocus: () => void }) {
   return (
     <label className="search">
       <SearchIcon size={15} />
-      <input value={query} onFocus={onFocus} onChange={(e) => setFilter({ query: e.target.value })} placeholder="Find a node" aria-label="Find a node" enterKeyHint="search" />
+      <input value={query} onFocus={onFocus} onChange={(e) => setFilter({ query: e.target.value })} placeholder={t("mesh.find")} aria-label={t("mesh.find")} enterKeyHint="search" />
     </label>
   );
 }

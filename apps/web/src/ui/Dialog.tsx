@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useBackLayer } from "../lib/back.js";
 import { Button } from "./Button.js";
+import { t } from "../i18n/index.js";
 
 /**
  * A native `<dialog>`, opened modally so focus and Escape are the browser's.
@@ -53,7 +54,7 @@ export function Confirm({
       onClose={onCancel}
       footer={
         <>
-          <Button onClick={onCancel}>Cancel</Button>
+          <Button onClick={onCancel}>{t("common.cancel")}</Button>
           <Button
             variant={danger ? "danger" : "primary"}
             busy={busy}
@@ -84,7 +85,7 @@ export function Prompt({
   placeholder,
   initial = "",
   type = "text",
-  submitLabel = "OK",
+  submitLabel = t("common.ok"),
   onSubmit,
   onCancel,
 }: {
@@ -128,7 +129,7 @@ export function Prompt({
           />
         </label>
         <div className="dialog-foot">
-          <Button onClick={onCancel}>Cancel</Button>
+          <Button onClick={onCancel}>{t("common.cancel")}</Button>
           <Button variant="primary" type="submit" busy={busy}>
             {submitLabel}
           </Button>

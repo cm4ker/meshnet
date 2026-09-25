@@ -4,6 +4,7 @@
 
 import { BaseTransport, frameForStream, SERIAL_BAUD, StreamFrameDecoder } from "@meshnet/meshcore";
 import type { Connector, FoundDevice } from "./types.js";
+import { t } from "../i18n/index.js";
 
 class WebSerialTransport extends BaseTransport {
   readonly kind = "serial" as const;
@@ -20,7 +21,7 @@ class WebSerialTransport extends BaseTransport {
 
   async open(): Promise<void> {
     await this.port.open({ baudRate: SERIAL_BAUD });
-    if (!this.port.readable || !this.port.writable) throw new Error("the port opened without streams");
+    if (!this.port.readable || !this.port.writable) throw new Error(t("connect.error.noStreams"));
     this.writer = this.port.writable.getWriter();
     this.reader = this.port.readable.getReader();
     void this.readLoop(this.reader);
@@ -41,7 +42,7 @@ class WebSerialTransport extends BaseTransport {
 
   send(frame: Uint8Array): Promise<void> {
     const writer = this.writer;
-    if (!writer) return Promise.reject(new Error("port not open"));
+    if (!writer) return Promise.reject(new Error(t("connect.error.portNotOpen")));
     const bytes = frameForStream(frame);
     // Writes are serialised: a second `write` before the first settles is an error on some stacks.
     this.writing = this.writing.then(() => writer.write(bytes));
@@ -74,7 +75,7 @@ function describe(port: SerialPort): string {
   if (info.usbVendorId !== undefined) {
     return `USB ${info.usbVendorId.toString(16).padStart(4, "0")}:${(info.usbProductId ?? 0).toString(16).padStart(4, "0")}`;
   }
-  return "Serial port";
+  return t("connect.transport.serialPort");
 }
 
 function found(port: SerialPort, index: number): FoundDevice {
@@ -84,8 +85,12 @@ function found(port: SerialPort, index: number): FoundDevice {
 export const webSerialConnector: Connector = {
   id: "web-serial",
   kind: "serial",
-  title: "USB",
-  description: "The browser's port chooser.",
+  get title() {
+    return t("connect.transport.usb");
+  },
+  get description() {
+    return t("connect.describe.browserSerial");
+  },
   mode: "picker",
 
   async remembered() {

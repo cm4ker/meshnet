@@ -2,6 +2,7 @@
 
 import { contactHops, isConversationType, type ContactRecord } from "@meshnet/meshcore";
 import { useEffect, useState } from "react";
+import { t } from "../i18n/index.js";
 import type { Discovery } from "./discovery.js";
 import type { Ping } from "./ping.js";
 import { session } from "./session.js";
@@ -10,9 +11,9 @@ import { session } from "./session.js";
 export const ROUTE_LIMITS: (number | null)[] = [null, 5, 15, 30, 60];
 
 export function limitLabel(minutes: number | null): string {
-  if (minutes === null) return "Never";
-  if (minutes === 60) return "1 hour";
-  return `${minutes} min`;
+  if (minutes === null) return t("tools.limit.never");
+  if (minutes === 60) return t("tools.limit.hour");
+  return t("common.minutes", { count: minutes });
 }
 
 /** `<select>` values: "default", "never", or minutes. */
@@ -27,22 +28,22 @@ export function parseLimit(value: string): number | null | undefined {
 /** "in 3 min", "in 1 h 5 min"; never less than a minute, so a countdown does not read zero. */
 export function inMinutes(ms: number): string {
   const minutes = Math.max(1, Math.ceil(ms / 60_000));
-  if (minutes < 60) return `in ${minutes} min`;
+  if (minutes < 60) return t("tools.in.minutes", { minutes });
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
-  return `in ${h} h${m ? ` ${m} min` : ""}`;
+  return m ? t("tools.in.hoursMinutes", { hours: h, minutes: m }) : t("tools.in.hours", { hours: h });
 }
 
 /** The chat header's line about a contact's route. */
 export function routeSubtitle(contact: ContactRecord, now: number): { text: string; tone: "" | "pinned" | "soon" } {
-  if (session.routePolicy(contact.key).flood) return { text: "Flood · pinned", tone: "pinned" };
-  if (contact.outPathLen === 0xff) return { text: "No route known: messages flood", tone: "" };
+  if (session.routePolicy(contact.key).flood) return { text: t("tools.routeSub.pinned"), tone: "pinned" };
+  if (contact.outPathLen === 0xff) return { text: t("tools.routeSub.none"), tone: "" };
   const hops = contact.outPathLen & 63;
-  const lead = hops === 0 ? "Direct" : `${hops} hop${hops === 1 ? "" : "s"}`;
+  const lead = hops === 0 ? t("tools.routeSub.direct") : t("tools.hops", { count: hops });
   const expires = session.routeExpiresAt(contact.key);
   if (expires === null) return { text: lead, tone: "" };
   const left = expires - now;
-  return { text: `${lead} · drops ${inMinutes(left)}`, tone: left <= 3 * 60_000 ? "soon" : "" };
+  return { text: t("tools.routeSub.drops", { route: lead, when: inMinutes(left) }), tone: left <= 3 * 60_000 ? "soon" : "" };
 }
 
 /** The clock, ticking every `ms`, for countdowns. */
@@ -57,11 +58,11 @@ export function useNow(ms = 15_000): number {
 
 /** A contact's route in a few words, for under a name: how the next message goes. */
 export function routeWords(contact: ContactRecord): { text: string; tone: "" | "pinned" | "none" } {
-  if (isConversationType(contact.type) && session.routePolicy(contact.key).flood) return { text: "always flood", tone: "pinned" };
+  if (isConversationType(contact.type) && session.routePolicy(contact.key).flood) return { text: t("tools.routeWords.pinned"), tone: "pinned" };
   const hops = contactHops(contact);
-  if (hops === null) return { text: "no route · floods", tone: "none" };
-  if (hops === 0) return { text: "direct", tone: "" };
-  return { text: `via ${hops} relay${hops === 1 ? "" : "s"}`, tone: "" };
+  if (hops === null) return { text: t("tools.routeWords.none"), tone: "none" };
+  if (hops === 0) return { text: t("tools.routeWords.direct"), tone: "" };
+  return { text: t("tools.viaRelays", { count: hops }), tone: "" };
 }
 
 /**
@@ -70,15 +71,16 @@ export function routeWords(contact: ContactRecord): { text: string; tone: "" | "
  */
 export function routeStatus(contact: ContactRecord, ping: Ping | null, found: Discovery | null): { text: string; tone: "" | "pinned" | "none" | "good" | "bad" } {
   const words = routeWords(contact);
+  const route = words.text;
   const checked = ping && !ping.via ? ping : null;
   if (found && (!checked || found.at >= checked.at)) {
-    if (found.running) return { text: `${words.text} · looking…`, tone: words.tone };
-    if (found.silent) return { text: `${words.text} · no answer`, tone: "bad" };
+    if (found.running) return { text: t("tools.status.looking", { route }), tone: words.tone };
+    if (found.silent) return { text: t("tools.status.noAnswer", { route }), tone: "bad" };
     return words;
   }
   if (!checked) return words;
-  if (checked.running) return { text: `${words.text} · ${checked.stage === "search" ? "looking…" : "checking…"}`, tone: words.tone };
-  if (checked.search) return checked.search.found ? { text: `${words.text} · works`, tone: "good" } : { text: `${words.text} · no answer`, tone: "bad" };
+  if (checked.running) return { text: t(checked.stage === "search" ? "tools.status.looking" : "tools.status.checking", { route }), tone: words.tone };
+  if (checked.search) return checked.search.found ? { text: t("tools.status.works", { route }), tone: "good" } : { text: t("tools.status.noAnswer", { route }), tone: "bad" };
   if (checked.runs.length === 0) return words;
-  return checked.runs.some((r) => r.ok) ? { text: `${words.text} · works`, tone: "good" } : { text: `${words.text} · no answer`, tone: "bad" };
+  return checked.runs.some((r) => r.ok) ? { text: t("tools.status.works", { route }), tone: "good" } : { text: t("tools.status.noAnswer", { route }), tone: "bad" };
 }

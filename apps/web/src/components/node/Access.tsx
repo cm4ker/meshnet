@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { AclRole, AdvType, NoReplyError, NodeCommandError, aclRoleName, isCliError, type ContactRecord } from "@meshnet/meshcore";
+import { AclRole, AdvType, NodeCommandError, isCliError, type ContactRecord } from "@meshnet/meshcore";
+import { errorText } from "../../i18n/errors.js";
+import { t, type Key } from "../../i18n/index.js";
+import { tx } from "../../i18n/rich.js";
 import { ago } from "../../lib/format.js";
 import { session, useSession } from "../../lib/session.js";
 import { Button } from "../../ui/Button.js";
@@ -10,10 +13,21 @@ import { RefreshIcon } from "../Icons.js";
 
 const ROLES = [AclRole.Admin, AclRole.ReadWrite, AclRole.ReadOnly];
 
+const ROLE_NAMES: Record<number, Key> = {
+  [AclRole.Admin]: "node.role.admin",
+  [AclRole.ReadWrite]: "node.role.readWrite",
+  [AclRole.ReadOnly]: "node.role.readOnly",
+  [AclRole.Guest]: "node.role.guest",
+};
+
+/** A role as the reader says it: "admin", "read-write", "read-only", "guest". */
+export function roleName(role: number): string {
+  return t(ROLE_NAMES[role & 3] ?? "node.role.guest");
+}
+
 function message(e: unknown): string {
-  if (e instanceof NoReplyError) return `${e.message}. The node may be out of range; try again.`;
-  if (e instanceof NodeCommandError) return `The node said: ${e.reply}`;
-  return (e as Error).message;
+  if (e instanceof NodeCommandError) return t("node.nodeSaid", { reply: e.reply });
+  return errorText(e);
 }
 
 /**
@@ -63,19 +77,19 @@ export function Access({ contact }: { contact: ContactRecord }) {
     <div className="card-scroll">
       <div className="toolbar">
         <span className="muted small">
-          {list ? `${list.entries.length} ${room ? "admins" : "clients with a role"} · read ${ago(list.at)}` : "not asked yet"}
+          {list ? t(room ? "node.access.admins" : "node.access.clients", { count: list.entries.length, time: ago(list.at) }) : t("node.notAskedYet")}
         </span>
         <Button size="sm" busy={busy === "list"} disabled={!online} onClick={() => void run("list", async () => void (await session.requestAccessList(key)))}>
           <RefreshIcon size={13} />
-          {list ? "Refresh" : "Ask the node"}
+          {list ? t("node.refresh") : t("node.access.askNode")}
         </Button>
       </div>
       {error ? <p className="connect-error">{error}</p> : null}
       {note ? <p className="muted small">{note}</p> : null}
 
       {list ? (
-        <Section title="Who can sign in">
-          {list.entries.length === 0 ? <p className="muted">Nobody but guests.</p> : null}
+        <Section title={t("node.access.whoCanSignIn")}>
+          {list.entries.length === 0 ? <p className="muted">{t("node.access.onlyGuests")}</p> : null}
           <div className="acl">
             {list.entries.map((entry) => {
               const known = session.contactByPrefix(entry.prefix);
@@ -89,30 +103,30 @@ export function Access({ contact }: { contact: ContactRecord }) {
                     <span className="who-text">
                       <span>
                         {name || <code>{entry.prefix}</code>}
-                        {me ? <span className="pill you">you</span> : null}
+                        {me ? <span className="pill you">{t("node.access.you")}</span> : null}
                       </span>
-                      <span className="muted small">{name ? <code>{entry.prefix}</code> : "not in contacts"}</span>
+                      <span className="muted small">{name ? <code>{entry.prefix}</code> : t("node.notInContacts")}</span>
                     </span>
                   </span>
                   <select
                     className="input select acl-role"
-                    aria-label={`Role of ${name || entry.prefix}`}
+                    aria-label={t("node.access.roleOf", { name: name || entry.prefix })}
                     value={role}
                     disabled={!online || me || busy !== null || (!known && !me)}
-                    title={me ? "Your own role is not changed from here" : !known ? "A role change needs the whole key, which only a contact has" : undefined}
+                    title={me ? t("node.access.ownRole") : !known ? t("node.access.needsKey") : undefined}
                     onChange={(e) => {
                       const next = (entry.permissions & ~3) | Number(e.target.value);
-                      void run(entry.prefix, () => setperm(known!.key, next, `${name} is now ${aclRoleName(next)}.`));
+                      void run(entry.prefix, () => setperm(known!.key, next, t("node.access.nowRole", { name: name ?? "", role: roleName(next) })));
                     }}
                   >
                     {ROLES.map((r) => (
                       <option key={r} value={r}>
-                        {aclRoleName(r)}
+                        {roleName(r)}
                       </option>
                     ))}
                   </select>
                   <Button size="sm" variant="ghost" busy={busy === entry.prefix} disabled={!online || me || busy !== null} onClick={() => setRemoving(entry.prefix)}>
-                    Remove
+                    {t("common.remove")}
                   </Button>
                 </div>
               );
@@ -120,16 +134,16 @@ export function Access({ contact }: { contact: ContactRecord }) {
           </div>
         </Section>
       ) : (
-        <p className="muted">One request brings back every client the node keeps a role for. Only admins may ask.</p>
+        <p className="muted">{t("node.access.intro")}</p>
       )}
 
       {list ? (
-        <Section title="Give a contact a role">
+        <Section title={t("node.access.giveRole")}>
           <div className="form-grid">
             <label className="field">
-              <span className="field-label">Contact</span>
+              <span className="field-label">{t("node.access.contact")}</span>
               <select className="input select" value={grantKey} onChange={(e) => setGrantKey(e.target.value)}>
-                <option value="">Choose…</option>
+                <option value="">{t("node.access.choose")}</option>
                 {people.map((p) => (
                   <option key={p.key} value={p.key}>
                     {p.name || p.prefix}
@@ -138,11 +152,11 @@ export function Access({ contact }: { contact: ContactRecord }) {
               </select>
             </label>
             <label className="field">
-              <span className="field-label">Role</span>
+              <span className="field-label">{t("node.access.role")}</span>
               <select className="input select" value={grantRole} onChange={(e) => setGrantRole(Number(e.target.value))}>
                 {ROLES.map((r) => (
                   <option key={r} value={r}>
-                    {aclRoleName(r)}
+                    {roleName(r)}
                   </option>
                 ))}
               </select>
@@ -155,29 +169,30 @@ export function Access({ contact }: { contact: ContactRecord }) {
               onClick={() =>
                 void run("grant", async () => {
                   const who = state.contacts[grantKey];
-                  await setperm(grantKey, grantRole, `${who?.name ?? "The contact"} can sign in as ${aclRoleName(grantRole)} without a password.`);
+                  const role = roleName(grantRole);
+                  await setperm(grantKey, grantRole, who ? t("node.access.granted", { name: who.name, role }) : t("node.access.grantedUnnamed", { role }));
                   setGrantKey("");
                 })
               }
             >
-              Give role
+              {t("node.access.give")}
             </Button>
           </div>
-          <p className="field-hint">A client with a role signs in with a blank password. Each change is one <code>setperm</code> command.</p>
+          <p className="field-hint">{tx("node.access.hint", { command: <code>setperm</code> })}</p>
         </Section>
       ) : null}
 
       <Confirm
         open={removing !== null}
-        title="Remove from the list?"
-        body={<p>They lose their role on {contact.name}, and sign in again only with a password.</p>}
-        confirmLabel="Remove"
+        title={t("node.access.removeTitle")}
+        body={<p>{t("node.access.removeBody", { name: contact.name })}</p>}
+        confirmLabel={t("common.remove")}
         danger
         onCancel={() => setRemoving(null)}
         onConfirm={async () => {
           const prefix = removing!;
           setRemoving(null);
-          await run(prefix, () => setperm(prefix, AclRole.Guest, "Removed."));
+          await run(prefix, () => setperm(prefix, AclRole.Guest, t("node.access.removed")));
         }}
       />
     </div>

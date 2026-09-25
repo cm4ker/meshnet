@@ -21,6 +21,7 @@
 		7E5A1C012F9A00000000A003 /* MeshViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5A1C012F9A00000000A004 /* MeshViewController.swift */; };
 		7E5A1C012F9A00000000A005 /* MeshWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5A1C012F9A00000000A006 /* MeshWatch.swift */; };
 		7E5A1C012F9A00000000A007 /* MeshRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5A1C012F9A00000000A008 /* MeshRelay.swift */; };
+		7E5A1C012F9A00000000C001 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 7E5A1C012F9A00000000C002 /* InfoPlist.strings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +39,7 @@
 		7E5A1C012F9A00000000A004 /* MeshViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshViewController.swift; sourceTree = "<group>"; };
 		7E5A1C012F9A00000000A006 /* MeshWatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshWatch.swift; sourceTree = "<group>"; };
 		7E5A1C012F9A00000000A008 /* MeshRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshRelay.swift; sourceTree = "<group>"; };
+		7E5A1C012F9A00000000C003 /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -85,6 +87,7 @@
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
 				504EC3131FED79650016851F /* Info.plist */,
+				7E5A1C012F9A00000000C002 /* InfoPlist.strings */,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
 			);
@@ -137,6 +140,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				ru,
 				Base,
 			);
 			mainGroup = 504EC2FB1FED79650016851F;
@@ -164,6 +168,7 @@
 				50379B232058CBB4000EE86E /* capacitor.config.json in Resources */,
 				504EC30D1FED79650016851F /* Main.storyboard in Resources */,
 				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
+				7E5A1C012F9A00000000C001 /* InfoPlist.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -200,6 +205,14 @@
 				504EC3111FED79650016851F /* Base */,
 			);
 			name = LaunchScreen.storyboard;
+			sourceTree = "<group>";
+		};
+		7E5A1C012F9A00000000C002 /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				7E5A1C012F9A00000000C003 /* ru */,
+			);
+			name = InfoPlist.strings;
 			sourceTree = "<group>";
 		};
 /* End PBXVariantGroup section */

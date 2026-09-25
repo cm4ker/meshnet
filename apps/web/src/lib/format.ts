@@ -1,16 +1,29 @@
 /** Small formatters shared by the views. */
 
+import { locale, t } from "../i18n/index.js";
+
 /*
  * `toLocale*String` with options builds a new `Intl.DateTimeFormat` on every call, a tenth of
  * a millisecond or more on a phone. A list of nodes or a long chat asks for hundreds of dates
- * on each render, so the formats are made once.
+ * on each render, so the formats are made once for each language the reader picks.
  */
-const CLOCK = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
-const DAY = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" });
-const DAY_OF_YEAR = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" });
+let formats: { locale: string; clock: Intl.DateTimeFormat; day: Intl.DateTimeFormat; dayOfYear: Intl.DateTimeFormat } | null = null;
+
+function dates() {
+  const tag = locale();
+  if (formats?.locale !== tag) {
+    formats = {
+      locale: tag,
+      clock: new Intl.DateTimeFormat(tag, { hour: "2-digit", minute: "2-digit" }),
+      day: new Intl.DateTimeFormat(tag, { day: "numeric", month: "short" }),
+      dayOfYear: new Intl.DateTimeFormat(tag, { day: "numeric", month: "short", year: "numeric" }),
+    };
+  }
+  return formats;
+}
 
 export function timeOfDay(unixSeconds: number): string {
-  return CLOCK.format(unixSeconds * 1000);
+  return dates().clock.format(unixSeconds * 1000);
 }
 
 export function dayLabel(unixSeconds: number, now = Date.now()): string {
@@ -18,29 +31,29 @@ export function dayLabel(unixSeconds: number, now = Date.now()): string {
   const today = new Date(now);
   const sameDay = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  if (sameDay(date, today)) return "Today";
+  if (sameDay(date, today)) return t("common.today");
   const yesterday = new Date(now - 86_400_000);
-  if (sameDay(date, yesterday)) return "Yesterday";
-  return (date.getFullYear() === today.getFullYear() ? DAY : DAY_OF_YEAR).format(date);
+  if (sameDay(date, yesterday)) return t("common.yesterday");
+  return (date.getFullYear() === today.getFullYear() ? dates().day : dates().dayOfYear).format(date);
 }
 
 /** "just now", "5 min", "3 h", "2 d", or a date for anything older. */
 export function ago(ms: number | null, now = Date.now()): string {
-  if (!ms) return "never";
+  if (!ms) return t("common.never");
   const delta = Math.max(0, now - ms);
-  if (delta < 60_000) return "just now";
-  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)} min`;
-  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)} h`;
-  if (delta < 7 * 86_400_000) return `${Math.floor(delta / 86_400_000)} d`;
-  return DAY.format(ms);
+  if (delta < 60_000) return t("common.justNow");
+  if (delta < 3_600_000) return t("common.minutes", { count: Math.floor(delta / 60_000) });
+  if (delta < 86_400_000) return t("common.hours", { count: Math.floor(delta / 3_600_000) });
+  if (delta < 7 * 86_400_000) return t("common.days", { count: Math.floor(delta / 86_400_000) });
+  return dates().day.format(ms);
 }
 
 export function frequency(khz: number): string {
-  return `${(khz / 1000).toFixed(3)} MHz`;
+  return t("common.megahertz", { value: (khz / 1000).toFixed(3) });
 }
 
 export function bandwidth(hz: number): string {
-  return `${(hz / 1000).toFixed(hz % 1000 === 0 ? 0 : 2)} kHz`;
+  return t("common.kilohertz", { value: (hz / 1000).toFixed(hz % 1000 === 0 ? 0 : 2) });
 }
 
 export function shortKey(hex: string, n = 6): string {
@@ -82,7 +95,7 @@ export function hue(seed: string): number {
 }
 
 export function battery(mv: number): string {
-  return `${(mv / 1000).toFixed(2)} V`;
+  return t("common.volts", { value: (mv / 1000).toFixed(2) });
 }
 
 /** What a cell is made of. The radio reports only its voltage. */
@@ -112,10 +125,6 @@ export function batteryPercent(mv: number, type: BatteryType = "liion"): number 
   return 0;
 }
 
-export function plural(n: number, one: string, many = `${one}s`): string {
-  return `${n} ${n === 1 ? one : many}`;
-}
-
 export function utf8Length(text: string): number {
   return new TextEncoder().encode(text).length;
 }
@@ -123,5 +132,5 @@ export function utf8Length(text: string): number {
 /** "just now", "12 min ago", "3 h ago": `ago` as it reads after a verb. */
 export function agoPhrase(ms: number | null, now = Date.now()): string {
   const text = ago(ms, now);
-  return text === "just now" || text === "never" || now - (ms ?? 0) >= 7 * 86_400_000 ? text : `${text} ago`;
+  return !ms || now - ms < 60_000 || now - ms >= 7 * 86_400_000 ? text : t("common.ago", { time: text });
 }

@@ -3,6 +3,7 @@ import { titleOf } from "../lib/conversations.js";
 import { useSession } from "../lib/session.js";
 import { MessageDetails } from "./MessageDetails.js";
 import { Gone, ScreenHead, type Chrome } from "./ScreenHead.js";
+import { t } from "../i18n/index.js";
 
 /**
  * How one message travelled: a sheet over the conversation on a phone, the
@@ -11,7 +12,7 @@ import { Gone, ScreenHead, type Chrome } from "./ScreenHead.js";
 export function MessageView({ conversation, id, chrome, bare = false }: { conversation: string; id: string; chrome: Chrome; bare?: boolean | undefined }) {
   const state = useSession();
   const message = state.messages.find((m) => m.id === id);
-  if (!message) return bare ? <div className="empty muted">This message is gone.</div> : <Gone chrome={chrome} title="Message" text="This message is gone." />;
+  if (!message) return bare ? <div className="empty muted">{t("chats.message.gone")}</div> : <Gone chrome={chrome} title={t("chats.message.title")} text={t("chats.message.gone")} />;
   const target = parseConversation(conversation);
   const many = target.kind === "channel" || (target.kind === "contact" && state.contacts[target.key]?.type === AdvType.Room);
   const peer = message.direction === "in" && many ? (message.sender ?? "?") : titleOf(state, conversation);
@@ -20,7 +21,7 @@ export function MessageView({ conversation, id, chrome, bare = false }: { conver
   return (
     <div className="screen">
       <ScreenHead chrome={chrome}>
-        <span className="screen-name">How it travelled</span>
+        <span className="screen-name">{t("chats.message.travelled")}</span>
       </ScreenHead>
       <div className="screen-scroll message-body">{body}</div>
     </div>

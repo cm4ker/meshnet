@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { MAX_PASSWORD_LEN, NoReplyError, NodeCommandError, isCliError, type ContactRecord } from "@meshnet/meshcore";
-import { ago, plural } from "../../lib/format.js";
+import { MAX_PASSWORD_LEN, NodeCommandError, isCliError, type ContactRecord } from "@meshnet/meshcore";
+import { errorText } from "../../i18n/errors.js";
+import { t } from "../../i18n/index.js";
+import { tx } from "../../i18n/rich.js";
+import { ago } from "../../lib/format.js";
 import {
   RADIO_FIELDS,
   displayValue,
@@ -34,9 +37,8 @@ interface Pending {
 }
 
 function message(e: unknown): string {
-  if (e instanceof NoReplyError) return `${e.message}. The node may be out of range; try again.`;
-  if (e instanceof NodeCommandError) return `The node said: ${e.reply}`;
-  return (e as Error).message;
+  if (e instanceof NodeCommandError) return t("node.nodeSaid", { reply: e.reply });
+  return errorText(e);
 }
 
 /**
@@ -120,7 +122,7 @@ export function Settings({ contact }: { contact: ContactRecord }) {
           else throw e;
         }
       }
-      if (refused.length) setNote(`This node does not know ${refused.join(", ")}; its firmware may be older.`);
+      if (refused.length) setNote(t("node.settings.unknown", { names: refused.join(", ") }));
     } catch (e) {
       setError(message(e));
     } finally {
@@ -148,12 +150,12 @@ export function Settings({ contact }: { contact: ContactRecord }) {
       if (radioValue && radioMode === "trial") {
         const reply = await session.runCli(key, `tempradio ${radioValue},${TRIAL_MINUTES}`);
         if (isCliError(reply)) throw new NodeCommandError(reply);
-        setNote(`${contact.name} is on the new radio settings for ${TRIAL_MINUTES} minutes. Switch this radio to them to reach it; if nobody does, it goes back by itself.`);
+        setNote(t("node.settings.onTrial", { name: contact.name, count: TRIAL_MINUTES }));
       } else if (radioValue && radioMode === "save") {
         await session.writeNodeSetting(key, "radio", radioValue, `set radio ${radioValue}`);
-        setNote(`${contact.name} keeps the new radio settings from its next reboot.`);
+        setNote(t("node.settings.keeps", { name: contact.name }));
       } else {
-        setNote(`${plural(pending.length, "change")} saved on ${contact.name}.`);
+        setNote(t("node.settings.saved", { count: pending.length, name: contact.name }));
       }
       if (radioValue && radioMode) {
         setDirty((d) => {
@@ -176,7 +178,7 @@ export function Settings({ contact }: { contact: ContactRecord }) {
       await session.writeNodeSetting(key, "password", password, `password ${password}`, { mask: "password ••••••" });
       if (hasSavedPassword(key)) await savePassword(key, password);
       setPassword("");
-      setNote(hasSavedPassword(key) ? "Admin password changed, and the saved one with it." : "Admin password changed.");
+      setNote(hasSavedPassword(key) ? t("node.settings.passwordChangedSaved") : t("node.settings.passwordChanged"));
     } catch (e) {
       setError(message(e));
     }
@@ -184,7 +186,10 @@ export function Settings({ contact }: { contact: ContactRecord }) {
 
   const total = pending.length + (radioValue ? 1 : 0);
   const invalid = Object.keys(problems).length > 0;
-  const commands = [...pending.map((p) => p.command), ...(radioValue ? [`tempradio ${radioValue},${TRIAL_MINUTES}  or  set radio ${radioValue}`] : [])];
+  const commands = [
+    ...pending.map((p) => p.command),
+    ...(radioValue ? [t("node.settings.trialOrSave", { trial: `tempradio ${radioValue},${TRIAL_MINUTES}`, save: `set radio ${radioValue}` })] : []),
+  ];
   const passwordTooLong = new TextEncoder().encode(password).length > MAX_PASSWORD_LEN;
 
   return (
@@ -204,10 +209,16 @@ export function Settings({ contact }: { contact: ContactRecord }) {
               title={group.title}
               actions={
                 <>
-                  <span className="muted small">{busy ? `reading ${known.length} of ${names.length}…` : at ? `read ${ago(at)}` : "not read"}</span>
+                  <span className="muted small">
+                    {busy
+                      ? t("node.settings.reading", { done: known.length, total: names.length })
+                      : at
+                        ? t("node.settings.readAgo", { time: ago(at) })
+                        : t("node.settings.notRead")}
+                  </span>
                   {known.length > 0 ? (
                     <Button size="sm" busy={busy} disabled={!online} onClick={() => void read(group)}>
-                      Read again
+                      {t("node.settings.readAgain")}
                     </Button>
                   ) : null}
                 </>
@@ -215,11 +226,9 @@ export function Settings({ contact }: { contact: ContactRecord }) {
             >
               {known.length === 0 ? (
                 <div className="unread">
-                  <span className="muted">
-                    Not read yet: {plural(names.length, "value")}, one request each, a few seconds apiece over the air.
-                  </span>
+                  <span className="muted">{t("node.settings.notReadYet", { count: names.length })}</span>
                   <Button size="sm" busy={busy} disabled={!online} onClick={() => void read(group)}>
-                    Read {plural(names.length, "value")}
+                    {t("node.settings.readValues", { count: names.length })}
                   </Button>
                 </div>
               ) : (
@@ -239,11 +248,7 @@ export function Settings({ contact }: { contact: ContactRecord }) {
                   {group.id === "radio" ? (
                     <p className="inline-warn">
                       <AlertIcon size={14} />
-                      <span>
-                        {radioValue
-                          ? "This moves the node off your channel. Apply offers a trial first, from which it falls back by itself."
-                          : "Frequency, bandwidth, SF and CR must match your radio's, or the node goes silent to you."}
-                      </span>
+                      <span>{radioValue ? t("node.settings.radioMoves") : t("node.settings.radioMatch")}</span>
                     </p>
                   ) : null}
                 </>
@@ -252,19 +257,19 @@ export function Settings({ contact }: { contact: ContactRecord }) {
           );
         })}
 
-        <Section title="Admin password">
+        <Section title={t("node.settings.adminPassword")}>
           <div className="form-grid">
             <label className="field">
-              <span className="field-label">New admin password</span>
+              <span className="field-label">{t("node.settings.newPassword")}</span>
               <input className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
               <span className={["field-hint", passwordTooLong ? "danger" : ""].join(" ")}>
-                {passwordTooLong ? `Sign-in reads only ${MAX_PASSWORD_LEN} bytes; keep it shorter.` : "Write-only: the node never sends it back."}
+                {passwordTooLong ? t("node.settings.passwordTooLong", { max: MAX_PASSWORD_LEN }) : t("node.settings.writeOnly")}
               </span>
             </label>
           </div>
           <div className="row-actions">
             <Button disabled={!online || !password || passwordTooLong} onClick={() => setAsk("password")}>
-              Change password
+              {t("node.settings.changePassword")}
             </Button>
           </div>
         </Section>
@@ -283,34 +288,33 @@ export function Settings({ contact }: { contact: ContactRecord }) {
             <p className="inline-warn">
               <AlertIcon size={14} />
               <span>
-                The node leaves this channel. <b>Try for {TRIAL_MINUTES} min</b> uses <code>tempradio</code>: unless you reach it on the new settings, it
-                comes back by itself.
+                {tx("node.settings.trialWarn", { button: <b>{t("node.settings.tryFor", { minutes: TRIAL_MINUTES })}</b>, command: <code>tempradio</code> })}
               </span>
             </p>
           ) : null}
           <div className="apply-row">
             <span>
-              <b>{total}</b> {total === 1 ? "change" : "changes"} ·{" "}
+              {tx("node.settings.changes", { count: total, total: <b>{total}</b> })} ·{" "}
               <button type="button" className="link" onClick={() => setShowCommands((s) => !s)}>
-                {showCommands ? "Hide" : "Show"} commands
+                {showCommands ? t("node.settings.hideCommands") : t("node.settings.showCommands")}
               </button>
             </span>
             <span className="row-actions">
               <Button size="sm" variant="ghost" disabled={applying} onClick={() => setDirty({})}>
-                Discard
+                {t("node.settings.discard")}
               </Button>
               {radioValue ? (
                 <>
                   <Button size="sm" variant="danger" disabled={!online || invalid || applying} onClick={() => setAsk("radio")}>
-                    Apply for good
+                    {t("node.settings.applyForGood")}
                   </Button>
                   <Button size="sm" variant="primary" busy={applying} disabled={!online || invalid} onClick={() => void apply("trial")}>
-                    Try for {TRIAL_MINUTES} min
+                    {t("node.settings.tryFor", { minutes: TRIAL_MINUTES })}
                   </Button>
                 </>
               ) : (
                 <Button size="sm" variant="primary" busy={applying} disabled={!online || invalid} onClick={() => void apply(null)}>
-                  Apply {plural(total, "command")}
+                  {t("node.settings.apply", { count: total })}
                 </Button>
               )}
             </span>
@@ -320,14 +324,9 @@ export function Settings({ contact }: { contact: ContactRecord }) {
 
       <Confirm
         open={ask === "radio"}
-        title="Move the node for good?"
-        body={
-          <p>
-            {contact.name} will keep the new radio settings from its next reboot. If this radio is not on the same settings then, you lose it until someone reaches it on
-            site. The {TRIAL_MINUTES}-minute trial is the safer first step.
-          </p>
-        }
-        confirmLabel="Apply for good"
+        title={t("node.settings.moveTitle")}
+        body={<p>{t("node.settings.moveBody", { name: contact.name, minutes: TRIAL_MINUTES })}</p>}
+        confirmLabel={t("node.settings.applyForGood")}
         danger
         onCancel={() => setAsk(null)}
         onConfirm={async () => {
@@ -337,14 +336,9 @@ export function Settings({ contact }: { contact: ContactRecord }) {
       />
       <Confirm
         open={ask === "password"}
-        title="Change the admin password?"
-        body={
-          <p>
-            From now on {contact.name} takes only the new password for admin sign-in.
-            {hasSavedPassword(key) ? " The saved one is replaced as soon as the node confirms." : " Keep it somewhere: nothing here remembers it unless you sign in with Remember on."}
-          </p>
-        }
-        confirmLabel="Change password"
+        title={t("node.settings.passwordTitle")}
+        body={<p>{t(hasSavedPassword(key) ? "node.settings.passwordBodySaved" : "node.settings.passwordBodyUnsaved", { name: contact.name })}</p>}
+        confirmLabel={t("node.settings.changePassword")}
         onCancel={() => setAsk(null)}
         onConfirm={async () => {
           setAsk(null);

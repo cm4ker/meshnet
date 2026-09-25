@@ -10,6 +10,8 @@ import { Group, LinkRow } from "../ui/List.js";
 import { Sheet } from "../ui/Sheet.js";
 import { Avatar } from "./Avatar.js";
 import { HashIcon, KeyIcon, PersonIcon, PlusIcon, SearchIcon } from "./Icons.js";
+import { errorText } from "../i18n/errors.js";
+import { t } from "../i18n/index.js";
 
 type Step = "menu" | "people" | "public" | "create" | "join";
 
@@ -19,15 +21,24 @@ export function NewChat({ open, onClose }: { open: boolean; onClose: () => void 
   useEffect(() => {
     if (open) setStep("menu");
   }, [open]);
-  const title = step === "people" ? "Message someone" : step === "public" ? "Join a public #channel" : step === "create" ? "Create a channel" : step === "join" ? "Join a private channel" : "New chat";
+  const title =
+    step === "people"
+      ? t("chats.newChat.people")
+      : step === "public"
+        ? t("chats.newChat.public")
+        : step === "create"
+          ? t("chats.newChat.create")
+          : step === "join"
+            ? t("chats.newChat.private")
+            : t("chats.newChat.title");
   return (
     <Sheet open={open} onClose={onClose} title={title}>
       {step === "menu" ? (
         <Group>
-          <LinkRow icon={<PersonIcon size={18} />} label="Message someone" hint="A person or a room the radio has heard" onClick={() => setStep("people")} />
-          <LinkRow icon={<HashIcon size={18} />} label="Join a public #channel" hint="Only its name, like #berlin" onClick={() => setStep("public")} />
-          <LinkRow icon={<KeyIcon size={18} />} label="Join a private channel" hint="With the name and key someone sent you" onClick={() => setStep("join")} />
-          <LinkRow icon={<PlusIcon size={18} />} label="Create a channel" hint="A new key, to share with the people you want in" onClick={() => setStep("create")} />
+          <LinkRow icon={<PersonIcon size={18} />} label={t("chats.newChat.people")} hint={t("chats.newChat.peopleHint")} onClick={() => setStep("people")} />
+          <LinkRow icon={<HashIcon size={18} />} label={t("chats.newChat.public")} hint={t("chats.newChat.publicHint")} onClick={() => setStep("public")} />
+          <LinkRow icon={<KeyIcon size={18} />} label={t("chats.newChat.private")} hint={t("chats.newChat.privateHint")} onClick={() => setStep("join")} />
+          <LinkRow icon={<PlusIcon size={18} />} label={t("chats.newChat.create")} hint={t("chats.newChat.createHint")} onClick={() => setStep("create")} />
         </Group>
       ) : step === "people" ? (
         <People onDone={onClose} />
@@ -53,10 +64,10 @@ function People({ onDone }: { onDone: () => void }) {
     <>
       <label className="search">
         <SearchIcon size={15} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find" aria-label="Find someone" autoFocus />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("chats.list.find")} aria-label={t("chats.newChat.findLabel")} autoFocus />
       </label>
       {rows.length === 0 ? (
-        <p className="group-note">{query ? "Nobody by that name." : "Nobody yet: people appear when the radio hears their adverts."}</p>
+        <p className="group-note">{query ? t("chats.newChat.nobodyNamed") : t("chats.newChat.nobodyYet")}</p>
       ) : (
         <ul className="list" role="list">
           {rows.map((c) => (
@@ -125,18 +136,18 @@ function PublicChannelForm({ onDone }: { onDone: () => void }) {
       openConversation(channelConversation(index));
       onDone();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorText(err));
     } finally {
       setBusy(false);
     }
   };
 
-  if (index < 0 && !existing) return <p className="group-note">Every channel slot on the radio is taken. Remove one from its channel page first.</p>;
+  if (index < 0 && !existing) return <p className="group-note">{t("chats.newChat.slotsFull")}</p>;
 
   return (
     <form className="stack sheet-form" onSubmit={submit}>
       <label className="field">
-        <span className="field-label">Name</span>
+        <span className="field-label">{t("chats.channel.name")}</span>
         <span className="input-prefixed">
           <span className="input-prefix" aria-hidden="true">#</span>
           <input
@@ -151,17 +162,17 @@ function PublicChannelForm({ onDone }: { onDone: () => void }) {
             autoFocus
           />
         </span>
-        <span className="field-hint">{existing ? "The radio already has this channel." : "Everyone who knows the name can read it."}</span>
+        <span className="field-hint">{existing ? t("chats.newChat.alreadyHas") : t("chats.newChat.anyoneReads")}</span>
       </label>
       {key ? (
         <div className="field">
-          <span className="field-label">Key, from the name</span>
+          <span className="field-label">{t("chats.newChat.keyFromName")}</span>
           <span className="key-text mono muted">{key.match(/.{4}/g)!.join(" ")}</span>
         </div>
       ) : null}
       {error ? <p className="connect-error">{error}</p> : null}
       <Button variant="primary" size="lg" type="submit" busy={busy} disabled={!name || state.status !== "ready"}>
-        {existing ? "Open" : "Join"}
+        {existing ? t("common.open") : t("chats.newChat.join")}
       </Button>
     </form>
   );
@@ -186,30 +197,30 @@ function ChannelForm({ join, onDone }: { join: boolean; onDone: () => void }) {
       openConversation(channelConversation(index));
       onDone();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorText(err));
     } finally {
       setBusy(false);
     }
   };
 
-  if (index < 0) return <p className="group-note">Every channel slot on the radio is taken. Remove one from its channel page first.</p>;
+  if (index < 0) return <p className="group-note">{t("chats.newChat.slotsFull")}</p>;
 
   return (
     <form className="stack sheet-form" onSubmit={submit}>
       <label className="field">
-        <span className="field-label">Name</span>
+        <span className="field-label">{t("chats.channel.name")}</span>
         <input className="input" value={name} maxLength={31} onChange={(e) => setName(e.target.value)} autoFocus />
       </label>
       <label className="field">
-        <span className="field-label">Key, 32 hex digits</span>
-        <input className="input mono" value={key} onChange={(e) => setKey(e.target.value)} placeholder="paste the key here" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+        <span className="field-label">{t("chats.newChat.key")}</span>
+        <input className="input mono" value={key} onChange={(e) => setKey(e.target.value)} placeholder={t("chats.newChat.keyPlaceholder")} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
         <span className={["field-hint", key && !secret ? "danger" : ""].join(" ")}>
-          {key && !secret ? "A key is 16 bytes: 32 hex digits." : join ? "The same name and key as everyone on the channel." : "A random key. Copy it from the channel's page to invite people."}
+          {key && !secret ? t("chats.newChat.keyInvalid") : join ? t("chats.newChat.keySame") : t("chats.newChat.keyRandom")}
         </span>
       </label>
       {error ? <p className="connect-error">{error}</p> : null}
       <Button variant="primary" size="lg" type="submit" busy={busy} disabled={!secret || !name.trim() || state.status !== "ready"}>
-        {join ? "Join" : "Create"}
+        {join ? t("chats.newChat.join") : t("chats.newChat.createButton")}
       </Button>
     </form>
   );

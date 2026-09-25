@@ -6,9 +6,11 @@
  */
 
 import { useEffect, useState } from "react";
-import { ELEVATION_ATTRIBUTION, profileBetween } from "../../lib/elevation.js";
+import { t } from "../../i18n/index.js";
+import { tx } from "../../i18n/rich.js";
+import { elevationAttribution, profileBetween } from "../../lib/elevation.js";
 import { formatDistance } from "../../lib/geo.js";
-import { formatDbm, formatSnr, lineOfSight, VERDICT_WORDS, type LineOfSight, type LinkRadio, type Profile } from "../../lib/los.js";
+import { formatDbm, formatSnr, lineOfSight, verdictWord, type LineOfSight, type LinkRadio, type Profile } from "../../lib/los.js";
 import { defaultHeight } from "../../lib/mapOverlay.js";
 import type { LosEnd, MeshTool } from "../../lib/meshTool.js";
 import { useSession } from "../../lib/session.js";
@@ -54,7 +56,7 @@ export function LosView({ tool, onBack, onClose }: { tool: Extract<MeshTool, { k
     setHeights([remembered(from) ?? defaultHeight(from, state.contacts), remembered(to) ?? defaultHeight(to, state.contacts)]);
     profileBetween(from, to)
       .then((p) => live && setProfile(p))
-      .catch(() => live && setError("The terrain along this line is not on this device yet, and the network did not answer."));
+      .catch(() => live && setError(t("tools.los.noTerrain")));
     return () => {
       live = false;
     };
@@ -78,7 +80,7 @@ export function LosView({ tool, onBack, onClose }: { tool: Extract<MeshTool, { k
     <div className="tool">
       <div className="tool-head">
         {onBack ? (
-          <IconButton label="Back" onClick={onBack}>
+          <IconButton label={t("common.back")} onClick={onBack}>
             <BackIcon size={18} />
           </IconButton>
         ) : null}
@@ -86,14 +88,14 @@ export function LosView({ tool, onBack, onClose }: { tool: Extract<MeshTool, { k
           <span className="row-title">
             {from.name} → {to.name}
           </span>
-          <span className="row-sub muted">{km !== null ? `${formatDistance(km)} · line of sight` : "Line of sight"}</span>
+          <span className="row-sub muted">{km !== null ? t("tools.los.sub", { distance: formatDistance(km) }) : t("tools.los.title")}</span>
         </span>
-        <IconButton label="Close" onClick={onClose}>
+        <IconButton label={t("common.close")} onClick={onClose}>
           <CloseIcon size={18} />
         </IconButton>
       </div>
       {error ? <p className="tool-note">{error}</p> : null}
-      {!error && !los ? <p className="tool-note muted">{radio ? "Reading the terrain…" : "Connect the radio: the line of sight is worked out for its frequency."}</p> : null}
+      {!error && !los ? <p className="tool-note muted">{radio ? t("tools.los.reading") : t("tools.los.connect")}</p> : null}
       {los ? (
         <>
           <Verdict los={los} />
@@ -101,21 +103,18 @@ export function LosView({ tool, onBack, onClose }: { tool: Extract<MeshTool, { k
             <ProfileChart los={los} from={from.name} to={to.name} heights={heights} />
           </div>
           <div className="los-heights">
-            <Stepper label={from.key === "self" ? "Your antenna" : from.name} value={heights[0]} onStep={(by) => setHeight(0, by)} />
-            <Stepper label={to.key === null ? "A mast here" : to.name} value={heights[1]} onStep={(by) => setHeight(1, by)} />
+            <Stepper label={from.key === "self" ? t("tools.los.yourAntenna") : from.name} value={heights[0]} onStep={(by) => setHeight(0, by)} />
+            <Stepper label={to.key === null ? t("tools.los.mastHere") : to.name} value={heights[1]} onStep={(by) => setHeight(1, by)} />
           </div>
-          <p className="tool-line">
-            On paper <b>{formatDbm(los.arrivesDbm)}</b> arrives, {Math.round(los.marginDb)} dB above what SF{radio!.spreadingFactor} still decodes.
-          </p>
+          <p className="tool-line">{tx("tools.los.budget", { power: <b>{formatDbm(los.arrivesDbm)}</b>, margin: Math.round(los.marginDb), sf: radio!.spreadingFactor })}</p>
           {tool.heard ? (
             <p className="tool-line">
-              Pinged: <b>{formatSnr(tool.heard[0])} dB</b> out
-              {tool.heard[1] === null ? "; it came home another way." : <>, <b>{formatSnr(tool.heard[1])} dB</b> back.</>}
+              {tool.heard[1] === null
+                ? tx("tools.los.pingedOneWay", { out: <b>{t("tools.unit.db", { value: formatSnr(tool.heard[0]) })}</b> })
+                : tx("tools.los.pinged", { out: <b>{t("tools.unit.db", { value: formatSnr(tool.heard[0]) })}</b>, back: <b>{t("tools.unit.db", { value: formatSnr(tool.heard[1]) })}</b> })}
             </p>
           ) : null}
-          <p className="tool-credit muted">
-            {ELEVATION_ATTRIBUTION}. The terrain knows hills, not houses or trees. Nothing goes on the air.
-          </p>
+          <p className="tool-credit muted">{t("tools.los.credit", { source: elevationAttribution() })}</p>
         </>
       ) : null}
     </div>
@@ -128,17 +127,17 @@ function Verdict({ los }: { los: LineOfSight }) {
   const text =
     los.verdict === "clear"
       ? Number.isFinite(w.clearanceM)
-        ? `nothing in the way; ${Math.round(w.clearanceM)} m to spare at the closest point.`
-        : "too short a hop for anything to be in the way."
+        ? t("tools.los.clear", { spare: Math.round(w.clearanceM) })
+        : t("tools.los.tooShort")
       : los.verdict === "grazed"
-        ? `the ground reaches into the zone ${at} along, costing about ${Math.round(los.terrainDb)} dB. A few metres of mast would clear it.`
-        : `the ground rises ${Math.round(-w.clearanceM)} m above the line ${at} along. Only what bends over it arrives: at least ${Math.round(los.terrainDb)} dB lost.`;
+        ? t("tools.los.grazed", { at, loss: Math.round(los.terrainDb) })
+        : t("tools.los.blocked", { rise: Math.round(-w.clearanceM), at, loss: Math.round(los.terrainDb) });
   const tone = los.verdict === "clear" ? "good" : los.verdict === "grazed" ? "warn" : "bad";
   return (
     <p className={`los-verdict ${tone}`}>
       {los.verdict === "clear" ? <CheckIcon size={18} /> : <AlertIcon size={18} />}
       <span>
-        <b>{VERDICT_WORDS[los.verdict]}:</b> {text}
+        <b>{verdictWord(los.verdict)}:</b> {text}
       </span>
     </p>
   );
@@ -149,12 +148,12 @@ function Stepper({ label, value, onStep }: { label: string; value: number; onSte
     <div className="stepper">
       <span className="row-main">
         <span className="row-sub muted">{label}</span>
-        <b className="mono">{value} m</b>
+        <b className="mono">{t("common.meters", { value })}</b>
       </span>
-      <IconButton label={`Lower ${label}`} disabled={value <= HEIGHTS[0]!} onClick={() => onStep(-1)}>
+      <IconButton label={t("tools.los.lower", { name: label })} disabled={value <= HEIGHTS[0]!} onClick={() => onStep(-1)}>
         <MinusIcon size={16} />
       </IconButton>
-      <IconButton label={`Raise ${label}`} disabled={value >= HEIGHTS.at(-1)!} onClick={() => onStep(1)}>
+      <IconButton label={t("tools.los.raise", { name: label })} disabled={value >= HEIGHTS.at(-1)!} onClick={() => onStep(1)}>
         <PlusIcon size={16} />
       </IconButton>
     </div>
@@ -208,12 +207,12 @@ function ProfileChart({ los, from, to, heights }: { los: LineOfSight; from: stri
   for (let k = 0; k <= km + 1e-6; k += kmStep) if (X(k * 1000) < x1 - 30) kms.push(k);
   const w = los.worst;
   const wp = pts[w.index]!;
-  const label = w.clearanceM < 0 ? `${Math.round(-w.clearanceM)} m above the line` : Number.isFinite(w.ratio) ? `${Math.round(Math.min(w.ratio, 9.99) * 100)}% of the zone clear` : "";
+  const label = w.clearanceM < 0 ? t("tools.los.aboveLine", { value: Math.round(-w.clearanceM) }) : Number.isFinite(w.ratio) ? t("tools.los.zoneClear", { value: Math.round(Math.min(w.ratio, 9.99) * 100) }) : "";
   const lw = label.length * 5.4 + 8;
   const lx = Math.min(Math.max(X(wp.d) - lw / 2, x0 + 2), x1 - lw);
   const ly = Math.max(y0 + 2, Math.min(Y(wp.ground), Y(wp.line)) - 22);
   return (
-    <svg className="los-svg" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Elevation profile over ${km.toFixed(1)} km`}>
+    <svg className="los-svg" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={t("tools.los.profile", { km: km.toFixed(1) })}>
       {ticks.map((h) => (
         <g key={h}>
           <line className="los-grid" x1={x0} x2={x1} y1={f(Y(h))} y2={f(Y(h))} />
@@ -253,13 +252,13 @@ function ProfileChart({ los, from, to, heights }: { los: LineOfSight; from: stri
         </text>
       ))}
       <text className="los-tick" x={x1} y={H - 6} textAnchor="end">
-        {km.toFixed(1)} km
+        {t("common.kilometers", { value: km.toFixed(1) })}
       </text>
       <text className="los-tick" x={x0 + 2} y={y0 - 5}>
-        {from} · {heights[0]} m
+        {from} · {t("common.meters", { value: heights[0] })}
       </text>
       <text className="los-tick" x={x1} y={y0 - 5} textAnchor="end">
-        {to} · {heights[1]} m
+        {to} · {t("common.meters", { value: heights[1] })}
       </text>
     </svg>
   );

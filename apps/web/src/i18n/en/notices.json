@@ -1,0 +1,55 @@
+{
+  "newContact": "New contact: {name}",
+  "newRepeater": "New repeater: {name}",
+  "newRoom": "New room: {name}",
+  "newSensor": "New sensor: {name}",
+  "newNode": "New node: {name}",
+  "heardFirst": "Heard for the first time.",
+  "heardFirstAt": "Heard for the first time, {distance} {direction}.",
+  "unknown": "Unknown {prefix}",
+  "channel": "Channel {index}",
+  "mentioned": "{who} mentioned you",
+  "mentionedIn": "{who} mentioned you in {chat}",
+  "inChat": "{sender} in {chat}",
+  "chatNew": {
+    "one": "{chat} · {count} new",
+    "other": "{chat} · {count} new"
+  },
+  "chatNewMentioned": {
+    "one": "{chat} · {count} new, you are mentioned",
+    "other": "{chat} · {count} new, you are mentioned"
+  },
+  "allChats": "{messages} in {chats}",
+  "newMessages": {
+    "one": "{count} new message",
+    "other": "{count} new messages"
+  },
+  "inChats": {
+    "one": "{count} chat",
+    "other": "{count} chats"
+  },
+  "dismiss": "Dismiss",
+  "reply": "Reply…",
+  "markRead": "Mark read",
+  "tray.open": "Open Meshnet",
+  "tray.quit": "Quit",
+  "tray.people": "{count} from people",
+  "tray.chats": "{count} in chats",
+  "tray.both": "{people} from people, {chats} in chats",
+  "android.relayChannel": "Radio connection",
+  "android.relayChannelHint": "Shown while the app keeps the radio connected in the background.",
+  "android.relayTheRadio": "the radio",
+  "android.relayReconnecting": "Reconnecting to {name}",
+  "android.relayWaitingRadio": "Waiting for the radio",
+  "android.relaySharing": "Sharing {name}",
+  "android.relayComputer": "A computer is connected",
+  "android.relayWaitingComputer": "Waiting for a computer",
+  "android.relayConnected": "Connected to {name}",
+  "android.relayAppClosed": "Messages arrive with the app closed",
+  "android.channelDirect": "Direct messages",
+  "android.channelDirectHint": "A message from a person to you.",
+  "android.channelChats": "Channels and rooms",
+  "android.channelChatsHint": "Messages in channels and rooms, or only the ones that mention you.",
+  "android.channelNodes": "New nodes",
+  "android.channelNodesHint": "A node heard for the first time."
+}

@@ -14,7 +14,7 @@ import { push, type RadioPage } from "../lib/nav.js";
 import { nativePlatform, shell } from "../lib/platform.js";
 import { recentStops, relayAvailable, relayWanted, setRelayWanted, setSharing, useRelay, type AppStop } from "../lib/relay.js";
 import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
-import { SEND_TRIES_MAX, setSendTries, triesPhrase, useSendTries } from "../lib/sendTries.js";
+import { SEND_TRIES_MAX, setSendTries, triesSpanMs, useSendTries } from "../lib/sendTries.js";
 import { session, storage, useSelector, useSession } from "../lib/session.js";
 import { act, toast } from "../lib/toast.js";
 import { getActiveTheme, getPreference, listThemes, setPreference, subscribeTheme } from "../theme/store.js";
@@ -33,33 +33,43 @@ import { ScreenHead, type Chrome } from "./ScreenHead.js";
 import { UpdateButton } from "./Updates.js";
 import { useDesktopUpdateInfo } from "../lib/updates.js";
 import { PrivacyButton } from "./Privacy.js";
+import { getLanguagePreference, languageName, languages, setLanguagePreference, subscribeLanguage, systemLanguage, t, type Key } from "../i18n/index.js";
+import { errorText } from "../i18n/errors.js";
 
 type Self = NonNullable<SessionState["self"]>;
 
 /** Pages opened from another page rather than from the Radio list: the list keeps the parent picked. */
 export const RADIO_PARENTS: Partial<Record<RadioPage, RadioPage>> = { removed: "contacts", sound: "notifications" };
 
-export const RADIO_TITLES: Record<RadioPage, string> = {
-  name: "Name and position",
-  frequency: "Frequency and power",
-  battery: "Battery",
-  privacy: "Privacy and telemetry",
-  contacts: "Contacts",
-  removed: "Removed",
-  advanced: "Advanced",
-  notifications: "Notifications",
-  sound: "Sound",
-  messages: "Messages and routes",
-  appearance: "Appearance",
-  connection: "Connection",
-  air: "On the air",
-  log: "Log",
-  power: "Reboot, reset, erase",
-  about: "About",
+/** Each page's title as a key; `radioTitle` says it. */
+export const RADIO_TITLES: Record<RadioPage, Key> = {
+  name: "radio.titles.name",
+  frequency: "radio.titles.frequency",
+  battery: "radio.titles.battery",
+  privacy: "radio.titles.privacy",
+  contacts: "radio.titles.contacts",
+  removed: "radio.titles.removed",
+  advanced: "radio.titles.advanced",
+  notifications: "radio.titles.notifications",
+  sound: "radio.titles.sound",
+  messages: "radio.titles.messages",
+  appearance: "radio.titles.appearance",
+  connection: "radio.titles.connection",
+  air: "radio.titles.air",
+  log: "radio.titles.log",
+  power: "radio.titles.power",
+  about: "radio.titles.about",
 };
 
+/** A Radio page's title in the reader's language. */
+export function radioTitle(page: RadioPage): string {
+  return t(RADIO_TITLES[page]);
+}
+
 interface Preset {
+  /** A region's name, the same in every language; `label` where it has a word in it. */
   name: string;
+  label?: Key;
   frequencyKhz: number;
   bandwidthHz: number;
   spreadingFactor: number;
@@ -68,7 +78,7 @@ interface Preset {
 
 const PRESETS: Preset[] = [
   { name: "EU/UK", frequencyKhz: 869_525, bandwidthHz: 250_000, spreadingFactor: 11, codingRate: 5 },
-  { name: "EU narrow", frequencyKhz: 869_618, bandwidthHz: 62_500, spreadingFactor: 8, codingRate: 8 },
+  { name: "EU narrow", label: "radio.presets.euNarrow", frequencyKhz: 869_618, bandwidthHz: 62_500, spreadingFactor: 8, codingRate: 8 },
   { name: "US", frequencyKhz: 910_525, bandwidthHz: 62_500, spreadingFactor: 7, codingRate: 5 },
   { name: "ANZ", frequencyKhz: 915_800, bandwidthHz: 250_000, spreadingFactor: 10, codingRate: 5 },
   { name: "OMS", frequencyKhz: 869_161, bandwidthHz: 62_500, spreadingFactor: 7, codingRate: 7 },
@@ -79,14 +89,21 @@ const BANDWIDTHS = ["7.8", "10.4", "15.6", "20.8", "31.25", "41.7", "62.5", "125
 /** The preset the radio is on, or its frequency and spreading factor when it is on none. */
 export function presetName(self: Self): string {
   const p = PRESETS.find((q) => q.frequencyKhz === self.frequencyKhz && q.bandwidthHz === self.bandwidthHz && q.spreadingFactor === self.spreadingFactor && q.codingRate === self.codingRate);
-  return p ? p.name : `${(self.frequencyKhz / 1000).toFixed(3)} · SF${self.spreadingFactor}`;
+  return p ? presetLabel(p) : `${(self.frequencyKhz / 1000).toFixed(3)} · SF${self.spreadingFactor}`;
 }
 
-const TELEMETRY = [
-  { value: String(TelemMode.Deny), label: "Nobody" },
-  { value: String(TelemMode.AllowFlags), label: "Contacts marked for it" },
-  { value: String(TelemMode.AllowAll), label: "Anyone" },
+function presetLabel(p: Preset): string {
+  return p.label ? t(p.label) : p.name;
+}
+
+const TELEMETRY: { value: string; label: Key }[] = [
+  { value: String(TelemMode.Deny), label: "radio.telemetry.nobody" },
+  { value: String(TelemMode.AllowFlags), label: "radio.telemetry.flagged" },
+  { value: String(TelemMode.AllowAll), label: "radio.telemetry.anyone" },
 ];
+
+/** Who may read a kind of telemetry, as the select offers it. */
+const telemetryOptions = () => TELEMETRY.map((o) => ({ value: o.value, label: t(o.label) }));
 
 /** The rest of the radio's settings go in one command, so a change to one sends all of them as they are. */
 function saveOther(self: Self, patch: Partial<Pick<Self, "manualAddContacts" | "telemetryModeBase" | "telemetryModeLocation" | "telemetryModeEnvironment" | "advertLocPolicy" | "multiAcks">>) {
@@ -100,7 +117,7 @@ function saveOther(self: Self, patch: Partial<Pick<Self, "manualAddContacts" | "
         advertLocPolicy: patch.advertLocPolicy ?? self.advertLocPolicy,
         multiAcks: patch.multiAcks ?? self.multiAcks,
       }),
-    "Saved to the radio",
+    t("common.savedToRadio"),
   );
 }
 
@@ -117,7 +134,7 @@ function CommitField({ label, hint, value, onCommit, check, disabled, inputMode,
     const problem = check?.(text.trim()) ?? null;
     setError(problem);
     if (problem) return;
-    void act(() => onCommit(text.trim()), "Saved to the radio").then((ok) => ok || setText(value));
+    void act(() => onCommit(text.trim()), t("common.savedToRadio")).then((ok) => ok || setText(value));
   };
   return (
     <Block>
@@ -142,9 +159,10 @@ function CommitField({ label, hint, value, onCommit, check, disabled, inputMode,
   );
 }
 
-const number = (min: number, max: number, what: string) => (text: string) => {
+/** A number between two bounds; `range` says so in a whole sentence: "Latitude is between {min} and {max}." */
+const number = (min: number, max: number, range: Key) => (text: string) => {
   const n = Number(text);
-  return Number.isFinite(n) && text !== "" && n >= min && n <= max ? null : `${what} is between ${min} and ${max}.`;
+  return Number.isFinite(n) && text !== "" && n >= min && n <= max ? null : t(range, { min, max });
 };
 
 /** A position field also takes both halves at once, pasted from a map. */
@@ -160,7 +178,7 @@ export function RadioPageView({ page, chrome }: { page: RadioPage; chrome: Chrom
   return (
     <div className="screen">
       <ScreenHead chrome={chrome}>
-        <span className="screen-name">{RADIO_TITLES[page]}</span>
+        <span className="screen-name">{radioTitle(page)}</span>
       </ScreenHead>
       {page === "log" ? <LogView /> : page === "air" ? <AirView /> : <div className="screen-scroll">{<PageBody page={page} />}</div>}
     </div>
@@ -181,10 +199,10 @@ function PageBody({ page }: { page: RadioPage }) {
     case "privacy":
       return self ? (
         <>
-          <Group title="Who may read its telemetry">
-            <SelectRow label="Battery" value={String(self.telemetryModeBase)} options={TELEMETRY} disabled={!online} onChange={(v) => void saveOther(self, { telemetryModeBase: Number(v) })} />
-            <SelectRow label="Location" value={String(self.telemetryModeLocation)} options={TELEMETRY} disabled={!online} onChange={(v) => void saveOther(self, { telemetryModeLocation: Number(v) })} />
-            <SelectRow label="Sensors" value={String(self.telemetryModeEnvironment)} options={TELEMETRY} disabled={!online} onChange={(v) => void saveOther(self, { telemetryModeEnvironment: Number(v) })} />
+          <Group title={t("radio.privacy.who")}>
+            <SelectRow label={t("radio.privacy.battery")} value={String(self.telemetryModeBase)} options={telemetryOptions()} disabled={!online} onChange={(v) => void saveOther(self, { telemetryModeBase: Number(v) })} />
+            <SelectRow label={t("radio.privacy.location")} value={String(self.telemetryModeLocation)} options={telemetryOptions()} disabled={!online} onChange={(v) => void saveOther(self, { telemetryModeLocation: Number(v) })} />
+            <SelectRow label={t("radio.privacy.sensors")} value={String(self.telemetryModeEnvironment)} options={telemetryOptions()} disabled={!online} onChange={(v) => void saveOther(self, { telemetryModeEnvironment: Number(v) })} />
           </Group>
         </>
       ) : (
@@ -216,38 +234,38 @@ function PageBody({ page }: { page: RadioPage }) {
 }
 
 function Offline() {
-  return <div className="empty muted">Connect to the radio to see this.</div>;
+  return <div className="empty muted">{t("radio.offline")}</div>;
 }
 
 function NamePage({ self, online }: { self: Self; online: boolean }) {
   const locate = () => {
     navigator.geolocation?.getCurrentPosition(
-      (pos) => void act(() => session.setLocation(Number(pos.coords.latitude.toFixed(6)), Number(pos.coords.longitude.toFixed(6))), "Position taken from this device"),
-      (error) => toast(error.message || "This device would not say where it is", "error"),
+      (pos) => void act(() => session.setLocation(Number(pos.coords.latitude.toFixed(6)), Number(pos.coords.longitude.toFixed(6))), t("radio.name.positionTaken")),
+      (error) => toast(error.message || t("radio.name.noPosition"), "error"),
       { enableHighAccuracy: true, timeout: 10_000 },
     );
   };
   return (
     <>
       <Group>
-        <CommitField label="Name" hint="Other radios see it in adverts and before your channel messages." value={self.name} maxLength={31} disabled={!online} onCommit={(name) => session.setName(name)} check={(t) => (t ? null : "A name cannot be empty.")} />
+        <CommitField label={t("radio.name.name")} hint={t("radio.name.nameHint")} value={self.name} maxLength={31} disabled={!online} onCommit={(name) => session.setName(name)} check={(text) => (text ? null : t("radio.name.nameEmpty"))} />
       </Group>
-      <Group title="Position">
+      <Group title={t("radio.name.position")}>
         <CommitField
-          label="Latitude"
-          hint="Or paste both, as a map copies them: 55.75580, 37.61730."
+          label={t("radio.name.latitude")}
+          hint={t("radio.name.latitudeHint")}
           value={String(self.lat)}
           inputMode="decimal"
           disabled={!online}
-          check={orBoth(number(-90, 90, "Latitude"))}
-          onCommit={(t) => setPosition(t, (n) => session.setLocation(n, self.lon))}
+          check={orBoth(number(-90, 90, "radio.check.latitude"))}
+          onCommit={(text) => setPosition(text, (n) => session.setLocation(n, self.lon))}
         />
-        <CommitField label="Longitude" value={String(self.lon)} inputMode="decimal" disabled={!online} check={orBoth(number(-180, 180, "Longitude"))} onCommit={(t) => setPosition(t, (n) => session.setLocation(self.lat, n))} />
+        <CommitField label={t("radio.name.longitude")} value={String(self.lon)} inputMode="decimal" disabled={!online} check={orBoth(number(-180, 180, "radio.check.longitude"))} onCommit={(text) => setPosition(text, (n) => session.setLocation(self.lat, n))} />
         {/* Android location permissions are limited to legacy BLE scanning; positions remain editable manually. */}
-        {nativePlatform() !== "android" && "geolocation" in navigator ? <ActionRow label="Use this device's position" disabled={!online} onClick={locate} /> : null}
+        {nativePlatform() !== "android" && "geolocation" in navigator ? <ActionRow label={t("radio.name.useDevice")} disabled={!online} onClick={locate} /> : null}
         <SwitchRow
-          label="Share it in adverts"
-          hint="Others see this radio on their map."
+          label={t("radio.name.share")}
+          hint={t("radio.name.shareHint")}
           checked={self.advertLocPolicy !== AdvertLocPolicy.None}
           disabled={!online}
           onChange={(v) => void saveOther(self, { advertLocPolicy: v ? AdvertLocPolicy.Share : AdvertLocPolicy.None })}
@@ -279,7 +297,7 @@ function FrequencyPage({ self, online }: { self: Self; online: boolean }) {
     const ok = await act(async () => {
       await session.setRadioParams({ frequencyKhz: Math.round(freq * 1000), bandwidthHz: Math.round(Number(values.bandwidth) * 1000), spreadingFactor: Number(values.sf), codingRate: Number(values.cr) });
       if (tx !== self.txPower) await session.setTxPower(tx);
-    }, "Radio settings applied");
+    }, t("radio.frequency.applied"));
     setBusy(false);
     setAsking(false);
     if (!ok) setValues(initial());
@@ -287,7 +305,7 @@ function FrequencyPage({ self, online }: { self: Self; online: boolean }) {
 
   return (
     <>
-      <Group title="Preset">
+      <Group title={t("radio.frequency.preset")}>
         <Block>
           <div className="preset-chips">
             {PRESETS.map((p) => {
@@ -300,22 +318,22 @@ function FrequencyPage({ self, online }: { self: Self; online: boolean }) {
                   disabled={!online}
                   onClick={() => update({ frequency: (p.frequencyKhz / 1000).toFixed(3), bandwidth: (p.bandwidthHz / 1000).toString(), sf: String(p.spreadingFactor), cr: String(p.codingRate) })}
                 >
-                  {p.name} <span className="muted">{(p.frequencyKhz / 1000).toFixed(3)}</span>
+                  {presetLabel(p)} <span className="muted">{(p.frequencyKhz / 1000).toFixed(3)}</span>
                 </button>
               );
             })}
           </div>
         </Block>
       </Group>
-      <Group title="Values">
+      <Group title={t("radio.frequency.values")}>
         <Block>
           <div className="form-grid">
             <label className="field">
-              <span className="field-label">Frequency, MHz</span>
+              <span className="field-label">{t("radio.frequency.frequency")}</span>
               <input className="input mono" inputMode="decimal" value={values.frequency} disabled={!online} onChange={(e) => update({ frequency: e.target.value })} />
             </label>
             <label className="field">
-              <span className="field-label">Bandwidth, kHz</span>
+              <span className="field-label">{t("radio.frequency.bandwidth")}</span>
               <select className="input select" value={values.bandwidth} disabled={!online} onChange={(e) => update({ bandwidth: e.target.value })}>
                 {BANDWIDTHS.map((b) => (
                   <option key={b} value={b}>
@@ -325,7 +343,7 @@ function FrequencyPage({ self, online }: { self: Self; online: boolean }) {
               </select>
             </label>
             <label className="field">
-              <span className="field-label">Spreading factor</span>
+              <span className="field-label">{t("radio.frequency.spreadingFactor")}</span>
               <select className="input select" value={values.sf} disabled={!online} onChange={(e) => update({ sf: e.target.value })}>
                 {[5, 6, 7, 8, 9, 10, 11, 12].map((n) => (
                   <option key={n} value={n}>
@@ -335,7 +353,7 @@ function FrequencyPage({ self, online }: { self: Self; online: boolean }) {
               </select>
             </label>
             <label className="field">
-              <span className="field-label">Coding rate</span>
+              <span className="field-label">{t("radio.frequency.codingRate")}</span>
               <select className="input select" value={values.cr} disabled={!online} onChange={(e) => update({ cr: e.target.value })}>
                 {[5, 6, 7, 8].map((n) => (
                   <option key={n} value={n}>
@@ -345,26 +363,26 @@ function FrequencyPage({ self, online }: { self: Self; online: boolean }) {
               </select>
             </label>
             <label className="field">
-              <span className="field-label">Transmit power, dBm (up to {self.maxTxPower})</span>
+              <span className="field-label">{t("radio.frequency.txPower", { max: self.maxTxPower })}</span>
               <input className="input mono" type="number" min={-9} max={self.maxTxPower} value={values.tx} disabled={!online} onChange={(e) => update({ tx: e.target.value })} />
             </label>
           </div>
         </Block>
       </Group>
       <p className="group-note">
-        Now {frequency(self.frequencyKhz)}, {bandwidth(self.bandwidthHz)}, SF{self.spreadingFactor}, CR 4/{self.codingRate}, {self.txPower} dBm. Every radio on a mesh must match: a radio on other settings stops hearing this one.
+        {t("radio.frequency.now", { frequency: frequency(self.frequencyKhz), bandwidth: bandwidth(self.bandwidthHz), sf: self.spreadingFactor, cr: self.codingRate, tx: self.txPower })}
       </p>
       <div className="page-actions">
-        {dirty ? <Button onClick={() => setValues(initial())}>Revert</Button> : null}
+        {dirty ? <Button onClick={() => setValues(initial())}>{t("radio.frequency.revert")}</Button> : null}
         <Button variant="primary" size="lg" disabled={!dirty || !valid || !online} busy={busy} onClick={() => setAsking(true)}>
-          Apply
+          {t("radio.frequency.apply")}
         </Button>
       </div>
       <Confirm
         open={asking}
-        title="Change the radio's settings?"
-        body={<p>Radios still on the old settings stop hearing this one until they change too.</p>}
-        confirmLabel="Apply"
+        title={t("radio.frequency.confirmTitle")}
+        body={<p>{t("radio.frequency.confirmBody")}</p>}
+        confirmLabel={t("radio.frequency.apply")}
         onCancel={() => setAsking(false)}
         onConfirm={apply}
       />
@@ -390,16 +408,16 @@ function BatteryPage({ radioKey, online }: { radioKey: string; online: boolean }
         <Block className="battery-now">
           <span className="battery-now-text">
             <b>{reading ? `${batteryPercent(reading.mv, type)}%` : "—"}</b>
-            <small>{reading ? `${volts(reading.mv)} · read ${agoPhrase(reading.at)}` : "Not read yet"}</small>
+            <small>{reading ? t("radio.battery.read", { volts: volts(reading.mv), ago: agoPhrase(reading.at) }) : t("radio.battery.notRead")}</small>
           </span>
           <Button size="sm" disabled={!online} onClick={() => void session.refreshBattery()}>
-            Read again
+            {t("radio.battery.readAgain")}
           </Button>
         </Block>
       </Group>
-      <Group title="Type" note="The radio reports only volts. The type turns them into a percent, here in the app.">
-        {BATTERY_TYPES.map((t) => (
-          <ChoiceRow key={t.value} label={t.label} hint={t.hint} value={reading ? `${batteryPercent(reading.mv, t.value)}%` : undefined} checked={type === t.value} onSelect={() => setBatteryType(radioKey, t.value)} />
+      <Group title={t("radio.battery.type")} note={t("radio.battery.typeNote")}>
+        {BATTERY_TYPES.map((b) => (
+          <ChoiceRow key={b.value} label={b.label} hint={t(b.hint)} value={reading ? `${batteryPercent(reading.mv, b.value)}%` : undefined} checked={type === b.value} onSelect={() => setBatteryType(radioKey, b.value)} />
         ))}
       </Group>
     </>
@@ -415,56 +433,54 @@ function AdvancedPage({ self, online }: { self: Self; online: boolean }) {
   const own = state.telemetry["self"];
   return (
     <>
-      <Group title="Device">
+      <Group title={t("radio.advanced.device")}>
         {device ? (
           <>
-            <InfoRow label="Firmware">
-              {device.firmwareVersion} · {device.buildDate} · protocol {device.firmwareVerCode}
-            </InfoRow>
-            <InfoRow label="Board">{device.manufacturer}</InfoRow>
-            <InfoRow label="Capacity">
-              {device.maxContacts} contacts · {device.maxChannels} channels
+            <InfoRow label={t("radio.advanced.firmware")}>{t("radio.advanced.firmwareValue", { version: device.firmwareVersion, date: device.buildDate, protocol: device.firmwareVerCode })}</InfoRow>
+            <InfoRow label={t("radio.advanced.board")}>{device.manufacturer}</InfoRow>
+            <InfoRow label={t("radio.advanced.capacity")}>
+              {t("radio.advanced.capacityValue", { contacts: t("radio.advanced.contacts", { count: device.maxContacts }), channels: t("radio.advanced.channels", { count: device.maxChannels }) })}
             </InfoRow>
             {device.blePin ? (
-              <InfoRow label="Bluetooth PIN" mono>
+              <InfoRow label={t("radio.advanced.blePin")} mono>
                 {String(device.blePin).padStart(6, "0")}
               </InfoRow>
             ) : null}
           </>
         ) : null}
-        <LinkRow label="Public key" value={<span className="mono">{self.key.slice(0, 16)}…</span>} trailing={<CopyIcon size={14} className="line-chev" />} onClick={() => void navigator.clipboard?.writeText(self.key).then(() => toast("Copied"))} />
+        <LinkRow label={t("radio.advanced.publicKey")} value={<span className="mono">{self.key.slice(0, 16)}…</span>} trailing={<CopyIcon size={14} className="line-chev" />} onClick={() => void navigator.clipboard?.writeText(self.key).then(() => toast(t("common.copied")))} />
       </Group>
-      <Group title="Clock and sensors">
-        <ActionRow label="Set the radio's clock from this device" disabled={!online} onClick={() => void act(() => session.syncClock(), "Clock set")} />
-        <ActionRow label="Read the radio's own sensors" disabled={!online} onClick={() => void act(() => session.requestTelemetry())} />
+      <Group title={t("radio.advanced.clockAndSensors")}>
+        <ActionRow label={t("radio.advanced.setClock")} disabled={!online} onClick={() => void act(() => session.syncClock(), t("radio.advanced.clockSet"))} />
+        <ActionRow label={t("radio.advanced.readSensors")} disabled={!online} onClick={() => void act(() => session.requestTelemetry())} />
         {own ? <Readings readings={own.readings} /> : null}
       </Group>
-      <Group title="Tuning">
+      <Group title={t("radio.advanced.tuning")}>
         <SelectRow
-          label="Extra acknowledgements"
-          hint="Repeats of each ack, for lossy links."
+          label={t("radio.advanced.multiAcks")}
+          hint={t("radio.advanced.multiAcksHint")}
           value={String(self.multiAcks)}
           disabled={!online}
           options={[0, 1, 2, 3].map((n) => ({ value: String(n), label: String(n) }))}
           onChange={(v) => void saveOther(self, { multiAcks: Number(v) })}
         />
         <CommitField
-          label="Receive delay base"
-          hint="0 turns the receive back-off off."
+          label={t("radio.advanced.rxDelay")}
+          hint={t("radio.advanced.rxDelayHint")}
           value={String(state.tuning?.rxDelayBase ?? 0)}
           inputMode="decimal"
           disabled={!online || !state.tuning}
-          check={number(0, 20, "The delay base")}
-          onCommit={(t) => session.setTuning(Number(t), state.tuning?.airtimeFactor ?? 0)}
+          check={number(0, 20, "radio.check.delayBase")}
+          onCommit={(text) => session.setTuning(Number(text), state.tuning?.airtimeFactor ?? 0)}
         />
         <CommitField
-          label="Airtime factor"
-          hint="How much the radio holds back after sending."
+          label={t("radio.advanced.airtimeFactor")}
+          hint={t("radio.advanced.airtimeFactorHint")}
           value={String(state.tuning?.airtimeFactor ?? 0)}
           inputMode="decimal"
           disabled={!online || !state.tuning}
-          check={number(0, 9, "The airtime factor")}
-          onCommit={(t) => session.setTuning(state.tuning?.rxDelayBase ?? 0, Number(t))}
+          check={number(0, 9, "radio.check.airtimeFactor")}
+          onCommit={(text) => session.setTuning(state.tuning?.rxDelayBase ?? 0, Number(text))}
         />
       </Group>
     </>
@@ -476,7 +492,7 @@ function NotificationsPage() {
   // Turning something on asks the system first: a notice it refuses would never show.
   const allowed = async () => {
     if (await askPermission()) return true;
-    toast("Notifications are turned off for this app in the system's settings", "error");
+    toast(t("radio.notifications.blocked"), "error");
     return false;
   };
   const change = async (patch: Partial<NoticePrefs>, on: boolean) => {
@@ -491,52 +507,66 @@ function NotificationsPage() {
   // Who draws them, and what that means here: a computer's app draws all of them, a phone's and a tab's only while on screen.
   const shownHint = own
     ? desktop
-      ? `${app} draws them in a corner of the screen, also while its window is in the tray. ${windows ? "Windows" : "The system"} keeps none of them.`
+      ? t(windows ? "radio.notifications.ownDesktopWindows" : "radio.notifications.ownDesktop", { app })
       : phone
-        ? `While ${app} is open, a banner slides in at the top. With it closed, the phone shows them as before.`
-        : "While this tab is on screen, a banner slides in at the top. Hidden, the browser shows them as before."
+        ? t("radio.notifications.ownPhone", { app })
+        : t("radio.notifications.ownTab")
     : desktop
-      ? `${windows ? "Windows" : "The system"} draws them and keeps them in its notification centre.`
+      ? t(windows ? "radio.notifications.systemDesktopWindows" : "radio.notifications.systemDesktop")
       : phone
-        ? `The phone's own banners, also while ${app} is open.`
-        : "The browser's own notices.";
+        ? t("radio.notifications.systemPhone", { app })
+        : t("radio.notifications.systemTab");
   const signal = SIGNALS.find((s) => s.id === prefs.signal) ?? SIGNALS[0]!;
   return (
     <>
-      <Group title="Messages">
-        <SwitchRow label="Direct messages" hint="From a person to you." checked={prefs.direct} onChange={(v) => void change({ direct: v }, v)} />
+      <Group title={t("radio.notifications.messages")}>
+        <SwitchRow label={t("radio.notifications.direct")} hint={t("radio.notifications.directHint")} checked={prefs.direct} onChange={(v) => void change({ direct: v }, v)} />
         <SelectRow
-          label="Channels and rooms"
-          hint={{ all: "Every message in a chat you are not looking at.", mentions: `Only when someone writes @[${session.getState().self?.name ?? "your name"}].`, off: "They stay quiet." }[prefs.chats]}
+          label={t("radio.notifications.chats")}
+          hint={
+            {
+              all: t("radio.notifications.chatsAll"),
+              mentions: t("radio.notifications.chatsMentions", { name: session.getState().self?.name ?? t("radio.notifications.yourName") }),
+              off: t("radio.notifications.quiet"),
+            }[prefs.chats]
+          }
           value={prefs.chats}
-          options={[{ value: "all", label: "All" }, { value: "mentions", label: "Mentions" }, { value: "off", label: "Off" }]}
+          options={[
+            { value: "all", label: t("radio.notifications.all") },
+            { value: "mentions", label: t("radio.notifications.mentions") },
+            { value: "off", label: t("common.off") },
+          ]}
           onChange={(v) => void change({ chats: v }, v !== "off")}
         />
       </Group>
-      <Group title="Mesh">
+      <Group title={t("radio.notifications.mesh")}>
         <SelectRow
-          label="New nodes"
-          hint={{ people: "A person's radio heard for the first time. Not repeaters, rooms or sensors.", all: "Any node heard for the first time.", off: "They stay quiet." }[prefs.nodes]}
+          label={t("radio.notifications.nodes")}
+          hint={{ people: t("radio.notifications.nodesPeople"), all: t("radio.notifications.nodesAll"), off: t("radio.notifications.quiet") }[prefs.nodes]}
           value={prefs.nodes}
-          options={[{ value: "people", label: "People" }, { value: "all", label: "All" }, { value: "off", label: "Off" }]}
+          options={[
+            { value: "people", label: t("radio.notifications.people") },
+            { value: "all", label: t("radio.notifications.all") },
+            { value: "off", label: t("common.off") },
+          ]}
           onChange={(v) => void change({ nodes: v }, v !== "off")}
         />
       </Group>
-      <Group title="Pop-ups" note="A chat can have its own setting on its page. A tap on a notification opens the chat or the node.">
+      <Group title={t("radio.notifications.popups")} note={t("radio.notifications.popupsNote")}>
         <SelectRow
-          label="Shown by"
+          label={t("radio.notifications.shownBy")}
           hint={shownHint}
           value={prefs.shownBy}
-          options={[{ value: "system", label: windows ? "Windows" : "System" }, { value: "app", label: app }]}
+          options={[{ value: "system", label: windows ? "Windows" : t("radio.notifications.system") }, { value: "app", label: app }]}
           onChange={(v) => setNoticePrefs({ shownBy: v })}
         />
         {desktop && own ? <CornerRow value={prefs.corner} onChange={(corner) => setNoticePrefs({ corner })} /> : null}
-        <LinkRow label="Sound" value={signal.label} onClick={() => push({ kind: "radio", page: "sound" })} />
+        <LinkRow label={t("radio.titles.sound")} value={t(signal.label)} onClick={() => push({ kind: "radio", page: "sound" })} />
         {hasNoticeSettings() ? (
           <LinkRow
-            label={windows ? "Windows settings" : "System settings"}
-            hint={phone ? "Vibration, the lock screen, quiet hours." : "Banners, the lock screen, Do not disturb."}
-            onClick={() => void openNoticeSettings().catch(() => toast("Could not open the system's settings", "error"))}
+            label={windows ? t("radio.notifications.windowsSettings") : t("radio.notifications.systemSettings")}
+            hint={phone ? t("radio.notifications.settingsPhoneHint") : t("radio.notifications.settingsHint")}
+            onClick={() => void openNoticeSettings().catch(() => toast(t("radio.notifications.settingsFailed"), "error"))}
           />
         ) : null}
       </Group>
@@ -546,16 +576,22 @@ function NotificationsPage() {
 
 /** Where a computer's own cards stack: a small screen with its four corners to pick from. */
 function CornerRow({ value, onChange }: { value: Corner; onChange: (corner: Corner) => void }) {
-  const names: Record<Corner, string> = { tl: "Top left", tr: "Top right", bl: "Bottom left", br: "Bottom right" };
+  // Each corner by name for its button, and in a sentence for the line under the label.
+  const names: Record<Corner, [Key, Key]> = {
+    tl: ["radio.corner.tl", "radio.corner.tlOfScreen"],
+    tr: ["radio.corner.tr", "radio.corner.trOfScreen"],
+    bl: ["radio.corner.bl", "radio.corner.blOfScreen"],
+    br: ["radio.corner.br", "radio.corner.brOfScreen"],
+  };
   return (
     <div className="line">
       <span className="line-text">
-        <span>Corner</span>
-        <small>{names[value]} of the screen.</small>
+        <span>{t("radio.corner.label")}</span>
+        <small>{t(names[value][1])}</small>
       </span>
-      <span className="corner-pick" role="radiogroup" aria-label="Corner">
+      <span className="corner-pick" role="radiogroup" aria-label={t("radio.corner.label")}>
         {(Object.keys(names) as Corner[]).map((corner) => (
-          <button key={corner} type="button" role="radio" aria-checked={corner === value} aria-label={names[corner]} className={`corner-${corner}`} onClick={() => onChange(corner)} />
+          <button key={corner} type="button" role="radio" aria-checked={corner === value} aria-label={t(names[corner][0])} className={`corner-${corner}`} onClick={() => onChange(corner)} />
         ))}
       </span>
     </div>
@@ -567,19 +603,19 @@ function SoundPage() {
   const prefs = useNoticePrefs();
   const note =
     shell() === "tauri"
-      ? "Plays with every notice, the app's own and the system's, except in a full-screen app, a presentation or Do not disturb."
+      ? t("radio.sound.desktop")
       : shell() === "capacitor"
         ? nativePlatform() === "android"
-          ? "Plays with every notice. Silent mode and Do not disturb still keep it quiet. A new sound makes the notification channels anew, so a sound picked for one in Android's settings gives way to this one."
-          : "Plays with every notice. Silent mode and Do not disturb still keep it quiet."
-        : "Plays with the banner in this tab. The browser's own notices ring with the system's sound.";
+          ? t("radio.sound.android")
+          : t("radio.sound.ios")
+        : t("radio.sound.web");
   return (
     <Group note={note}>
       {SIGNALS.map((s) => (
         <ChoiceRow
           key={s.id}
-          label={s.label}
-          hint={s.hint}
+          label={t(s.label)}
+          hint={t(s.hint)}
           checked={prefs.signal === s.id}
           onSelect={() => {
             setNoticePrefs({ signal: s.id });
@@ -591,6 +627,12 @@ function SoundPage() {
   );
 }
 
+/** What `n` tries come to, and what follows them, in one sentence. */
+function triesHint(n: number): string {
+  const span = triesSpanMs(n);
+  return span < 60_000 ? t("radio.messages.triesMinute", { count: n }) : t("radio.messages.triesOver", { count: n, minutes: Math.round(span / 60_000) });
+}
+
 function MessagesPage() {
   const state = useSession();
   const lookalikes = useLookalikePrefs();
@@ -600,35 +642,35 @@ function MessagesPage() {
     <>
       <Group>
         <SwitchRow
-          label="Open at first unread"
-          hint="A chat with new messages opens where they begin, not at the latest one."
+          label={t("radio.messages.openAtUnread")}
+          hint={t("radio.messages.openAtUnreadHint")}
           checked={openAtUnread}
           onChange={setOpenAtUnread}
         />
       </Group>
       <Group>
         <SwitchRow
-          label="Swap lookalike letters"
-          hint="а е о р с х and А В Е К М Н О Р С Т Х go out as their Latin twins: they look the same and take one byte instead of two, so about a fifth more text fits."
+          label={t("radio.messages.lookalikes")}
+          hint={t("radio.messages.lookalikesHint")}
           checked={lookalikes.on}
           onChange={(v) => setLookalikePrefs({ on: v })}
         />
-        {lookalikes.on ? <SwitchRow label="Also у and У" hint="The same as y and Y in most fonts, not in every one." checked={lookalikes.near} onChange={(v) => setLookalikePrefs({ near: v })} /> : null}
+        {lookalikes.on ? <SwitchRow label={t("radio.messages.near")} hint={t("radio.messages.nearHint")} checked={lookalikes.near} onChange={(v) => setLookalikePrefs({ near: v })} /> : null}
       </Group>
-      <Group note="Chats and rooms. A message the other side has not acknowledged goes again on its own: the first try by the route, the rest flood. Channels keep their own Keep trying.">
+      <Group note={t("radio.messages.triesNote")}>
         <StepperRow
-          label="Send tries"
-          hint={sendTries === 1 ? "Sent once. With no acknowledgement, sending again is up to you." : `${triesPhrase(sendTries)}, then the message turns red.`}
+          label={t("radio.messages.sendTries")}
+          hint={sendTries === 1 ? t("radio.messages.sentOnce") : triesHint(sendTries)}
           value={sendTries}
           min={1}
           max={SEND_TRIES_MAX}
-          format={(n) => (n === 1 ? "Once" : String(n))}
+          format={(n) => (n === 1 ? t("radio.messages.once") : String(n))}
           onChange={setSendTries}
         />
       </Group>
-      <Group note={state.self ? "Chats and rooms. A route learned this long ago is dropped, and the next message floods to find a fresh one. A contact can set its own on its Route page." : "Kept per radio: connect to change it."}>
+      <Group note={state.self ? t("radio.messages.routesNote") : t("radio.messages.routesOffline")}>
         <SelectRow
-          label="Forget learned routes after"
+          label={t("radio.messages.forgetRoutes")}
           value={limitValue(state.routing.resetAfterMin)}
           disabled={!state.self}
           options={ROUTE_LIMITS.map((m) => ({ value: limitValue(m), label: limitLabel(m) }))}
@@ -636,6 +678,20 @@ function MessagesPage() {
         />
       </Group>
     </>
+  );
+}
+
+/** Each language in its own words, so a reader lost in a foreign one still finds theirs. */
+function LanguageGroup() {
+  const preference = useSyncExternalStore(subscribeLanguage, getLanguagePreference);
+  const options = [
+    { value: "system", label: t("common.systemLanguage", { language: languageName(systemLanguage()) }) },
+    ...languages().map((code) => ({ value: code, label: languageName(code) })),
+  ];
+  return (
+    <Group>
+      <SelectRow label={t("common.language")} value={preference} options={options} onChange={(v) => void setLanguagePreference(v)} />
+    </Group>
   );
 }
 
@@ -651,31 +707,32 @@ function AppearancePage() {
   const percent = (s: number) => `${Math.round(s * 100)}%`;
   return (
     <>
-      <Group title="Theme">
+      <LanguageGroup />
+      <Group title={t("radio.appearance.theme")}>
         {/* Turned off, the theme drawn now stays, so the screen does not change under the finger. */}
-        <SwitchRow label="Follow the system" hint="One Light or One Dark, as the system is set" checked={following} onChange={(v) => setPreference(v ? "system" : active.id)} />
+        <SwitchRow label={t("common.followSystem")} hint={t("radio.appearance.themeHint")} checked={following} onChange={(v) => setPreference(v ? "system" : active.id)} />
         <Block className={["theme-tiles", following ? "following" : ""].join(" ")}>
-          {listThemes().map((t) => (
+          {listThemes().map((theme) => (
             <button
-              key={t.id}
+              key={theme.id}
               type="button"
               className="theme-tile"
-              aria-pressed={!following && active.id === t.id}
-              onClick={() => setPreference(t.id)}
-              style={{ "--swatch-bg": t.tokens.bg, "--swatch-in": t.tokens.bubbleIn, "--swatch-out": t.tokens.bubbleOut } as React.CSSProperties}
+              aria-pressed={!following && active.id === theme.id}
+              onClick={() => setPreference(theme.id)}
+              style={{ "--swatch-bg": theme.tokens.bg, "--swatch-in": theme.tokens.bubbleIn, "--swatch-out": theme.tokens.bubbleOut } as React.CSSProperties}
             >
               <span className="theme-swatch" aria-hidden="true">
                 <i />
                 <i />
               </span>
-              {t.name}
+              {t(theme.name)}
             </button>
           ))}
         </Block>
       </Group>
-      <Group title="Text size">
+      <Group title={t("radio.appearance.textSize")}>
         {hasSystemTextSize() ? (
-          <SwitchRow label="Follow the system" hint={`The phone's text size, ${percent(system)}`} checked={textSize === "system"} onChange={(v) => setTextSizePreference(v ? "system" : String(TEXT_STEPS[step] ?? 1))} />
+          <SwitchRow label={t("common.followSystem")} hint={t("radio.appearance.phoneTextSize", { percent: percent(system) })} checked={textSize === "system"} onChange={(v) => setTextSizePreference(v ? "system" : String(TEXT_STEPS[step] ?? 1))} />
         ) : null}
         <Block className="text-size">
           <span className="text-size-a" aria-hidden="true">
@@ -687,7 +744,7 @@ function AppearancePage() {
             max={TEXT_STEPS.length - 1}
             step={1}
             value={step}
-            aria-label="Text size"
+            aria-label={t("radio.appearance.textSize")}
             aria-valuetext={percent(scale)}
             onChange={(e) => setTextSizePreference(String(TEXT_STEPS[Number(e.target.value)] ?? 1))}
           />
@@ -705,7 +762,7 @@ function AppearancePage() {
             <div className="msg-col">
               <div className="bubble">
                 <SenderName name="Ridge" />
-                <span className="msg-text">Anyone hearing me from the valley?</span>
+                <span className="msg-text">{t("radio.appearance.sampleIn")}</span>
                 <span className="msg-meta">
                   <span>18:04</span>
                 </span>
@@ -715,7 +772,7 @@ function AppearancePage() {
           <div className="msg out">
             <div className="msg-col">
               <div className="bubble">
-                <span className="msg-text">Loud and clear, two hops.</span>
+                <span className="msg-text">{t("radio.appearance.sampleOut")}</span>
                 <span className="msg-meta">
                   <span>18:05</span>
                 </span>
@@ -735,15 +792,15 @@ function AboutPage() {
     recentStops().then(setStops, () => setStops([]));
   }, []);
   return <>
-    <Group note="A companion for MeshCore radios. Messages stay on this device; the radio keeps only what has not been read yet.">
+    <Group note={t("radio.about.note")}>
       <InfoRow label={shell() === "capacitor" ? "Ommesh" : "Meshnet"} icon={<img src="./icon.svg" alt="" width={24} height={24} />}>{info.version}</InfoRow>
-      <InfoRow label="Running in">{shell() === "tauri" ? "the desktop shell" : shell() === "capacitor" ? "the phone shell" : "a browser"}</InfoRow>
+      <InfoRow label={t("radio.about.runningIn")}>{shell() === "tauri" ? t("radio.about.desktop") : shell() === "capacitor" ? t("radio.about.phone") : t("radio.about.browser")}</InfoRow>
     </Group>
     {stops.length > 0 ? (
-      <Group title="Stopped lately" note="When and why Android stopped the app, or the page inside it, as Android says. Worth a screenshot when the app keeps closing.">
+      <Group title={t("radio.about.stopped")} note={t("radio.about.stoppedNote")}>
         {stops.map((stop) => (
           <InfoRow key={`${stop.at}-${stop.what}`} label={`${dayLabel(stop.at / 1000)} ${timeOfDay(stop.at / 1000)}`} hint={stop.detail ?? undefined}>
-            {stop.what === "page" ? `page ${stop.reason}` : stop.reason}
+            {stop.what === "page" ? t("radio.about.pageStopped", { reason: stop.reason }) : stop.reason}
           </InfoRow>
         ))}
       </Group>
@@ -768,9 +825,9 @@ function ConnectionPage() {
   return (
     <>
       <Group>
-        <InfoRow label="Connected">{state.status === "ready" ? (state.link?.label ?? "yes") : link.phase === "connecting" ? "reconnecting…" : "no"}</InfoRow>
+        <InfoRow label={t("radio.connection.connected")}>{state.status === "ready" ? (state.link?.label ?? t("radio.connection.yes")) : link.phase === "connecting" ? t("radio.connection.reconnecting") : t("radio.connection.no")}</InfoRow>
         <SwitchRow
-          label="Reconnect at launch"
+          label={t("radio.connection.reconnectAtLaunch")}
           checked={auto}
           onChange={(v) => {
             setAuto(v);
@@ -780,24 +837,24 @@ function ConnectionPage() {
         {atLogin !== null ? (
           <SwitchRow
             label={autostartLabel()}
-            hint={auto ? "Opens minimised and connects to the radio." : "Opens minimised."}
+            hint={auto ? t("radio.connection.minimisedConnects") : t("radio.connection.minimised")}
             checked={atLogin}
             onChange={async (v) => {
               try {
                 await setAutostart(v);
                 setAtLogin(v);
               } catch (err) {
-                toast(`Could not change it: ${(err as Error).message ?? err}`, "error");
+                toast(t("radio.connection.changeFailed", { error: errorText(err) }), "error");
               }
             }}
           />
         ) : null}
       </Group>
       {relayAvailable() && state.link?.kind === "ble" ? (
-        <Group note="A computer nearby connects to this phone over Bluetooth, as if it were the radio, and uses the radio through it, with the phone locked too. Both can use the radio at once, and each gets every message.">
+        <Group note={t("radio.connection.shareNote")}>
           <SwitchRow
-            label="Share with a computer"
-            hint={!lend ? undefined : relay.computer ? "A computer is connected" : "Waiting for a computer"}
+            label={t("radio.connection.share")}
+            hint={!lend ? undefined : relay.computer ? t("radio.connection.computerConnected") : t("radio.connection.waiting")}
             checked={lend}
             disabled={state.status !== "ready"}
             onChange={async (v) => {
@@ -807,14 +864,14 @@ function ConnectionPage() {
                 // The page already goes through the phone's link: only the computer's side changes.
                 await setSharing(v);
               } catch (err) {
-                toast(`Could not change it: ${(err as Error).message ?? err}`, "error");
+                toast(t("radio.connection.changeFailed", { error: errorText(err) }), "error");
               }
             }}
           />
         </Group>
       ) : null}
-      <Group note="Both lead to the connect screen, where another radio can be picked.">
-        <ActionRow label="Disconnect" onClick={() => void disconnect()} />
+      <Group note={t("radio.connection.disconnectNote")}>
+        <ActionRow label={t("radio.connection.disconnect")} onClick={() => void disconnect()} />
       </Group>
     </>
   );
@@ -827,17 +884,17 @@ function PowerPage() {
   return (
     <>
       <Group>
-        <ActionRow label="Reboot the radio" disabled={!online} onClick={() => setAsk("reboot")} />
+        <ActionRow label={t("radio.power.reboot")} disabled={!online} onClick={() => setAsk("reboot")} />
       </Group>
-      <Group note="A factory reset erases every contact, channel and setting on the radio, and its identity with them. Deleting history leaves the radio untouched.">
-        <ActionRow label="Factory reset the radio" danger disabled={!online} onClick={() => setAsk("reset")} />
-        <ActionRow label="Delete the history on this device" danger disabled={!state.self} onClick={() => setAsk("forget")} />
+      <Group note={t("radio.power.note")}>
+        <ActionRow label={t("radio.power.reset")} danger disabled={!online} onClick={() => setAsk("reset")} />
+        <ActionRow label={t("radio.power.forget")} danger disabled={!state.self} onClick={() => setAsk("forget")} />
       </Group>
       <Confirm
         open={ask === "reboot"}
-        title="Reboot the radio?"
-        body={<p>The link drops and comes back when the radio is up.</p>}
-        confirmLabel="Reboot"
+        title={t("radio.power.rebootTitle")}
+        body={<p>{t("radio.power.rebootBody")}</p>}
+        confirmLabel={t("radio.power.rebootConfirm")}
         onCancel={() => setAsk(null)}
         onConfirm={async () => {
           await act(() => session.reboot());
@@ -846,9 +903,9 @@ function PowerPage() {
       />
       <Confirm
         open={ask === "reset"}
-        title="Factory reset the radio?"
-        body={<p>Every contact, channel and setting on the radio is erased, and its identity with them: it becomes a new node with a new key. This cannot be undone.</p>}
-        confirmLabel="Erase everything"
+        title={t("radio.power.resetTitle")}
+        body={<p>{t("radio.power.resetBody")}</p>}
+        confirmLabel={t("radio.power.resetConfirm")}
         danger
         onCancel={() => setAsk(null)}
         onConfirm={async () => {
@@ -858,9 +915,9 @@ function PowerPage() {
       />
       <Confirm
         open={ask === "forget"}
-        title="Delete the history?"
-        body={<p>Every message this device has kept for this radio is deleted. The radio itself is untouched.</p>}
-        confirmLabel="Delete"
+        title={t("radio.power.forgetTitle")}
+        body={<p>{t("radio.power.forgetBody")}</p>}
+        confirmLabel={t("common.delete")}
         danger
         onCancel={() => setAsk(null)}
         onConfirm={async () => {
@@ -868,7 +925,7 @@ function PowerPage() {
           if (self) await storage.forget(self.key);
           for (const conv of new Set(session.getState().messages.map((m) => m.conversation))) session.deleteConversation(conv);
           setAsk(null);
-          toast("History deleted");
+          toast(t("radio.power.forgotten"));
         }}
       />
     </>

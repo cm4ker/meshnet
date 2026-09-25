@@ -1,4 +1,7 @@
 /** The update lifecycle, independent of the native shell so failures can be tested. */
+import { errorText } from "../i18n/errors.js";
+import { t } from "../i18n/index.js";
+
 export type UpdateChannel = "stable" | "dev";
 export type UpdatePhase = "idle" | "checking" | "current" | "available" | "downloading" | "ready" | "installing";
 export type Progress = { event: "Started"; data: { contentLength?: number } } | { event: "Progress"; data: { chunkLength: number } } | { event: "Finished" };
@@ -57,7 +60,7 @@ export class UpdateController {
       this.set({ phase: next ? "available" : "current", version: next?.version ?? null, notes: next?.body ?? "", checkedAt: Date.now(), downloaded: 0, total: null });
       await previous?.close().catch(() => undefined);
     } catch (error) {
-      this.set({ phase: previous ? "available" : "idle", error: `Could not check for updates. ${message(error)}` });
+      this.set({ phase: previous ? "available" : "idle", error: t("app.update.error.check", { reason: errorText(error) }) });
     }
   }
   async download(): Promise<void> {
@@ -71,7 +74,7 @@ export class UpdateController {
       }, { timeout: 15 * 60_000 });
       this.set({ phase: "ready" });
     } catch (error) {
-      this.set({ phase: "available", error: `Download failed. ${message(error)}` });
+      this.set({ phase: "available", error: t("app.update.error.download", { reason: errorText(error) }) });
     }
   }
   async install(prepare: () => Promise<() => Promise<void>>): Promise<void> {
@@ -83,11 +86,7 @@ export class UpdateController {
       await this.handle.install({ restartAfterInstall: true });
     } catch (error) {
       await recover?.().catch(() => undefined);
-      this.set({ phase: "ready", error: `Could not install the update. ${message(error)}` });
+      this.set({ phase: "ready", error: t("app.update.error.install", { reason: errorText(error) }) });
     }
   }
-}
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

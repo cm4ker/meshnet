@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { AirIcon, CheckIcon, ChevronRightIcon, MinusIcon, PlusIcon } from "../components/Icons.js";
+import { t } from "../i18n/index.js";
 
 /**
  * Grouped rows, the way a phone's settings are laid out: a group is a
@@ -85,17 +86,17 @@ export function SelectRow<T extends string>({ label, hint, icon, value, options,
 
 /** A count, a step at a time: minus and plus at the right edge, the value between them. */
 export function StepperRow({ label, hint, icon, value, min, max, onChange, format, disabled }: RowBase & { value: number; min: number; max: number; onChange: (next: number) => void; format?: ((n: number) => string) | undefined; disabled?: boolean | undefined }) {
-  const name = typeof label === "string" ? label.toLowerCase() : "the value";
+  const name = typeof label === "string" ? label.toLowerCase() : t("common.theValue");
   return (
     <div className={["line", disabled ? "off" : ""].join(" ")}>
       {icon ? <span className="line-icon">{icon}</span> : null}
       <Text label={label} hint={hint} />
       <span className="step-control">
-        <button type="button" aria-label={`Fewer ${name}`} disabled={disabled || value <= min} onClick={() => onChange(value - 1)}>
+        <button type="button" aria-label={t("common.fewer", { name })} disabled={disabled || value <= min} onClick={() => onChange(value - 1)}>
           <MinusIcon size={14} />
         </button>
         <output aria-live="polite">{format ? format(value) : value}</output>
-        <button type="button" aria-label={`More ${name}`} disabled={disabled || value >= max} onClick={() => onChange(value + 1)}>
+        <button type="button" aria-label={t("common.moreOf", { name })} disabled={disabled || value >= max} onClick={() => onChange(value + 1)}>
           <PlusIcon size={14} />
         </button>
       </span>
@@ -133,7 +134,7 @@ export function Block({ children, className }: { children: ReactNode; className?
 
 export function AirMark() {
   return (
-    <span className="air-mark" title="Transmits on the air">
+    <span className="air-mark" title={t("common.transmits")}>
       <AirIcon size={14} />
     </span>
   );

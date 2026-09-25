@@ -1,3 +1,4 @@
+import { locale, t } from "../i18n/index.js";
 import { bubbleVariable, cssVariable, defaultDark, defaultLight, findTheme, themes, type BubbleToken, type Theme, type ThemeToken } from "./themes.js";
 
 const BUBBLE_TOKENS: BubbleToken[] = ["text", "textMuted", "textFaint", "accent", "danger"];
@@ -34,8 +35,10 @@ export function getActiveTheme(): Theme {
   return findTheme(preference) ?? defaultDark;
 }
 
+/** Every theme, by its name in the reader's language: the picker's order. */
 export function listThemes(): Theme[] {
-  return themes;
+  const names = new Map(themes.map((theme) => [theme, t(theme.name)]));
+  return [...themes].sort((a, b) => names.get(a)!.localeCompare(names.get(b)!, locale()));
 }
 
 export function subscribeTheme(listener: () => void): () => void {

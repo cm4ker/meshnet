@@ -16,6 +16,7 @@ import * as L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AdvType, type ContactRecord } from "@meshnet/meshcore";
+import { t } from "../i18n/index.js";
 import { darkenPixels } from "../lib/darkTile.js";
 import { hasPosition } from "../lib/geo.js";
 import { EMPTY_OVERLAY, type MapHandle, type MapOverlay } from "../lib/mapOverlay.js";
@@ -23,7 +24,7 @@ import type { LosEnd } from "../lib/meshTool.js";
 import { NodeCanvas } from "../lib/nodeCanvas.js";
 import type { MenuAt } from "../lib/press.js";
 import { useSession } from "../lib/session.js";
-import { TILE_ATTRIBUTION, TILE_URL, tileBlob } from "../lib/tiles.js";
+import { TILE_URL, tileAttribution, tileBlob } from "../lib/tiles.js";
 import { IconButton } from "../ui/Button.js";
 import { FitIcon, GroupIcon, LocateIcon, MinusIcon, PlusIcon } from "./Icons.js";
 
@@ -158,7 +159,7 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
   const selfLat = state.self && hasPosition(state.self.lat, state.self.lon) ? state.self.lat : null;
   const selfLon = selfLat !== null ? state.self!.lon : null;
   const self = useMemo(() => (selfLat !== null && selfLon !== null ? { lat: selfLat, lon: selfLon } : null), [selfLat, selfLon]);
-  const selfName = state.self?.name ?? "This radio";
+  const selfName = state.self?.name ?? t("mesh.map.thisRadio");
   // Read when the map moves rather than when it renders: the sheet over it moves often and should not redraw it.
   const cover = useRef({ top: coverTop, bottom: coverBottom });
   cover.current = { top: coverTop, bottom: coverBottom };
@@ -186,7 +187,7 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
     // A long press picks a spot; iOS needs Leaflet's own timer for it, Android and a mouse fire it themselves.
     const m = L.map(box.current, { zoomControl: false, attributionControl: false, worldCopyJump: true, minZoom: 2, maxZoom: 19, tapHold: true });
     L.control.attribution({ prefix: false, position: "topleft" }).addTo(m);
-    const tiles = new CachedTileLayer(TILE_URL, { maxZoom: 19, attribution: TILE_ATTRIBUTION }).addTo(m);
+    const tiles = new CachedTileLayer(TILE_URL, { maxZoom: 19, attribution: tileAttribution() }).addTo(m);
     routeLayer.current = L.layerGroup().addTo(m);
     // Over the lines, under the markers left: this radio, a route's handles, the labels of legs.
     m.createPane("nodes").style.zIndex = "450";
@@ -478,16 +479,16 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
       <div className="map-controls">
         {zoomButtons ? (
           <>
-            <IconButton label="Zoom in" onClick={() => map.current?.zoomIn()}>
+            <IconButton label={t("mesh.map.zoomIn")} onClick={() => map.current?.zoomIn()}>
               <PlusIcon size={18} />
             </IconButton>
-            <IconButton label="Zoom out" onClick={() => map.current?.zoomOut()}>
+            <IconButton label={t("mesh.map.zoomOut")} onClick={() => map.current?.zoomOut()}>
               <MinusIcon size={18} />
             </IconButton>
           </>
         ) : null}
         <IconButton
-          label={grouping ? "Show every node apart" : "Group close nodes"}
+          label={grouping ? t("mesh.map.ungroup") : t("mesh.map.group")}
           className={grouping ? "on" : ""}
           aria-pressed={grouping}
           onClick={() => {
@@ -502,11 +503,11 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
         >
           <GroupIcon size={18} />
         </IconButton>
-        <IconButton label="Show all" onClick={fitAll}>
+        <IconButton label={t("mesh.map.showAll")} onClick={fitAll}>
           <FitIcon size={18} />
         </IconButton>
         {self ? (
-          <IconButton label="This radio" onClick={() => map.current && centerOn([self.lat, self.lon], Math.max(map.current.getZoom(), 14))}>
+          <IconButton label={t("mesh.map.thisRadio")} onClick={() => map.current && centerOn([self.lat, self.lon], Math.max(map.current.getZoom(), 14))}>
             <LocateIcon size={18} />
           </IconButton>
         ) : null}

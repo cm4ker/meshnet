@@ -4,6 +4,7 @@
  */
 
 import { useSyncExternalStore } from "react";
+import { errorText } from "../i18n/errors.js";
 
 export interface Toast {
   id: number;
@@ -58,7 +59,7 @@ export async function act(action: () => Promise<unknown>, done?: string): Promis
     if (done) toast(done);
     return true;
   } catch (error) {
-    toast((error as Error).message, "error");
+    toast(errorText(error), "error");
     return false;
   }
 }

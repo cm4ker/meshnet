@@ -25,6 +25,7 @@
 
 import { AdvType, type MessageRecord, type SessionState } from "@meshnet/meshcore";
 import { titleOf } from "./conversations.js";
+import { t } from "../i18n/index.js";
 import { isDirect, mentionsMe } from "./noticePrefs.js";
 
 /** What a notice is about, which on Android is its channel: the reader sets each one's sound in the system. */
@@ -88,8 +89,11 @@ function unreadIn(state: SessionState, conversation: string): MessageRecord[] {
 
 /** One message on its own: who said it, and where. */
 function heading(state: SessionState, message: MessageRecord, title: string): string {
-  if (mentionsMe(state, message)) return `${message.sender ?? title} mentioned you${message.sender && message.sender !== title ? ` in ${title}` : ""}`;
-  if (message.sender && message.conversation.startsWith("ch:")) return `${message.sender} in ${title}`;
+  if (mentionsMe(state, message)) {
+    const who = message.sender ?? title;
+    return message.sender && message.sender !== title ? t("notices.mentionedIn", { who, chat: title }) : t("notices.mentioned", { who });
+  }
+  if (message.sender && message.conversation.startsWith("ch:")) return t("notices.inChat", { sender: message.sender, chat: title });
   return title;
 }
 
@@ -124,7 +128,7 @@ export function conversationNotice(state: SessionState, conversation: string, ke
   if (count === 1) return { title: heading(state, last, title), body: last.text, tag, kind, face: direct ? face : { name: speaker(last) }, thread };
   const mentioned = unread.some((m) => mentionsMe(state, m));
   return {
-    title: `${title} · ${count} new${mentioned ? ", you are mentioned" : ""}`,
+    title: t(mentioned ? "notices.chatNewMentioned" : "notices.chatNew", { chat: title, count }),
     body: unread.slice(-LINES).map((m) => line(m, title)).join("\n"),
     tag,
     kind,
@@ -152,7 +156,7 @@ export function allChatsNotice(state: SessionState, keep: Keep = everything): No
   const named = chats.slice(0, NAMED).map(([c, n]) => `${titleOf(state, c)} ${n}`);
   if (chats.length > NAMED) named.push("…");
   return {
-    title: `${total} new ${total === 1 ? "message" : "messages"} in ${chats.length} ${chats.length === 1 ? "chat" : "chats"}`,
+    title: t("notices.allChats", { messages: t("notices.newMessages", { count: total }), chats: t("notices.inChats", { count: chats.length }) }),
     body: named.join(", "),
     tag: ALL_CHATS,
     kind: "chats",

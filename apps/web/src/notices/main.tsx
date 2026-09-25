@@ -20,6 +20,8 @@ import { NoticeCard, NoticeReply } from "../components/NoticeCard.js";
 import type { Card } from "../lib/notify.js";
 import { initTheme, setPreference } from "../theme/store.js";
 import { initTextSize, setTextSizePreference, type TextSizePreference } from "../theme/textSize.js";
+import { initLanguage, useLanguage } from "../i18n/index.js";
+import "../i18n/languages.js";
 import "../styles.css";
 
 /** How long a card stays, ms. */
@@ -34,6 +36,8 @@ interface Shown extends Card {
 
 initTheme();
 initTextSize();
+// The main window's language, and its changes (initLanguage follows the shared storage).
+await initLanguage();
 // The reader changes the theme or the text size in the main window: this one follows.
 window.addEventListener("storage", (e) => {
   if (e.key === "meshnet.theme") setPreference(e.newValue ?? "system");
@@ -41,6 +45,8 @@ window.addEventListener("storage", (e) => {
 });
 
 function Notices() {
+  // Drawn again in a new language.
+  useLanguage();
   const [cards, setCards] = useState<Shown[]>([]);
   const [corner, setCorner] = useState("br");
   const [hovered, setHovered] = useState(false);

@@ -7,6 +7,8 @@
  * downloads, so what is cached is what was looked at.
  */
 
+import { t } from "../i18n/index.js";
+
 const DB_NAME = "meshnet-tiles";
 const STORE = "tiles";
 /** About 80 MB at the ~20 KB an OSM tile weighs. */
@@ -14,7 +16,10 @@ const LIMIT = 4000;
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 export const TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-export const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
+/** The credit OSM asks for, as HTML, in the language of the moment. */
+export function tileAttribution(): string {
+  return t("mesh.map.attribution", { osm: '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' });
+}
 
 interface StoredTile {
   key: string;

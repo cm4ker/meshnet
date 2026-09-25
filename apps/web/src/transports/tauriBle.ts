@@ -6,6 +6,7 @@
 
 import { BaseTransport, BLE } from "@meshnet/meshcore";
 import type { Connector, FoundDevice } from "./types.js";
+import { t } from "../i18n/index.js";
 
 type Blec = typeof import("@mnlphlp/plugin-blec");
 
@@ -65,7 +66,7 @@ class TauriBleTransport extends BaseTransport {
 function explainBleError(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
   if (/auth|encrypt|pair|bond|access.?denied|insufficient/i.test(text)) {
-    return `${text}. The radio wants a paired link: pair it in Windows Settings → Bluetooth with its PIN (123456 unless changed), or remove and pair again if it was re-flashed.`;
+    return t("connect.error.bleWantsPairing", { error: text });
   }
   return text;
 }
@@ -91,13 +92,17 @@ const SCAN_MS = 10_000;
 export const tauriBleConnector: Connector = {
   id: "tauri-ble",
   kind: "ble",
-  title: "Bluetooth",
-  description: "Radios in range, found by the shell.",
+  get title() {
+    return t("connect.transport.bluetooth");
+  },
+  get description() {
+    return t("connect.describe.shellBle");
+  },
   mode: "scan",
 
   async scan(onFound, signal) {
     const api = await blec();
-    if (!(await api.checkPermissions(true))) throw new Error("Bluetooth permission was not granted");
+    if (!(await api.checkPermissions(true))) throw new Error(t("connect.error.blePermission"));
     const seen = new Map<string, FoundDevice>();
     const stop = () => api.stopScan().catch(() => undefined);
     signal.addEventListener("abort", stop, { once: true });
@@ -112,7 +117,7 @@ export const tauriBleConnector: Connector = {
   },
 
   async connect(device) {
-    if (!device) throw new Error("pick a radio from the list");
+    if (!device) throw new Error(t("connect.error.pickRadio"));
     const api = await blec();
     // The plugin can only connect to a peripheral its adapter has seen; a
     // short scan is what makes a remembered address reachable again.

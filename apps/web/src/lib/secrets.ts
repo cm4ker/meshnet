@@ -13,6 +13,7 @@ import { useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { shell } from "./platform.js";
 import { readSetting, writeSetting } from "./storage.js";
+import { t } from "../i18n/index.js";
 
 interface Backend {
   get(id: string): Promise<string | null>;
@@ -84,15 +85,15 @@ function backend(): Backend {
   }
 }
 
-/** Where a saved password lives, in words for the sign-in dialog. */
-export function passwordStoreName(): string {
+/** Where a saved password lives, a whole sentence for the sign-in dialog: "Kept in Windows Credential Manager." */
+export function passwordStoreHint(): string {
   switch (shell()) {
     case "tauri":
-      return navigator.userAgent.includes("Windows") ? "Windows Credential Manager" : "the system keychain";
+      return navigator.userAgent.includes("Windows") ? t("connect.passwordKept.windows") : t("connect.passwordKept.keychain");
     case "capacitor":
-      return "the phone's secure storage";
+      return t("connect.passwordKept.phone");
     default:
-      return "this browser's storage";
+      return t("connect.passwordKept.browser");
   }
 }
 

@@ -9,6 +9,8 @@ import { useSyncExternalStore } from "react";
 import { session } from "./session.js";
 import type { Transport } from "@meshnet/meshcore";
 import { autoConnectWanted, connectorById, lastLink, needsPairing, rememberLink, type Connector, type FoundDevice } from "../transports/index.js";
+import { t } from "../i18n/index.js";
+import { errorText } from "../i18n/errors.js";
 
 export interface LinkState {
   phase: "idle" | "connecting" | "connected" | "failed";
@@ -54,7 +56,7 @@ const OPEN_TIMEOUT_MS = 45_000;
 
 function withTimeout<T>(promise: Promise<T>, what: string): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${what} did not answer in ${OPEN_TIMEOUT_MS / 1000} s`)), OPEN_TIMEOUT_MS);
+    const timer = setTimeout(() => reject(new Error(t("connect.error.noAnswer", { what, seconds: OPEN_TIMEOUT_MS / 1000 }))), OPEN_TIMEOUT_MS);
     promise.then(
       (value) => {
         clearTimeout(timer);
@@ -110,7 +112,7 @@ export async function connectWith(connector: Connector, device: FoundDevice | nu
       // Given up for another radio or a disconnect: its failure is no news.
       if (gen !== generation) return;
       if (attempt < tries && !needsPairing(error)) continue;
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorText(error);
       set({ phase: "failed", error: message, attempt: 0, pair: canPair(connector, device, error) });
       throw error;
     }
@@ -128,7 +130,7 @@ function canPair(connector: Connector, device: FoundDevice | null, error: unknow
  */
 export async function pairLink(pin: string): Promise<void> {
   const link = wantedLink;
-  if (!link?.device || !link.connector.pair) throw new Error("nothing to pair with");
+  if (!link?.device || !link.connector.pair) throw new Error(t("connect.error.nothingToPair"));
   await link.connector.pair(link.device, pin);
   void connectWith(link.connector, link.device).catch(() => undefined);
 }
@@ -175,7 +177,7 @@ session.subscribe(() => {
   if (status !== "closed" || !wantedLink || state.phase !== "connected") return;
   if (!wantedLink.device || wantedLink.connector.mode === "picker") {
     // A chooser cannot be reopened without a click.
-    set({ phase: "failed", error: "link dropped" });
+    set({ phase: "failed", error: t("connect.error.linkDropped") });
     return;
   }
   scheduleRetry();
@@ -205,7 +207,7 @@ async function retry(gen: number): Promise<void> {
     set({ phase: "connected", retrying: false, attempt: 0, error: null });
   } catch (error) {
     if (gen !== generation) return;
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorText(error);
     if (canPair(link.connector, link.device, error)) {
       // A radio that wants a bond will not stop wanting it: ask for the PIN instead of trying again.
       set({ phase: "failed", error: message, retrying: false, attempt: 0, pair: true });

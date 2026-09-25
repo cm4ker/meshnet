@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { IconButton } from "../ui/Button.js";
 import { BackIcon, CloseIcon } from "./Icons.js";
+import { t } from "../i18n/index.js";
 
 /** How a screen is left: back to the one under it on a phone, closed as the desktop's panel. */
 export interface Chrome {
@@ -12,14 +13,14 @@ export function ScreenHead({ chrome, children, actions }: { chrome: Chrome; chil
   return (
     <header className="screen-head">
       {chrome.onBack ? (
-        <IconButton label="Back" onClick={chrome.onBack}>
+        <IconButton label={t("common.back")} onClick={chrome.onBack}>
           <BackIcon size={20} />
         </IconButton>
       ) : null}
       <div className="screen-title">{children}</div>
       {actions}
       {chrome.onClose ? (
-        <IconButton label="Close · Esc" onClick={chrome.onClose}>
+        <IconButton label={t("common.closeEsc")} onClick={chrome.onClose}>
           <CloseIcon size={18} />
         </IconButton>
       ) : null}

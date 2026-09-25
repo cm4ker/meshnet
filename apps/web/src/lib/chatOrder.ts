@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { t, type Key } from "../i18n/index.js";
 import type { ConversationSummary } from "./conversations.js";
 import { readSetting, writeSetting } from "./storage.js";
 
@@ -9,10 +10,11 @@ import { readSetting, writeSetting } from "./storage.js";
 
 export type ChatOrder = "latest" | "name" | "unread";
 
-export const CHAT_ORDERS: readonly { id: ChatOrder; label: string; short: string }[] = [
-  { id: "latest", label: "Latest message", short: "Latest" },
-  { id: "name", label: "Name", short: "Name" },
-  { id: "unread", label: "Unread first", short: "Unread first" },
+/** The orders, their words as keys: `t()` them while drawing. */
+export const CHAT_ORDERS: readonly { id: ChatOrder; label: Key; short: Key }[] = [
+  { id: "latest", label: "chats.order.latest", short: "chats.order.latestShort" },
+  { id: "name", label: "chats.order.name", short: "chats.order.nameShort" },
+  { id: "unread", label: "chats.order.unread", short: "chats.order.unreadShort" },
 ];
 
 export interface ChatOrderPrefs {
@@ -88,8 +90,8 @@ export function chatGroups(rows: Row[], p: ChatOrderPrefs): ChatGroup[] {
   const sorted = [...rows].sort(chatComparator(p.order));
   if (!p.channelsFirst) return [{ title: "", rows: sorted }];
   const groups = [
-    { title: "Channels", rows: sorted.filter((r) => r.kind === "channel") },
-    { title: "Direct", rows: sorted.filter((r) => r.kind !== "channel") },
+    { title: t("chats.order.channelsGroup"), rows: sorted.filter((r) => r.kind === "channel") },
+    { title: t("chats.order.directGroup"), rows: sorted.filter((r) => r.kind !== "channel") },
   ].filter((g) => g.rows.length > 0);
   return groups.length === 1 ? [{ title: "", rows: groups[0]!.rows }] : groups;
 }

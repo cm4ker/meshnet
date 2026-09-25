@@ -9,11 +9,12 @@
 
 import { useEffect, useState } from "react";
 import type { ContactRecord } from "@meshnet/meshcore";
+import { t } from "../../i18n/index.js";
 import { nameOfHash } from "../../lib/echoes.js";
 import { profileBetween } from "../../lib/elevation.js";
 import { agoPhrase } from "../../lib/format.js";
 import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "../../lib/geo.js";
-import { lineOfSight, quality, VERDICT_WORDS, type LineOfSight, type LinkRadio, type Profile } from "../../lib/los.js";
+import { lineOfSight, quality, verdictWord, type LineOfSight, type LinkRadio, type Profile } from "../../lib/los.js";
 import { contactEnd } from "../../lib/mapOverlay.js";
 import type { LosEnd, NeighboursTool } from "../../lib/meshTool.js";
 import { openProfile } from "../../lib/nav.js";
@@ -41,7 +42,7 @@ export function NeighboursSheet({ tool }: { tool: NeighboursTool }) {
 const nameOf = (c: ContactRecord) => c.name || c.prefix;
 
 function heardWhen(heardS: number, now: number): string {
-  return `heard ${agoPhrase(now - heardS * 1000, now)}`;
+  return t("tools.nb.heard", { time: agoPhrase(now - heardS * 1000, now) });
 }
 
 function NeighbourList({ tool }: { tool: NeighboursTool }) {
@@ -49,7 +50,7 @@ function NeighbourList({ tool }: { tool: NeighboursTool }) {
   const fetch = useNeighbourFetch(tool.key);
   const [offOpen, setOffOpen] = useState(false);
   const hub = state.contacts[tool.key];
-  const hubName = hub ? nameOf(hub) : "The repeater";
+  const hubName = hub ? nameOf(hub) : t("tools.nb.theRepeater");
   const list = state.neighbours[tool.key];
   const now = Date.now();
   const rows = neighbourRows(state, tool.key, now);
@@ -64,11 +65,11 @@ function NeighbourList({ tool }: { tool: NeighboursTool }) {
 
   const sub = !list
     ? running
-      ? `Asking ${hubName}…`
-      : "Not asked yet"
+      ? t("tools.nb.asking", { name: hubName })
+      : t("tools.nb.notAsked")
     : complete
-      ? `${list.total} heard · ${placed.length} on the map · ${agoPhrase(list.at, now)}`
-      : `${list.neighbours.length} of ${list.total} so far`;
+      ? t("tools.nb.subComplete", { total: list.total, placed: placed.length, time: agoPhrase(list.at, now) })
+      : t("tools.nb.soFar", { count: list.neighbours.length, total: list.total });
   const missing = list ? list.total - list.neighbours.length : 0;
 
   let progress: React.ReactNode = null;
@@ -76,7 +77,7 @@ function NeighbourList({ tool }: { tool: NeighboursTool }) {
     progress = (
       <div className="nb-progress">
         <span className="nb-progress-line">
-          Getting the rest · {list.neighbours.length} of {list.total}
+          {t("tools.nb.gettingRest", { count: list.neighbours.length, total: list.total })}
           <span className="spinner" aria-hidden="true" />
         </span>
         <span className="nb-progress-bar" aria-hidden="true">
@@ -88,10 +89,10 @@ function NeighbourList({ tool }: { tool: NeighboursTool }) {
     progress = (
       <div className="nb-progress bad">
         <span className="nb-progress-line">
-          {fetch.silent ? `${hubName} did not answer${missing > 0 ? ` · ${missing} not fetched` : ""}` : fetch.error}
+          {fetch.silent ? (missing > 0 ? t("tools.nb.noAnswerMissing", { name: hubName, missing }) : t("tools.nb.noAnswer", { name: hubName })) : fetch.error}
           <Button size="sm" disabled={!online} onClick={() => void fetchAllNeighbours(tool.key)}>
             <RefreshIcon size={13} />
-            Try again
+            {t("common.tryAgain")}
           </Button>
         </span>
       </div>
@@ -100,10 +101,10 @@ function NeighbourList({ tool }: { tool: NeighboursTool }) {
     progress = (
       <div className="nb-progress">
         <span className="nb-progress-line">
-          {online ? `${missing} more to fetch` : `${missing} more · connect the radio to fetch them`}
+          {online ? t("tools.nb.moreToFetch", { count: missing }) : t("tools.nb.moreOffline", { count: missing })}
           {online ? (
             <Button size="sm" onClick={() => void fetchAllNeighbours(tool.key)}>
-              Get the rest
+              {t("tools.nb.getRest")}
             </Button>
           ) : null}
         </span>
@@ -114,17 +115,17 @@ function NeighbourList({ tool }: { tool: NeighboursTool }) {
   const pages = Math.max(1, Math.ceil((list?.total ?? PAGE) / PAGE));
   return (
     <div className="tool nb-sheet">
-      <SheetHead title={`Neighbours of ${hubName}`} sub={sub} onBack={closeTool} />
+      <SheetHead title={t("tools.nb.title", { name: hubName })} sub={sub} onBack={closeTool} />
       {placed.length ? (
         <div className="nb-summary">
-          <span><i className="good" />{counts.good} good</span>
-          <span><i className="fair" />{counts.fair} fair</span>
-          <span><i className="weak" />{counts.weak} weak</span>
-          {off.length ? <span>· {off.length} off the map</span> : null}
+          <span><i className="good" />{t("tools.nb.good", { count: counts.good })}</span>
+          <span><i className="fair" />{t("tools.nb.fair", { count: counts.fair })}</span>
+          <span><i className="weak" />{t("tools.nb.weak", { count: counts.weak })}</span>
+          {off.length ? <span>· {t("tools.nb.offMap", { count: off.length })}</span> : null}
         </div>
       ) : null}
       {progress}
-      {list && list.total === 0 ? <p className="tool-note muted">It hears no other repeater directly right now.</p> : null}
+      {list && list.total === 0 ? <p className="tool-note muted">{t("tools.nb.none")}</p> : null}
       {placed.length ? (
         <ul className="list-rows nb-rows" role="list">
           {placed.map((r) => {
@@ -136,7 +137,7 @@ function NeighbourList({ tool }: { tool: NeighboursTool }) {
                   <Avatar name={nameOf(c)} type={c.type} size={32} />
                   <span className="row-main">
                     <span className="row-title">{nameOf(c)}</span>
-                    <span className={["row-sub", r.stale ? "nb-gone" : "muted"].join(" ")}>{r.stale ? `${heardWhen(r.heardS, now)} · may be gone` : [heardWhen(r.heardS, now), far].filter(Boolean).join(" · ")}</span>
+                    <span className={["row-sub", r.stale ? "nb-gone" : "muted"].join(" ")}>{r.stale ? t("tools.nb.mayBeGone", { heard: heardWhen(r.heardS, now) }) : [heardWhen(r.heardS, now), far].filter(Boolean).join(" · ")}</span>
                   </span>
                   <QualityChip snr={r.snr} />
                   <ChevronRightIcon size={14} className="line-chev" />
@@ -149,7 +150,7 @@ function NeighbourList({ tool }: { tool: NeighboursTool }) {
       {off.length ? (
         <>
           <button type="button" className="nb-off-toggle" aria-expanded={offOpen} onClick={() => setOffOpen(!offOpen)}>
-            <span className="grow">{off.length} not on the map</span>
+            <span className="grow">{t("tools.nb.notOnMap", { count: off.length })}</span>
             {offOpen ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
           </button>
           {offOpen ? (
@@ -161,7 +162,7 @@ function NeighbourList({ tool }: { tool: NeighboursTool }) {
                       <Avatar name={nameOf(r.contact)} type={r.contact.type} size={32} />
                       <span className="row-main">
                         <span className="row-title">{nameOf(r.contact)}</span>
-                        <span className="row-sub muted">no position shared · {heardWhen(r.heardS, now)}</span>
+                        <span className="row-sub muted">{t("tools.nb.noPosition", { heard: heardWhen(r.heardS, now) })}</span>
                       </span>
                       <QualityChip snr={r.snr} />
                       <ChevronRightIcon size={14} className="line-chev" />
@@ -171,7 +172,7 @@ function NeighbourList({ tool }: { tool: NeighboursTool }) {
                       <Avatar name={r.prefix} type={2} size={32} />
                       <span className="row-main">
                         <span className="row-title mono">{r.prefix}</span>
-                        <span className="row-sub muted">not in contacts · {heardWhen(r.heardS, now)}</span>
+                        <span className="row-sub muted">{t("tools.nb.notContact", { heard: heardWhen(r.heardS, now) })}</span>
                       </span>
                       <QualityChip snr={r.snr} />
                     </div>
@@ -184,11 +185,11 @@ function NeighbourList({ tool }: { tool: NeighboursTool }) {
       ) : null}
       <Button size="lg" busy={running} disabled={!online} onClick={() => void fetchAllNeighbours(tool.key, true)}>
         <RefreshIcon size={16} />
-        {running ? "Asking…" : "Ask again"}
+        {running ? t("tools.nb.askingButton") : t("tools.askAgain")}
       </Button>
       <div className="check-cost">
         <AirIcon size={13} />
-        {pages} request{pages === 1 ? "" : "s"} to {hubName} · it keeps up to {KEPT}
+        {t("tools.nb.cost", { count: pages, name: hubName, max: KEPT })}
       </div>
     </div>
   );
@@ -204,7 +205,7 @@ function LinkCard({ tool, link }: { tool: NeighboursTool; link: string }) {
   if (!hub || !nb) {
     return (
       <div className="tool">
-        <SheetHead title="Link" sub="No longer on the radio" onBack={() => openNeighbourLink(null)} />
+        <SheetHead title={t("tools.link.title")} sub={t("tools.link.gone")} onBack={() => openNeighbourLink(null)} />
       </div>
     );
   }
@@ -218,10 +219,10 @@ function LinkCard({ tool, link }: { tool: NeighboursTool; link: string }) {
   const legs = measuredLegs(p);
   // The leg between the two, when the check went straight from one to the other: out is how the neighbour heard it, back how the repeater did.
   const direct = p && p.from >= 0 && p.chain.length === p.from + 2 ? (legs[p.from + 1] ?? null) : null;
-  const checked = direct && p ? `${agoPhrase(p.at, now)} · checked from your radio` : null;
+  const checked = direct && p ? t("tools.link.checked", { time: agoPhrase(p.at, now) }) : null;
   const a = contactEnd(hub);
   const b = contactEnd(nb);
-  const where = a && b ? `${formatDistance(distanceKm(a.lat, a.lon, b.lat, b.lon))} ${compass(bearingDeg(a.lat, a.lon, b.lat, b.lon))} of ${hubName}` : `${nbName} has shared no position`;
+  const where = a && b ? t("tools.link.where", { distance: formatDistance(distanceKm(a.lat, a.lon, b.lat, b.lon)), direction: compass(bearingDeg(a.lat, a.lon, b.lat, b.lon)), name: hubName }) : t("tools.link.noPosition", { name: nbName });
   const signed = !!state.logins[link]?.ok;
   const nbList = state.neighbours[link];
   const openLeg = (index: number) => {
@@ -232,13 +233,13 @@ function LinkCard({ tool, link }: { tool: NeighboursTool; link: string }) {
     if (x && y) openLineOfSight(x, y, null, legs[index] ?? null);
   };
 
-  const hubHears = direct?.[1] != null ? { snr: direct[1], hint: checked! } : row ? { snr: row.snr, hint: `${heardWhen(row.heardS, now)} · from ${hubName}'s list` } : null;
-  const nbHears = direct ? { snr: direct[0], hint: checked! } : reverse ? { snr: reverse.snr, hint: `${heardWhen(reverse.heardS, now)} · from ${nbName}'s list` } : null;
+  const hubHears = direct?.[1] != null ? { snr: direct[1], hint: checked! } : row ? { snr: row.snr, hint: t("tools.link.fromList", { heard: heardWhen(row.heardS, now), name: hubName }) } : null;
+  const nbHears = direct ? { snr: direct[0], hint: checked! } : reverse ? { snr: reverse.snr, hint: t("tools.link.fromList", { heard: heardWhen(reverse.heardS, now), name: nbName }) } : null;
 
   return (
     <div className="tool nb-link">
       <div className="tool-head">
-        <IconButton label="Back to the list" onClick={() => openNeighbourLink(null)}>
+        <IconButton label={t("tools.link.backToList")} onClick={() => openNeighbourLink(null)}>
           <BackIcon size={18} />
         </IconButton>
         <span className="row-main">
@@ -247,38 +248,36 @@ function LinkCard({ tool, link }: { tool: NeighboursTool; link: string }) {
           </span>
           <span className="row-sub muted">{where}</span>
         </span>
-        <IconButton label="Close" onClick={closeAllTools}>
+        <IconButton label={t("common.close")} onClick={closeAllTools}>
           <CloseIcon size={18} />
         </IconButton>
       </div>
       <Group>
-        <InfoRow label={`${hubName} hears ${nbName}`} hint={hubHears?.hint ?? "not in the list any more"}>
+        <InfoRow label={t("tools.link.hears", { a: hubName, b: nbName })} hint={hubHears?.hint ?? t("tools.link.notInList")}>
           {hubHears ? <QualityChip snr={hubHears.snr} /> : <span className="muted">—</span>}
         </InfoRow>
-        <InfoRow label={`${nbName} hears ${hubName}`} hint={nbHears?.hint ?? "not known yet"}>
+        <InfoRow label={t("tools.link.hears", { a: nbName, b: hubName })} hint={nbHears?.hint ?? t("tools.link.notKnown")}>
           {nbHears ? <QualityChip snr={nbHears.snr} /> : <span className="muted">—</span>}
         </InfoRow>
       </Group>
       {row?.stale && !direct ? (
-        <p className="nb-warn">
-          {hubName} last heard {nbName} {agoPhrase(now - row.heardS * 1000, now)}. It may be gone.
-        </p>
+        <p className="nb-warn">{t("tools.link.stale", { hub: hubName, nb: nbName, time: agoPhrase(now - row.heardS * 1000, now) })}</p>
       ) : null}
-      {p ? <CheckResult p={p} names={["You", ...p.chain.map((h) => nameOfHash(h, state.contacts) ?? h)]} reach={null} placed onLeg={openLeg} /> : null}
+      {p ? <CheckResult p={p} names={[t("tools.you"), ...p.chain.map((h) => nameOfHash(h, state.contacts) ?? h)]} reach={null} placed onLeg={openLeg} /> : null}
       <Button variant={running ? "default" : "primary"} size="lg" disabled={!online} onClick={() => (running ? stopPing(key) : void ping(key))}>
         {running ? null : <AirIcon size={16} />}
-        {running ? "Stop" : p ? "Check again" : "Check both ways"}
+        {running ? t("tools.stop") : p ? t("tools.link.checkAgain") : t("tools.link.checkBoth")}
       </Button>
       <div className="check-cost">
         <AirIcon size={13} />
-        Up to {ROUNDS} traces from you through {hubName} · each measures both ways
+        {t("tools.link.cost", { count: ROUNDS, name: hubName })}
       </div>
       {a && b ? <Terrain a={a} b={b} heard={direct} /> : null}
       <Group>
-        <LinkRow icon={<Avatar name={nbName} type={nb.type} size={26} />} label={nbName} hint="Profile" onClick={() => openProfile(link)} />
+        <LinkRow icon={<Avatar name={nbName} type={nb.type} size={26} />} label={nbName} hint={t("tools.link.profile")} onClick={() => openProfile(link)} />
         <LinkRow
-          label={`${nbName}'s neighbours`}
-          hint={signed ? (nbList ? `${nbList.total} heard · ${agoPhrase(nbList.at, now)}` : "Not asked yet") : `Sign in to ${nbName} to see them`}
+          label={t("tools.link.neighbours", { name: nbName })}
+          hint={signed ? (nbList ? t("tools.link.neighboursHint", { total: nbList.total, time: agoPhrase(nbList.at, now) }) : t("tools.nb.notAsked")) : t("tools.link.signInToSee", { name: nbName })}
           trailing={signed ? undefined : <LockIcon size={14} className="line-chev" />}
           disabled={!signed && !online}
           onClick={() => (signed ? openNeighboursOf(link) : setSigning(true))}
@@ -290,7 +289,7 @@ function LinkCard({ tool, link }: { tool: NeighboursTool; link: string }) {
         onClose={() => setSigning(false)}
         onSignedIn={() => {
           setSigning(false);
-          toast(`Signed in to ${nbName}`);
+          toast(t("tools.signedIn", { name: nbName }));
           openNeighboursOf(link);
         }}
       />
@@ -321,10 +320,10 @@ function Terrain({ a, b, heard }: { a: LosEnd; b: LosEnd; heard: [number, number
   const ha = antennaHeight(a, state.contacts);
   const hb = antennaHeight(b, state.contacts);
   const los = profile && radio ? lineOfSight(profile, ha, hb, radio) : null;
-  const label = los ? <span className={`nb-verdict ${los.verdict}`}>{VERDICT_WORDS[los.verdict]}</span> : failed ? "Line of sight" : "Reading the terrain…";
+  const label = los ? <span className={`nb-verdict ${los.verdict}`}>{verdictWord(los.verdict)}</span> : failed ? t("tools.los.title") : t("tools.los.reading");
   return (
     <Group>
-      <LinkRow label={label} hint={`Line of sight · antennas ${ha} m and ${hb} m`} onClick={() => openLineOfSight(a, b, null, heard)} />
+      <LinkRow label={label} hint={t("tools.link.losHint", { a: ha, b: hb })} onClick={() => openLineOfSight(a, b, null, heard)} />
       {los ? (
         <div className="nb-terrain">
           <MiniProfile los={los} />

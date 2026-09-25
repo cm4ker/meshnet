@@ -6,6 +6,7 @@
  */
 
 import { AdvType, contactRoute, type ContactRecord, type SessionState } from "@meshnet/meshcore";
+import { t } from "../i18n/index.js";
 import { candidatesOfHash } from "./echoes.js";
 import { hasPosition } from "./geo.js";
 import { legId } from "./legVerdicts.js";
@@ -65,7 +66,7 @@ export const EMPTY_OVERLAY: MapOverlay = { lines: [], pins: [], numbers: {}, han
 
 export function selfEnd(state: SessionState): LosEnd | null {
   const self = state.self;
-  return self && hasPosition(self.lat, self.lon) ? { lat: self.lat, lon: self.lon, name: "You", key: "self" } : null;
+  return self && hasPosition(self.lat, self.lon) ? { lat: self.lat, lon: self.lon, name: t("mesh.you"), key: "self" } : null;
 }
 
 export function contactEnd(c: ContactRecord): LosEnd | null {
@@ -170,7 +171,7 @@ function checkTrail(ping: Ping | null, nodesOf: (chain: string[]) => { nodes: (L
     const { nodes, relays } = nodesOf(chain);
     const a = breakAt === null ? null : nodes[breakAt];
     const b = breakAt === null ? null : nodes[breakAt + 1];
-    const overlay = chainOverlay(nodes, relays, () => tone, (x, y) => (a && b && x === a && y === b ? "breaks" : undefined), false);
+    const overlay = chainOverlay(nodes, relays, () => tone, (x, y) => (a && b && x === a && y === b ? t("mesh.leg.breaks") : undefined), false);
     lines.push(...overlay.lines.map((l) => ({ ...l, tappable: false })));
   };
   for (const tried of ping.search?.tried ?? []) faint(tried, "was");
@@ -273,7 +274,7 @@ export function editOverlay(key: string, relays: string[], state: SessionState, 
   const pinged = ping?.via && sameRelays(ping.via, relays) ? ping : null;
   const measured = pingTone(pinged, ends.length - 1, toPerson);
   const tone = (i: number): LineTone => (pinged ? measured(i) : i === ends.length - 2 && toPerson ? "dest" : "unknown");
-  const overlay = chainOverlay(ends, relays, tone, (a, b) => (blocked.has(legId(a, b)) ? "blocked" : undefined), !pinged?.running);
+  const overlay = chainOverlay(ends, relays, tone, (a, b) => (blocked.has(legId(a, b)) ? t("mesh.leg.blocked") : undefined), !pinged?.running);
   const numbers: Record<string, number> = {};
   relays.forEach((k, i) => (numbers[k] = i + 1));
   return { ...overlay, lines: overlay.lines.map((l) => ({ ...l, tappable: true })), numbers };

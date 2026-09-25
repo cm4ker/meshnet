@@ -9,6 +9,7 @@ import type { PluginListenerHandle } from "@capacitor/core";
 import { BaseTransport, frameForStream, StreamFrameDecoder } from "@meshnet/meshcore";
 import { addressOf, knownAddresses, rememberAddress, TCP_CONNECT_TIMEOUT_S } from "./tcp.js";
 import type { Connector } from "./types.js";
+import { t } from "../i18n/index.js";
 
 interface MeshTcpPlugin {
   open(options: { host: string; port: number; timeout?: number }): Promise<{ id: string }>;
@@ -74,7 +75,7 @@ class CapacitorTcpTransport extends BaseTransport {
   }
 
   async send(frame: Uint8Array): Promise<void> {
-    if (this.isClosed) throw new Error("connection closed");
+    if (this.isClosed) throw new Error(t("connect.error.connectionClosed"));
     await this.api.write({ id: this.id, data: toBase64(frameForStream(frame)) });
   }
 
@@ -87,8 +88,12 @@ class CapacitorTcpTransport extends BaseTransport {
 export const capacitorTcpConnector: Connector = {
   id: "cap-tcp",
   kind: "tcp",
-  title: "Wi-Fi",
-  description: "A radio on the network, by its address. Companion firmware built with Wi-Fi listens on port 5000.",
+  get title() {
+    return t("connect.transport.wifi");
+  },
+  get description() {
+    return t("connect.describe.tcp");
+  },
   mode: "address",
 
   async remembered() {
@@ -96,7 +101,7 @@ export const capacitorTcpConnector: Connector = {
   },
 
   async connect(device) {
-    if (!device) throw new Error("type the radio's address");
+    if (!device) throw new Error(t("connect.error.typeAddress"));
     const address = addressOf(device);
     const api = await tcp();
     await listen(api);

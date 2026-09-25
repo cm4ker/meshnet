@@ -9,6 +9,7 @@ import { Avatar } from "./Avatar.js";
 import { ChatNotices } from "./ChatNotices.js";
 import { CopyIcon } from "./Icons.js";
 import { Gone, ScreenHead, type Chrome } from "./ScreenHead.js";
+import { t } from "../i18n/index.js";
 
 /** A channel's own page, opened from its conversation: its name, its key, and leaving it. */
 export function ChannelView({ index, chrome }: { index: number; chrome: Chrome }) {
@@ -20,65 +21,65 @@ export function ChannelView({ index, chrome }: { index: number; chrome: Chrome }
 
   useEffect(() => setName(channel?.name ?? ""), [channel?.name]);
 
-  if (!channel) return <Gone chrome={chrome} title="Channel" text="The radio no longer has this channel." />;
+  if (!channel) return <Gone chrome={chrome} title={t("chats.channel.title")} text={t("chats.channel.gone")} />;
 
   const rename = () => {
     const next = name.trim();
     if (!next || next === channel.name) return setName(channel.name);
-    void act(() => session.setChannel(channel.index, next, fromHex(channel.secret)), "Renamed");
+    void act(() => session.setChannel(channel.index, next, fromHex(channel.secret)), t("chats.channel.renamed"));
   };
 
   return (
     <div className="screen">
       <ScreenHead chrome={chrome}>
-        <span className="screen-name">Channel</span>
+        <span className="screen-name">{t("chats.channel.title")}</span>
       </ScreenHead>
       <div className="screen-scroll">
         <div className="hero">
-          <Avatar name={channel.name || `Channel ${channel.index}`} channel size={68} />
-          <h1>{channel.name || `Channel ${channel.index}`}</h1>
-          <span className="muted">Channel {channel.index} on the radio</span>
+          <Avatar name={channel.name || t("chats.conversation.channel", { index: channel.index })} channel size={68} />
+          <h1>{channel.name || t("chats.conversation.channel", { index: channel.index })}</h1>
+          <span className="muted">{t("chats.channel.slot", { index: channel.index })}</span>
         </div>
         <ChatNotices conversation={channelConversation(channel.index)} direct={false} />
-        <Group title="Name">
+        <Group title={t("chats.channel.name")}>
           <Block>
             <input
               className="input"
               value={name}
               maxLength={31}
               disabled={!online}
-              aria-label="Channel name"
+              aria-label={t("chats.channel.nameLabel")}
               onChange={(e) => setName(e.target.value)}
               onBlur={rename}
               onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
             />
           </Block>
         </Group>
-        <Group title="Key" note="Everyone with this key reads the channel. Send it to the people you want in.">
+        <Group title={t("chats.channel.key")} note={t("chats.channel.keyNote")}>
           <LinkRow
             label={<span className="mono key-text">{channel.secret}</span>}
             trailing={<CopyIcon size={14} className="line-chev" />}
-            onClick={() => void navigator.clipboard?.writeText(channel.secret).then(() => toast("Key copied"))}
+            onClick={() => void navigator.clipboard?.writeText(channel.secret).then(() => toast(t("chats.channel.keyCopied")))}
           />
         </Group>
         {channel.index === 0 ? (
-          <p className="group-note">The first channel stays on the radio.</p>
+          <p className="group-note">{t("chats.channel.firstStays")}</p>
         ) : (
           <Group>
-            <ActionRow label="Remove the channel" danger disabled={!online} onClick={() => setRemoving(true)} />
+            <ActionRow label={t("chats.channel.remove")} danger disabled={!online} onClick={() => setRemoving(true)} />
           </Group>
         )}
       </div>
       <Confirm
         open={removing}
-        title={`Remove ${channel.name || `channel ${channel.index}`}?`}
-        body={<p>The radio stops listening on it. Its messages stay on this device.</p>}
-        confirmLabel="Remove"
+        title={t("chats.channel.removeTitle", { name: channel.name || t("chats.channel.fallbackName", { index: channel.index }) })}
+        body={<p>{t("chats.channel.removeBody")}</p>}
+        confirmLabel={t("chats.channel.removeConfirm")}
         danger
         onCancel={() => setRemoving(false)}
         onConfirm={async () => {
           setRemoving(false);
-          if (await act(() => session.clearChannel(channel.index), "Channel removed")) openConversation(null);
+          if (await act(() => session.clearChannel(channel.index), t("chats.channel.removed"))) openConversation(null);
         }}
       />
     </div>

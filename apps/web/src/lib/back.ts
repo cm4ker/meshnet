@@ -92,9 +92,24 @@ export function goBack(): boolean {
 
 let guarded = false;
 let swallowPop = false;
+let settling = false;
 
+/**
+ * Settled once the moment's changes are done: a tree drawn again in place (a
+ * new language) leaves and comes back within one commit, and its guard stays
+ * where it was rather than being taken back and pushed again, which left a
+ * stray Back behind.
+ */
 function sync(): void {
-  if (typeof window === "undefined" || !window.history || isCapacitor()) return;
+  if (typeof window === "undefined" || !window.history || isCapacitor() || settling) return;
+  settling = true;
+  queueMicrotask(() => {
+    settling = false;
+    settle();
+  });
+}
+
+function settle(): void {
   const wanted = canGoBack();
   if (wanted && !guarded) {
     window.history.pushState({ meshnet: "back" }, "");

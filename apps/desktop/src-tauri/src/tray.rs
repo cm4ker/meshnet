@@ -5,7 +5,8 @@
 //!
 //! The icon carries a dot while anything is unread, told by the page
 //! (`tray_unread`): red for a message from a person, amber for channels and
-//! rooms only. Its tooltip counts both.
+//! rooms only. Its tooltip counts both. Its words are the page's, in the
+//! reader's language (`tray_words`), English until the page has said.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -35,10 +36,14 @@ pub fn install(app: &App) {
     }
 }
 
+fn menu<R: Runtime, M: Manager<R>>(app: &M, open: &str, quit: &str) -> tauri::Result<Menu<R>> {
+    let open = MenuItem::with_id(app, "open", open, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", quit, true, None::<&str>)?;
+    Menu::with_items(app, &[&open, &quit])
+}
+
 fn build(app: &App) -> tauri::Result<TrayIcon> {
-    let open = MenuItem::with_id(app, "open", "Open Meshnet", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &quit])?;
+    let menu = menu(app, "Open Meshnet", "Quit")?;
     TrayIconBuilder::with_id(ID)
         .icon(Image::from_bytes(ICON)?)
         .tooltip(&app.package_info().name)
@@ -89,18 +94,34 @@ pub fn bring_back<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// What is unread, from the page: messages from people, and in channels and rooms.
+/// The menu's words, in the page's language.
 #[tauri::command]
-pub fn tray_unread(app: AppHandle, direct: u32, chats: u32) -> Result<(), String> {
+pub fn tray_words(app: AppHandle, open: String, quit: String) -> Result<(), String> {
+    let Some(tray) = app.tray_by_id(ID) else {
+        return Ok(());
+    };
+    let menu = menu(&app, &open, &quit).map_err(|error| error.to_string())?;
+    tray.set_menu(Some(menu)).map_err(|error| error.to_string())
+}
+
+/// What is unread, from the page: messages from people, and in channels and rooms,
+/// and how the tooltip says it (`detail`), in the page's words.
+#[tauri::command]
+pub fn tray_unread(app: AppHandle, direct: u32, chats: u32, detail: Option<String>) -> Result<(), String> {
     let Some(tray) = app.tray_by_id(ID) else {
         return Ok(());
     };
     let name = &app.package_info().name;
-    let tooltip = match (direct, chats) {
-        (0, 0) => name.clone(),
-        (d, 0) => format!("{name}: {d} from people"),
-        (0, c) => format!("{name}: {c} in chats"),
-        (d, c) => format!("{name}: {d} from people, {c} in chats"),
+    let detail = detail.unwrap_or_else(|| match (direct, chats) {
+        (0, 0) => String::new(),
+        (d, 0) => format!("{d} from people"),
+        (0, c) => format!("{c} in chats"),
+        (d, c) => format!("{d} from people, {c} in chats"),
+    });
+    let tooltip = if detail.is_empty() {
+        name.clone()
+    } else {
+        format!("{name}: {detail}")
     };
     let dot = if direct > 0 {
         Some(DIRECT)

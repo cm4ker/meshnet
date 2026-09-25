@@ -82,6 +82,8 @@ pub struct WatchConfig {
     pub chat: HashMap<String, ChatLevel>,
     pub contacts: Vec<Contact>,
     pub channels: Vec<Channel>,
+    /// What the notices say, in the page's language.
+    pub words: Words,
 }
 
 impl Default for WatchConfig {
@@ -95,8 +97,105 @@ impl Default for WatchConfig {
             chat: HashMap::new(),
             contacts: Vec::new(),
             channels: Vec::new(),
+            words: Words::default(),
         }
     }
+}
+
+/// A counted phrase: one form per plural category of the language (`one`, `few`, `many`, `other` …).
+pub type Forms = HashMap<String, String>;
+
+/// The words of the notices, from the page (`notices.core.*` in its `i18n`), `{placeholders}`
+/// and all; English until the page has said. What the page leaves out stays English.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Words {
+    pub new_contact: String,
+    pub new_repeater: String,
+    pub new_room: String,
+    pub new_sensor: String,
+    pub new_node: String,
+    pub heard_first: String,
+    pub unknown: String,
+    pub channel: String,
+    pub mentioned: String,
+    pub mentioned_in: String,
+    pub in_chat: String,
+    pub chat_new: Forms,
+    pub chat_new_mentioned: Forms,
+    pub all_chats: String,
+    pub new_messages: Forms,
+    pub in_chats: Forms,
+    /// The plural category of each count from 0 to 199 in the page's language; a larger count
+    /// is taken as the one with its last two digits, past 100. Empty: English's.
+    pub plurals: Vec<String>,
+}
+
+impl Default for Words {
+    fn default() -> Self {
+        let forms = |one: &str, other: &str| {
+            Forms::from([
+                ("one".to_string(), one.to_string()),
+                ("other".to_string(), other.to_string()),
+            ])
+        };
+        Words {
+            new_contact: "New contact: {name}".into(),
+            new_repeater: "New repeater: {name}".into(),
+            new_room: "New room: {name}".into(),
+            new_sensor: "New sensor: {name}".into(),
+            new_node: "New node: {name}".into(),
+            heard_first: "Heard for the first time.".into(),
+            unknown: "Unknown {prefix}".into(),
+            channel: "Channel {index}".into(),
+            mentioned: "{who} mentioned you".into(),
+            mentioned_in: "{who} mentioned you in {chat}".into(),
+            in_chat: "{sender} in {chat}".into(),
+            chat_new: forms("{chat} · {count} new", "{chat} · {count} new"),
+            chat_new_mentioned: forms(
+                "{chat} · {count} new, you are mentioned",
+                "{chat} · {count} new, you are mentioned",
+            ),
+            all_chats: "{messages} in {chats}".into(),
+            new_messages: forms("{count} new message", "{count} new messages"),
+            in_chats: forms("{count} chat", "{count} chats"),
+            plurals: Vec::new(),
+        }
+    }
+}
+
+impl Words {
+    fn category(&self, count: usize) -> &str {
+        let at = if count < 200 {
+            count
+        } else {
+            100 + count % 100
+        };
+        match self.plurals.get(at) {
+            Some(category) => category,
+            None if count == 1 => "one",
+            None => "other",
+        }
+    }
+
+    /// The form for `count`, with `{count}` filled.
+    fn counted(&self, forms: &Forms, count: usize) -> String {
+        let form = forms
+            .get(self.category(count))
+            .or_else(|| forms.get("other"))
+            .map(String::as_str)
+            .unwrap_or("{count}");
+        fill(form, &[("count", &count.to_string())])
+    }
+}
+
+/// A phrase with its `{placeholders}` filled.
+fn fill(phrase: &str, values: &[(&str, &str)]) -> String {
+    let mut text = phrase.to_string();
+    for (name, value) in values {
+        text = text.replace(&format!("{{{name}}}"), value);
+    }
+    text
 }
 
 /// Which channel a notice goes on, where the system has channels.
@@ -275,19 +374,21 @@ impl Watch {
         } else {
             node.name
         };
-        let kind = match node.kind {
-            ADV_TYPE_CHAT => "contact",
-            ADV_TYPE_REPEATER => "repeater",
-            ADV_TYPE_ROOM => "room",
-            ADV_TYPE_SENSOR => "sensor",
-            _ => "node",
+        let words = &self.config.words;
+        let title = match node.kind {
+            ADV_TYPE_CHAT => &words.new_contact,
+            ADV_TYPE_REPEATER => &words.new_repeater,
+            ADV_TYPE_ROOM => &words.new_room,
+            ADV_TYPE_SENSOR => &words.new_sensor,
+            _ => &words.new_node,
         };
-        self.waiting.push(Waiting::Node(Notice::new(
+        let notice = Notice::new(
             format!("n:{key}"),
-            format!("New {kind}: {name}"),
-            "Heard for the first time.".to_string(),
+            fill(title, &[("name", &name)]),
+            words.heard_first.clone(),
             NoticeKind::Nodes,
-        )));
+        );
+        self.waiting.push(Waiting::Node(notice));
         self.arm();
     }
 
@@ -424,7 +525,7 @@ impl Watch {
                     },
                     None => Chat {
                         conversation: format!("p:{prefix}"),
-                        title: format!("Unknown {prefix}"),
+                        title: fill(&self.config.words.unknown, &[("prefix", &prefix)]),
                         direct: true,
                         lines: Vec::new(),
                     },
@@ -453,7 +554,9 @@ impl Watch {
                     .filter(|n| !n.is_empty());
                 let chat = Chat {
                     conversation: format!("ch:{index}"),
-                    title: name.unwrap_or_else(|| format!("Channel {index}")),
+                    title: name.unwrap_or_else(|| {
+                        fill(&self.config.words.channel, &[("index", &index.to_string())])
+                    }),
                     direct: false,
                     lines: Vec::new(),
                 };
@@ -502,7 +605,7 @@ impl Watch {
             let Some(chat) = self.chats.iter().find(|c| c.conversation == conversation) else {
                 continue;
             };
-            let notice = chat_notice(chat);
+            let notice = chat_notice(chat, &self.config.words);
             if !self.out.contains(&conversation) {
                 self.out.push(conversation);
             }
@@ -523,14 +626,17 @@ impl Watch {
         if chats.len() > NAMED {
             named.push("…".to_string());
         }
+        let words = &self.config.words;
+        let title = fill(
+            &words.all_chats,
+            &[
+                ("messages", &words.counted(&words.new_messages, total)),
+                ("chats", &words.counted(&words.in_chats, chats.len())),
+            ],
+        );
         Notice::new(
             ALL_CHATS.to_string(),
-            format!(
-                "{total} new {} in {} {}",
-                if total == 1 { "message" } else { "messages" },
-                chats.len(),
-                if chats.len() == 1 { "chat" } else { "chats" }
-            ),
+            title,
             named.join(", "),
             NoticeKind::Chats,
         )
@@ -549,7 +655,7 @@ fn tag_of(conversation: &str) -> String {
 }
 
 /// A chat's notice: the one message, or how many and the latest few.
-fn chat_notice(chat: &Chat) -> Notice {
+fn chat_notice(chat: &Chat, words: &Words) -> Notice {
     let title = &chat.title;
     let kind = if chat.direct {
         NoticeKind::Direct
@@ -564,11 +670,13 @@ fn chat_notice(chat: &Chat) -> Notice {
         let heading = if line.mention {
             let who = sender.unwrap_or(title);
             match sender {
-                Some(s) if s != title => format!("{who} mentioned you in {title}"),
-                _ => format!("{who} mentioned you"),
+                Some(s) if s != title => {
+                    fill(&words.mentioned_in, &[("who", who), ("chat", title)])
+                }
+                _ => fill(&words.mentioned, &[("who", who)]),
             }
         } else if let (Some(s), true) = (sender, channel) {
-            format!("{s} in {title}")
+            fill(&words.in_chat, &[("sender", s), ("chat", title)])
         } else {
             title.clone()
         };
@@ -583,16 +691,13 @@ fn chat_notice(chat: &Chat) -> Notice {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    Notice::new(
-        tag,
-        format!(
-            "{title} · {} new{}",
-            lines.len(),
-            if mentioned { ", you are mentioned" } else { "" }
-        ),
-        body,
-        kind,
-    )
+    let forms = if mentioned {
+        &words.chat_new_mentioned
+    } else {
+        &words.chat_new
+    };
+    let heading = fill(&words.counted(forms, lines.len()), &[("chat", title)]);
+    Notice::new(tag, heading, body, kind)
 }
 
 #[cfg(test)]
@@ -904,6 +1009,43 @@ mod tests {
             "and it stays one"
         );
         assert!(rig.posted.last().unwrap().body.ends_with(", …"));
+    }
+
+    #[test]
+    fn the_notices_speak_the_pages_language_and_count_in_it() {
+        // As the page sends it: Russian, with its plural category of each count up to 199.
+        let plurals: Vec<&str> = (0..200)
+            .map(|n| match (n % 10, n % 100) {
+                (1, m) if m != 11 => "one",
+                (2..=4, m) if !(12..=14).contains(&m) => "few",
+                _ => "many",
+            })
+            .collect();
+        let words: Words = serde_json::from_value(serde_json::json!({
+            "inChat": "{sender} в {chat}",
+            "allChats": "{messages} в {chats}",
+            "newMessages": { "one": "{count} новое сообщение", "few": "{count} новых сообщения", "many": "{count} новых сообщений", "other": "{count} нового сообщения" },
+            "inChats": { "one": "{count} чате", "few": "{count} чатах", "many": "{count} чатах", "other": "{count} чата" },
+            "plurals": plurals,
+        }))
+        .unwrap();
+        assert_eq!(words.counted(&words.new_messages, 21), "21 новое сообщение");
+        assert_eq!(
+            words.counted(&words.new_messages, 212),
+            "212 новых сообщений"
+        );
+        let mut rig = Rig::new(WatchConfig { words, ..config() });
+        rig.arrives(channel(0, "a: 1")).grace_ends();
+        assert_eq!(rig.posted[0].title, "a в Public");
+        rig.arrives(channel(1, "b: 2"))
+            .arrives(direct(&ALICE[..12], 1, "3"))
+            .arrives(direct(&BOB[..12], 2, "4"))
+            .arrives(channel(0, "c: 5"))
+            .grace_ends();
+        assert_eq!(
+            rig.posted.last().unwrap().title,
+            "5 новых сообщений в 4 чатах"
+        );
     }
 
     #[test]

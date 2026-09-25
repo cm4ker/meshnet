@@ -3,6 +3,7 @@ import type { Face } from "../lib/announce.js";
 import { hue } from "../lib/format.js";
 import { Avatar } from "./Avatar.js";
 import { CloseIcon } from "./Icons.js";
+import { t } from "../i18n/index.js";
 
 /**
  * One of the app's own notices (noticePrefs `shownBy: "app"`): a banner at
@@ -41,7 +42,7 @@ export function NoticeCard({ title, body, face, onOpen, onClose, children }: {
         <button
           type="button"
           className="notice-close"
-          aria-label="Dismiss"
+          aria-label={t("notices.dismiss")}
           onClick={(e) => {
             e.stopPropagation();
             onClose();
@@ -83,7 +84,7 @@ export function NoticeReply({ onReply, onRead, onBusy }: {
         id="notice-reply"
         className="notice-field"
         value={text}
-        placeholder="Reply…"
+        placeholder={t("notices.reply")}
         autoComplete="off"
         onChange={(e) => {
           setText(e.target.value);
@@ -94,7 +95,7 @@ export function NoticeReply({ onReply, onRead, onBusy }: {
         onKeyDown={key}
       />
       <button type="button" className="notice-read" onClick={onRead}>
-        Mark read
+        {t("notices.markRead")}
       </button>
     </div>
   );

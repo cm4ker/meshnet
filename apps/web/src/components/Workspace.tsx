@@ -32,11 +32,14 @@ import { CleanUpHost } from "./CleanUp.js";
 import { ToolPanel } from "./tools/ToolPanel.js";
 import { UpdateButton } from "./Updates.js";
 import type { Chrome } from "./ScreenHead.js";
+import { t, type Key } from "../i18n/index.js";
+import { errorText } from "../i18n/errors.js";
 
-const SECTIONS: { id: Section; label: string; icon: ReactNode }[] = [
-  { id: "chats", label: "Chats", icon: <ChatIcon size={22} /> },
-  { id: "mesh", label: "Mesh", icon: <NodesIcon size={22} /> },
-  { id: "radio", label: "Radio", icon: <RadioIcon size={22} /> },
+/** The label is a key, read while drawing: this table is made before the language is known. */
+const SECTIONS: { id: Section; label: Key; icon: ReactNode }[] = [
+  { id: "chats", label: "connect.tabs.chats", icon: <ChatIcon size={22} /> },
+  { id: "mesh", label: "connect.tabs.mesh", icon: <NodesIcon size={22} /> },
+  { id: "radio", label: "connect.tabs.radio", icon: <RadioIcon size={22} /> },
 ];
 
 export function Workspace() {
@@ -81,23 +84,23 @@ function Offline() {
       {link.phase === "connecting" ? (
         <>
           <span className="spinner" />
-          <span className="offline-text">Reconnecting{link.attempt ? ` · attempt ${link.attempt}` : ""}</span>
+          <span className="offline-text">{link.attempt ? t("connect.status.reconnectingAttempt", { attempt: link.attempt }) : t("connect.status.reconnecting")}</span>
           {link.retrying ? (
             <Button size="sm" disabled={!link.waiting} onClick={reconnectNow}>
-              Try now
+              {t("connect.status.tryNow")}
             </Button>
           ) : null}
         </>
       ) : (
         <>
-          <span className="offline-text">Disconnected{link.error ? `: ${link.error}` : ""}</span>
+          <span className="offline-text">{link.error ? t("connect.status.disconnectedWith", { error: link.error }) : t("connect.status.disconnected")}</span>
           {link.pair ? (
             <Button size="sm" onClick={() => setAsking(true)}>
-              Pair…
+              {t("connect.pair.button")}
             </Button>
           ) : link.phase === "failed" ? (
             <Button size="sm" onClick={reconnectNow}>
-              Reconnect
+              {t("connect.status.reconnect")}
             </Button>
           ) : null}
         </>
@@ -112,17 +115,17 @@ function PairPrompt({ open, onDone }: { open: boolean; onDone: () => void }) {
   return (
     <Prompt
       open={open}
-      title="Pair"
-      label="PIN on the radio's screen, or any digits for a phone"
-      placeholder="6 digits"
-      submitLabel="Pair"
+      title={t("connect.pair.title")}
+      label={t("connect.pair.label")}
+      placeholder={t("connect.pair.placeholder")}
+      submitLabel={t("connect.pair.submit")}
       onCancel={onDone}
       onSubmit={async (pin) => {
         try {
           await pairLink(pin);
           onDone();
         } catch (error) {
-          toast(`Could not pair: ${(error as Error).message ?? error}`, "error");
+          toast(t("connect.pair.failed", { error: errorText(error) }), "error");
         }
       }}
     />
@@ -192,17 +195,17 @@ function Phone() {
         })}
       </main>
       {tabs ? (
-        <nav className="tabbar" aria-label="Sections">
+        <nav className="tabbar" aria-label={t("connect.tabs.label")}>
           {SECTIONS.map((s) => (
             <button key={s.id} type="button" className={nav.section === s.id ? "on" : ""} aria-current={nav.section === s.id ? "page" : undefined} onClick={() => goSection(s.id, nav.section === s.id)}>
               {s.icon}
-              <span className="tab-label">{s.label}</span>
+              <span className="tab-label">{t(s.label)}</span>
               <Badge section={s.id} badges={badges} />
             </button>
           ))}
         </nav>
       ) : null}
-      <Sheet open={sheet !== null} onClose={back} title="How it travelled">
+      <Sheet open={sheet !== null} onClose={back} title={t("connect.sheet.travelled")}>
         {sheet ? <MessageView conversation={sheet.conversation} id={sheet.id} chrome={{}} bare /> : null}
       </Sheet>
     </div>
@@ -211,8 +214,8 @@ function Phone() {
 
 function Badge({ section, badges }: { section: Section; badges: ReturnType<typeof useBadges> }) {
   if (section === "chats" && badges.unread > 0) return <span className="tab-badge">{badges.unread}</span>;
-  if (section === "mesh" && badges.attention) return <span className="tab-dot warn" title="A node of yours needs a look" />;
-  if (section === "radio" && badges.offline) return <span className="tab-dot bad" title="The radio is not connected" />;
+  if (section === "mesh" && badges.attention) return <span className="tab-dot warn" title={t("connect.badge.attention")} />;
+  if (section === "radio" && badges.offline) return <span className="tab-dot bad" title={t("connect.badge.offline")} />;
   return null;
 }
 
@@ -381,7 +384,7 @@ function Desktop() {
     ) : chat ? (
       <ChatView key={chat.conversation} conversation={chat.conversation} chrome={{}} infoOpen={panel !== null} onInfo={togglePanel} />
     ) : (
-      <Empty>Pick a conversation, or start one with +.</Empty>
+      <Empty>{t("connect.empty.pickChat")}</Empty>
     );
   } else if (nav.section === "mesh") {
     const focus = panel?.kind === "profile" ? panel.key : full?.key ?? nav.meshFocus;
@@ -417,20 +420,20 @@ function Desktop() {
 
   return (
     <div className="app wide">
-      <nav className="rail" aria-label="Sections">
-        <button type="button" className="rail-search" title="Jump to anything · Ctrl+K" onClick={() => setPalette(true)}>
+      <nav className="rail" aria-label={t("connect.tabs.label")}>
+        <button type="button" className="rail-search" title={t("connect.rail.search")} onClick={() => setPalette(true)}>
           <SearchIcon size={18} />
         </button>
         {SECTIONS.map((s, i) => (
-          <button key={s.id} type="button" className={nav.section === s.id ? "on" : ""} aria-current={nav.section === s.id ? "page" : undefined} title={`${s.label} · ${isTauri() ? "Ctrl" : "Alt"}+${i + 1}`} onClick={() => goSection(s.id)}>
+          <button key={s.id} type="button" className={nav.section === s.id ? "on" : ""} aria-current={nav.section === s.id ? "page" : undefined} title={`${t(s.label)} · ${isTauri() ? "Ctrl" : "Alt"}+${i + 1}`} onClick={() => goSection(s.id)}>
             {s.icon}
-            <span className="tab-label">{s.label}</span>
+            <span className="tab-label">{t(s.label)}</span>
             <Badge section={s.id} badges={{ ...badges, offline: false }} />
           </button>
         ))}
         <span className="grow" />
         <UpdateButton compact />
-        <button type="button" className="rail-radio" title={state.link ? `${state.self?.name ?? "Radio"} · ${state.link.label}` : "The radio"} onClick={() => setStack("radio", [{ kind: "radio", page: "connection" }])}>
+        <button type="button" className="rail-radio" title={state.link ? `${state.self?.name ?? t("connect.tabs.radio")} · ${state.link.label}` : t("connect.rail.theRadio")} onClick={() => setStack("radio", [{ kind: "radio", page: "connection" }])}>
           {state.link ? <LinkIcon kind={state.link.kind} size={16} /> : <RadioIcon size={16} />}
           <span className={["dot", badges.offline ? "off" : "on"].join(" ")} aria-hidden="true" />
           <span className="tab-label">{state.battery ? `${batteryPercent(state.battery.mv, cell)}%` : "—"}</span>
@@ -467,9 +470,9 @@ function GroupPanel({ keys, onClose }: { keys: string[]; onClose: () => void }) 
       <div className="screen">
         <header className="screen-head">
           <div className="screen-title">
-            <span className="screen-name">{keys.length} nodes at one spot</span>
+            <span className="screen-name">{t("connect.group.title", { count: keys.length })}</span>
           </div>
-          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}>
+          <button type="button" className="icon-button" aria-label={t("common.close")} onClick={onClose}>
             ×
           </button>
         </header>

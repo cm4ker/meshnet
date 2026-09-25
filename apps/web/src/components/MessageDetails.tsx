@@ -6,6 +6,8 @@ import { quality } from "../lib/los.js";
 import { openProfile } from "../lib/nav.js";
 import { heardAt } from "../lib/nodes.js";
 import { useSession } from "../lib/session.js";
+import { locale, t } from "../i18n/index.js";
+import { tx } from "../i18n/rich.js";
 
 /**
  * What is known of how a message travelled, shown under its bubble once it is
@@ -28,17 +30,19 @@ export function MessageDetails({ message, peer }: { message: MessageRecord; peer
     if (message.flood) {
       body = message.route ? (
         <>
-          <span className="details-lead">Flooded. The acknowledgement came back along the route it took; the radio uses it for the next message.</span>
-          {chain("You", message.route, peer)}
+          <span className="details-lead">{t("chats.details.floodedRoute")}</span>
+          {chain(t("chats.details.you"), message.route, peer)}
         </>
       ) : (
-        <span>Flooded: no route was known. {message.status === "delivered" ? "No route came back with the acknowledgement." : "A route comes back with the acknowledgement."}</span>
+        <span>
+          {t("chats.details.floodedNoRoute")} {message.status === "delivered" ? t("chats.details.noRouteBack") : t("chats.details.routeComesBack")}
+        </span>
       );
     } else if (message.route) {
       body = (
         <>
-          <span className="details-label">Sent direct along</span>
-          {chain("You", message.route, peer)}
+          <span className="details-label">{t("chats.details.sentAlong")}</span>
+          {chain(t("chats.details.you"), message.route, peer)}
         </>
       );
     }
@@ -47,29 +51,27 @@ export function MessageDetails({ message, peer }: { message: MessageRecord; peer
   } else if (message.hops === null) {
     body = (
       <>
-        <span className="details-lead">Came by a direct route.</span>
-        <span>Each relay strips itself from a direct packet's path, so it reaches the radio with none: who carried it cannot be told.</span>
+        <span className="details-lead">{t("chats.details.directRoute")}</span>
+        <span>{t("chats.details.directRouteWhy")}</span>
       </>
     );
   } else {
     body = (
       <>
-        <span className="details-lead">Route unknown.</span>
-        <span>
-          The radio handed up only the hop count ({message.hops}): the packet itself was not heard while the app was listening.
-        </span>
+        <span className="details-lead">{t("chats.details.routeUnknown")}</span>
+        <span>{t("chats.details.hopCountOnly", { hops: message.hops })}</span>
       </>
     );
   }
 
-  const bytes = `${utf8Length(message.text)} bytes`;
+  const bytes = t("chats.details.bytes", { count: utf8Length(message.text) });
   const facts = out
     ? [
-        message.original ? `${bytes} · lookalike letters sent as Latin (${utf8Length(message.original)} typed)` : bytes,
-        message.roundTripMs ? `acknowledged in ${(message.roundTripMs / 1000).toFixed(1)} s` : null,
-        message.attempt > 0 ? `${message.attempt + 1} attempts` : null,
+        message.original ? `${bytes} · ${t("chats.details.lookalikes", { count: utf8Length(message.original) })}` : bytes,
+        message.roundTripMs ? t("chats.details.ackIn", { seconds: (message.roundTripMs / 1000).toFixed(1) }) : null,
+        message.attempt > 0 ? t("chats.details.attempts", { count: message.attempt + 1 }) : null,
       ]
-    : [`Sent ${clock(message.timestamp * 1000)} by their clock`, `received ${clock(message.receivedAt)}`, bytes];
+    : [t("chats.details.sentAt", { time: clock(message.timestamp * 1000) }), t("chats.details.receivedAt", { time: clock(message.receivedAt) }), bytes];
 
   const candidates = pick ? candidatesOfHash(pick, contacts) : [];
   return (
@@ -77,12 +79,10 @@ export function MessageDetails({ message, peer }: { message: MessageRecord; peer
       {body}
       {candidates.length > 1 ? (
         <div className="cands">
-          <span>
-            <b>{pick}</b> could be {candidates.length} contacts:
-          </span>
+          <span>{tx("chats.details.couldBe", { hash: <b>{pick}</b>, count: candidates.length })}</span>
           {candidates.map((c) => (
             <button key={c.key} type="button" className="link" onClick={() => openProfile(c.key)}>
-              {c.name || c.prefix} · heard {ago(heardAt(c) || null)}
+              {t("chats.details.candidate", { name: c.name || c.prefix, time: ago(heardAt(c) || null) })}
             </button>
           ))}
         </div>
@@ -98,7 +98,7 @@ function Snr({ snr }: { snr: number | null }) {
   return (
     <span className={`heard-snr ${quality(snr)}`}>
       {snr > 0 ? "+" : ""}
-      {snr.toFixed(1)} <small>dB</small>
+      {snr.toFixed(1)} <small>{t("chats.details.db")}</small>
     </span>
   );
 }
@@ -116,7 +116,7 @@ function Spread({ echoes, relay }: { echoes: MessageEcho[]; relay: (hash: string
   return (
     <>
       <span className="heard-head">
-        Heard you <span className="muted">· {n} repeater{n === 1 ? "" : "s"}</span>
+        {t("chats.details.heardYou")} <span className="muted">· {t("chats.details.repeaters", { count: n })}</span>
       </span>
       <div className="heard-rows">
         {spread.first.map((f) => (
@@ -129,10 +129,10 @@ function Spread({ echoes, relay }: { echoes: MessageEcho[]; relay: (hash: string
       {more > 0 ? (
         <>
           <button type="button" className="heard-more" aria-expanded={open} onClick={() => setOpen(!open)}>
-            Went on through {more} more
+            {t("chats.details.wentOn", { count: more })}
             <span className="muted">
               {" "}
-              · {spread.farthest} hops out {open ? "▴" : "›"}
+              · {t("chats.details.hopsOut", { count: spread.farthest })} {open ? "▴" : "›"}
             </span>
           </button>
           {open
@@ -158,7 +158,7 @@ function Arrived({ echoes, relay }: { echoes: MessageEcho[]; relay: (hash: strin
   const [open, setOpen] = useState(false);
   const path = (echo: MessageEcho) =>
     echo.path.length === 0 ? (
-      <span className="muted">heard direct</span>
+      <span className="muted">{t("chats.details.heardDirect")}</span>
     ) : (
       echo.path.map((hash, j) => (
         <Fragment key={j}>
@@ -172,7 +172,7 @@ function Arrived({ echoes, relay }: { echoes: MessageEcho[]; relay: (hash: strin
     <>
       <div className="heard-row">
         <span className="heard-name wrap">
-          <span className="muted">{first!.path.length ? "Came via " : ""}</span>
+          <span className="muted">{first!.path.length ? `${t("chats.details.cameVia")} ` : ""}</span>
           {path(first!)}
         </span>
         <Snr snr={first!.snr} />
@@ -180,7 +180,7 @@ function Arrived({ echoes, relay }: { echoes: MessageEcho[]; relay: (hash: strin
       {rest.length > 0 ? (
         <>
           <button type="button" className="heard-more" aria-expanded={open} onClick={() => setOpen(!open)}>
-            {rest.length} more cop{rest.length === 1 ? "y" : "ies"} <span className="muted">{open ? "▴" : "›"}</span>
+            {t("chats.details.moreCopies", { count: rest.length })} <span className="muted">{open ? "▴" : "›"}</span>
           </button>
           {open ? (
             <div className="heard-rows">
@@ -210,13 +210,13 @@ function Relay({ hash, contacts, pick, onPick }: { hash: string; contacts: Recor
   }
   if (matches.length > 1) {
     return (
-      <button type="button" className={["relay amb", pick === hash ? "on" : ""].join(" ")} title={`${matches.length} contacts share this hash`} onClick={() => onPick(pick === hash ? null : hash)}>
+      <button type="button" className={["relay amb", pick === hash ? "on" : ""].join(" ")} title={t("chats.details.shareHash", { count: matches.length })} onClick={() => onPick(pick === hash ? null : hash)}>
         <span className="hop-hash">{hash}</span>?
       </button>
     );
   }
   return (
-    <span className="relay unknown" title="No contact has this hash">
+    <span className="relay unknown" title={t("chats.details.noHash")}>
       <span className="hop-hash">{hash}</span>
     </span>
   );
@@ -232,26 +232,24 @@ function Unheard({ message }: { message: MessageRecord }) {
   if (plan && plan.made < plan.total) {
     return (
       <>
-        <span className="details-lead">
-          Trying again: {plan.made} of {plan.total} sent.
-        </span>
-        <span>{plan.nextAt === null ? "Waiting for the radio; no try is spent while it is away." : "It stops at the first repeater heard sending it on."}</span>
+        <span className="details-lead">{t("chats.details.tryingAgain", { made: plan.made, total: plan.total })}</span>
+        <span>{plan.nextAt === null ? t("chats.details.waitingRadio") : t("chats.details.stopsAtFirst")}</span>
       </>
     );
   }
   if (message.status === "unheard") {
     return (
       <>
-        <span className="details-lead">{plan ? `${plan.total} tries, none relayed.` : "No repeater sent it on in the first 20 s."}</span>
-        <span>A node in direct range may still have it. Repeaters out of range, asleep or busy stay quiet the same way.</span>
+        <span className="details-lead">{plan ? t("chats.details.triesNone", { count: plan.total }) : t("chats.details.noRepeater20")}</span>
+        <span>{t("chats.details.mayHaveIt")}</span>
       </>
     );
   }
-  return <span>No repeater has been heard sending it on.</span>;
+  return <span>{t("chats.details.noRepeater")}</span>;
 }
 
 function clock(ms: number): string {
-  return new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return new Date(ms).toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 /** A route as a chain of chips: named relays open their contact, a hash several contacts share lists them. */
@@ -279,15 +277,15 @@ function HopChain({
           <Fragment key={i}>
             <span className="sep">›</span>
             {matches.length === 1 ? (
-              <button type="button" className="hop" title="Open the contact" onClick={() => openProfile(matches[0]!.key)}>
+              <button type="button" className="hop" title={t("chats.details.openContact")} onClick={() => openProfile(matches[0]!.key)}>
                 {matches[0]!.name} <span className="hop-hash">{hash}</span>
               </button>
             ) : matches.length > 1 ? (
-              <button type="button" className={["hop amb", pick === hash ? "on" : ""].join(" ")} title={`${matches.length} contacts share this hash`} onClick={() => onPick(pick === hash ? null : hash)}>
+              <button type="button" className={["hop amb", pick === hash ? "on" : ""].join(" ")} title={t("chats.details.shareHash", { count: matches.length })} onClick={() => onPick(pick === hash ? null : hash)}>
                 <span className="hop-hash">{hash}</span>?
               </button>
             ) : (
-              <span className="hop" title="No contact has this hash">
+              <span className="hop" title={t("chats.details.noHash")}>
                 <span className="hop-hash">{hash}</span>
               </span>
             )}

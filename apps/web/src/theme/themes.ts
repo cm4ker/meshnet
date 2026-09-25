@@ -5,6 +5,8 @@
  * bubbles, so the app is not all grey.
  */
 
+import type { Key } from "../i18n/index.js";
+
 export type ThemeToken =
   | "bg"
   | "panel"
@@ -47,7 +49,8 @@ export type ThemeLook = "terminal" | "lcd" | "classic";
 
 export interface Theme {
   id: string;
-  name: string;
+  /** Its name as a key: the picker says it in the reader's language, and One Dark and One Light in every one. */
+  name: Key;
   appearance: "light" | "dark";
   tokens: ThemeTokens;
   bubble?: BubblePalette;
@@ -56,7 +59,7 @@ export interface Theme {
 
 const oneDark: Theme = {
   id: "one-dark",
-  name: "One Dark",
+  name: "radio.themes.oneDark",
   appearance: "dark",
   tokens: {
     bg: "#282c33",
@@ -82,7 +85,7 @@ const oneDark: Theme = {
 
 const oneLight: Theme = {
   id: "one-light",
-  name: "One Light",
+  name: "radio.themes.oneLight",
   appearance: "light",
   tokens: {
     bg: "#fafafa",
@@ -106,11 +109,11 @@ const oneLight: Theme = {
   },
 };
 
-/** In the order the picker shows them: by name, so no kind of theme stands apart from the rest. */
+/** By name, as the picker shows them in the reader's language, so no kind of theme stands apart from the rest. */
 export const themes: Theme[] = [
   {
     id: "amber",
-    name: "Amber",
+    name: "radio.themes.amber",
     appearance: "dark",
     look: "terminal",
     tokens: {
@@ -136,7 +139,7 @@ export const themes: Theme[] = [
   },
   {
     id: "apricot",
-    name: "Apricot",
+    name: "radio.themes.apricot",
     appearance: "light",
     tokens: {
       bg: "#fff7f1",
@@ -161,7 +164,7 @@ export const themes: Theme[] = [
   },
   {
     id: "berry",
-    name: "Berry",
+    name: "radio.themes.berry",
     appearance: "light",
     tokens: {
       bg: "#fff5f9",
@@ -186,7 +189,7 @@ export const themes: Theme[] = [
   },
   {
     id: "dusk",
-    name: "Dusk",
+    name: "radio.themes.dusk",
     appearance: "dark",
     tokens: {
       bg: "#1f1519",
@@ -211,7 +214,7 @@ export const themes: Theme[] = [
   },
   {
     id: "grape",
-    name: "Grape",
+    name: "radio.themes.grape",
     appearance: "dark",
     tokens: {
       bg: "#1b1429",
@@ -236,7 +239,7 @@ export const themes: Theme[] = [
   },
   {
     id: "lagoon",
-    name: "Lagoon",
+    name: "radio.themes.lagoon",
     appearance: "dark",
     tokens: {
       bg: "#0e1f2b",
@@ -261,7 +264,7 @@ export const themes: Theme[] = [
   },
   {
     id: "mint",
-    name: "Mint",
+    name: "radio.themes.mint",
     appearance: "light",
     tokens: {
       bg: "#f2faf5",
@@ -286,7 +289,7 @@ export const themes: Theme[] = [
   },
   {
     id: "olive",
-    name: "Olive",
+    name: "radio.themes.olive",
     appearance: "light",
     look: "lcd",
     tokens: {
@@ -314,7 +317,7 @@ export const themes: Theme[] = [
   oneLight,
   {
     id: "onyx",
-    name: "Onyx",
+    name: "radio.themes.onyx",
     appearance: "dark",
     tokens: {
       bg: "#000000",
@@ -347,7 +350,7 @@ export const themes: Theme[] = [
   },
   {
     id: "pebble",
-    name: "Pebble",
+    name: "radio.themes.pebble",
     appearance: "light",
     look: "classic",
     tokens: {

@@ -6,16 +6,30 @@
  */
 
 import { AclRole, AdvType, contactHops, isNodeType, type ContactRecord, type NodeLogin, type SessionState } from "@meshnet/meshcore";
+import { t, type Key } from "../i18n/index.js";
 
 export type NodeTab = "overview" | "neighbours" | "history" | "settings" | "access" | "console";
 
+/** Each read in the language of the moment: a getter, since the module loads before the language does. */
 export const TAB_LABELS: Record<NodeTab, string> = {
-  overview: "Overview",
-  neighbours: "Neighbours",
-  history: "History",
-  settings: "Settings",
-  access: "Access",
-  console: "Console",
+  get overview() {
+    return t("mesh.tab.overview");
+  },
+  get neighbours() {
+    return t("mesh.tab.neighbours");
+  },
+  get history() {
+    return t("mesh.tab.history");
+  },
+  get settings() {
+    return t("mesh.tab.settings");
+  },
+  get access() {
+    return t("mesh.tab.access");
+  },
+  get console() {
+    return t("mesh.tab.console");
+  },
 };
 
 /** Only a repeater tracks neighbours; only a sensor keeps series to summarise. */
@@ -35,7 +49,7 @@ export function isAdmin(login: NodeLogin | undefined): boolean {
 
 export function hopsLabel(contact: ContactRecord): string {
   const hops = contactHops(contact);
-  return hops === null ? "no route" : hops === 0 ? "direct" : `${hops} hop${hops === 1 ? "" : "s"}`;
+  return hops === null ? t("mesh.hops.none") : hops === 0 ? t("mesh.hops.direct") : t("mesh.hops.count", { count: hops });
 }
 
 /**
@@ -50,7 +64,7 @@ export function heardAt(contact: ContactRecord): number {
 }
 
 export function nodeKindName(type: number): string {
-  return type === AdvType.Repeater ? "Repeater" : type === AdvType.Room ? "Room" : type === AdvType.Sensor ? "Sensor" : "Node";
+  return t(type === AdvType.Repeater ? "mesh.kind.repeater" : type === AdvType.Room ? "mesh.kind.room" : type === AdvType.Sensor ? "mesh.kind.sensor" : "mesh.kind.node");
 }
 
 /** The nodes in the list: every repeater, room and sensor signed in to, asked for its status, or with a password saved. */
@@ -102,57 +116,52 @@ export interface SettingGroup {
   fields: SettingField[];
 }
 
+/**
+ * A field whose label and hint are read in the language of the moment: the
+ * tables below are made when the module loads, before the language is known.
+ */
+function makeField(label: Key, spec: Omit<SettingField, "label" | "hint">, hint?: Key): SettingField {
+  const made = Object.defineProperty({ ...spec }, "label", { get: () => t(label), enumerable: true }) as SettingField;
+  if (hint) Object.defineProperty(made, "hint", { get: () => t(hint), enumerable: true });
+  return made;
+}
+
+/** A group whose title is read in the language of the moment. */
+function makeGroup(id: GroupId, title: Key, fields: SettingField[]): SettingGroup {
+  return Object.defineProperty({ id, fields }, "title", { get: () => t(title), enumerable: true }) as SettingGroup;
+}
+
 export const RADIO_FIELDS: SettingField[] = [
-  { name: "freq", label: "Frequency, MHz", kind: "text" },
-  { name: "bw", label: "Bandwidth, kHz", kind: "select", options: ["7.8", "10.4", "15.6", "20.8", "31.25", "41.7", "62.5", "125", "250", "500"] },
-  { name: "sf", label: "Spreading factor", kind: "select", options: ["5", "6", "7", "8", "9", "10", "11", "12"] },
-  { name: "cr", label: "Coding rate", kind: "select", options: ["5", "6", "7", "8"] },
+  makeField("mesh.settings.freq", { name: "freq", kind: "text" }),
+  makeField("mesh.settings.bw", { name: "bw", kind: "select", options: ["7.8", "10.4", "15.6", "20.8", "31.25", "41.7", "62.5", "125", "250", "500"] }),
+  makeField("mesh.settings.sf", { name: "sf", kind: "select", options: ["5", "6", "7", "8", "9", "10", "11", "12"] }),
+  makeField("mesh.settings.cr", { name: "cr", kind: "select", options: ["5", "6", "7", "8"] }),
 ];
 
 const GROUPS: Record<GroupId, SettingGroup> = {
-  identity: {
-    id: "identity",
-    title: "Identity",
-    fields: [
-      { name: "name", label: "Name", kind: "text" },
-      { name: "lat", label: "Latitude", kind: "text" },
-      { name: "lon", label: "Longitude", kind: "text" },
-      { name: "owner.info", label: "Owner info", kind: "textarea", hint: "Shown to anyone who asks the node who runs it." },
-    ],
-  },
-  radio: {
-    id: "radio",
-    title: "Radio",
-    // Frequency, bandwidth, SF and CR travel as one `radio` value; see RADIO_FIELDS.
-    fields: [{ name: "tx", label: "TX power, dBm", kind: "number", min: -9, max: 30 }],
-  },
-  repeating: {
-    id: "repeating",
-    title: "Repeating",
-    fields: [
-      { name: "repeat", label: "Repeat packets", kind: "toggle", hint: "Off turns the repeater into a listener." },
-      { name: "flood.max", label: "Flood max hops", kind: "number", min: 0, max: 64 },
-      { name: "advert.interval", label: "Zero-hop advert, min", kind: "number", min: 60, max: 240, allowZero: true, hint: "0 is off, else 60 to 240." },
-      { name: "flood.advert.interval", label: "Flood advert, hours", kind: "number", min: 0, max: 168, hint: "0 is off." },
-      { name: "txdelay", label: "TX delay factor", kind: "text" },
-      { name: "direct.txdelay", label: "Direct TX delay factor", kind: "text" },
-      { name: "rxdelay", label: "RX delay base", kind: "text" },
-      { name: "af", label: "Airtime factor", kind: "text" },
-    ],
-  },
-  access: {
-    id: "access",
-    title: "Guests",
-    fields: [
-      { name: "guest.password", label: "Guest password", kind: "text" },
-      { name: "allow.read.only", label: "Let strangers read", kind: "toggle", hint: "A blank password signs in read-only." },
-    ],
-  },
-  power: {
-    id: "power",
-    title: "Power",
-    fields: [{ name: "powersaving", label: "Power saving", kind: "toggle", hint: "Sleeps between packets. Not every board has it." }],
-  },
+  identity: makeGroup("identity", "mesh.settings.identity", [
+    makeField("mesh.settings.name", { name: "name", kind: "text" }),
+    makeField("mesh.settings.lat", { name: "lat", kind: "text" }),
+    makeField("mesh.settings.lon", { name: "lon", kind: "text" }),
+    makeField("mesh.settings.ownerInfo", { name: "owner.info", kind: "textarea" }, "mesh.settings.ownerInfoHint"),
+  ]),
+  // Frequency, bandwidth, SF and CR travel as one `radio` value; see RADIO_FIELDS.
+  radio: makeGroup("radio", "mesh.settings.radio", [makeField("mesh.settings.tx", { name: "tx", kind: "number", min: -9, max: 30 })]),
+  repeating: makeGroup("repeating", "mesh.settings.repeating", [
+    makeField("mesh.settings.repeat", { name: "repeat", kind: "toggle" }, "mesh.settings.repeatHint"),
+    makeField("mesh.settings.floodMax", { name: "flood.max", kind: "number", min: 0, max: 64 }),
+    makeField("mesh.settings.advertInterval", { name: "advert.interval", kind: "number", min: 60, max: 240, allowZero: true }, "mesh.settings.advertIntervalHint"),
+    makeField("mesh.settings.floodAdvertInterval", { name: "flood.advert.interval", kind: "number", min: 0, max: 168 }, "mesh.settings.floodAdvertIntervalHint"),
+    makeField("mesh.settings.txdelay", { name: "txdelay", kind: "text" }),
+    makeField("mesh.settings.directTxdelay", { name: "direct.txdelay", kind: "text" }),
+    makeField("mesh.settings.rxdelay", { name: "rxdelay", kind: "text" }),
+    makeField("mesh.settings.af", { name: "af", kind: "text" }),
+  ]),
+  access: makeGroup("access", "mesh.settings.guests", [
+    makeField("mesh.settings.guestPassword", { name: "guest.password", kind: "text" }),
+    makeField("mesh.settings.allowReadOnly", { name: "allow.read.only", kind: "toggle" }, "mesh.settings.allowReadOnlyHint"),
+  ]),
+  power: makeGroup("power", "mesh.settings.power", [makeField("mesh.settings.powersaving", { name: "powersaving", kind: "toggle" }, "mesh.settings.powersavingHint")]),
 };
 
 /** A sensor has no guests; a room does not repeat. */
@@ -219,25 +228,25 @@ function trimNumber(text: string, decimals: number): string {
 /** What is wrong with a value before it goes on the air, or null. */
 export function validate(field: SettingField, value: string): string | null {
   if (field.kind === "number") {
-    if (!/^-?\d+$/.test(value.trim())) return "A whole number.";
+    if (!/^-?\d+$/.test(value.trim())) return t("mesh.settings.wholeNumber");
     const n = Number(value);
     if (field.allowZero && n === 0) return null;
-    if (field.min !== undefined && n < field.min) return `At least ${field.min}.`;
-    if (field.max !== undefined && n > field.max) return `At most ${field.max}.`;
+    if (field.min !== undefined && n < field.min) return t("mesh.settings.atLeast", { min: field.min });
+    if (field.max !== undefined && n > field.max) return t("mesh.settings.atMost", { max: field.max });
   }
-  if ((field.name === "lat" || field.name === "lon") && !Number.isFinite(Number(value))) return "Degrees, like 59.93421.";
-  if (field.name === "name" && !value.trim()) return "A name is needed.";
-  if (new TextEncoder().encode(writeCommand(field.name, value)).length > 150) return "Too long for one console command.";
+  if ((field.name === "lat" || field.name === "lon") && !Number.isFinite(Number(value))) return t("mesh.settings.degrees");
+  if (field.name === "name" && !value.trim()) return t("mesh.settings.nameNeeded");
+  if (new TextEncoder().encode(writeCommand(field.name, value)).length > 150) return t("mesh.settings.tooLong");
   return null;
 }
 
 export function validateRadio(radio: RadioValue): string | null {
   const freq = Number(radio.freq);
-  if (!Number.isFinite(freq) || freq < 150 || freq > 2500) return "Frequency between 150 and 2500 MHz.";
+  if (!Number.isFinite(freq) || freq < 150 || freq > 2500) return t("mesh.settings.frequencyRange");
   return null;
 }
 
 /** What a node is, as a person reads it: a chat node is a person. */
 export function kindLabel(type: number): string {
-  return type === AdvType.Chat ? "Person" : nodeKindName(type);
+  return type === AdvType.Chat ? t("mesh.kind.person") : nodeKindName(type);
 }

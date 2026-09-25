@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { locale, t } from "../i18n/index.js";
 import { isTauri } from "../lib/platform.js";
 import { updateBusy } from "../lib/updateController.js";
 import { chooseUpdateChannel, closeUpdates, initializeUpdates, installUpdate, openUpdates, setAutomaticChecks, updates, useDesktopUpdateInfo, useUpdates } from "../lib/updates.js";
@@ -13,9 +14,9 @@ export function UpdateButton({ compact = false }: { compact?: boolean }) {
   if (!isTauri() || (info.ready && !info.supported && !info.error)) return null;
   const available = state.version !== null;
   return (
-    <button type="button" className={compact ? "rail-update" : "update-link"} onClick={openUpdates} title={available ? `Update ${state.version} available` : "App updates"} aria-label={available ? `App updates · ${state.version} available` : "App updates"}>
+    <button type="button" className={compact ? "rail-update" : "update-link"} onClick={openUpdates} title={available ? t("app.update.available", { version: state.version! }) : t("app.update.title")} aria-label={available ? t("app.update.availableAria", { version: state.version! }) : t("app.update.title")}>
       <RefreshIcon size={compact ? 18 : 15} />
-      <span>{compact ? "Update" : available ? `Update ${state.version} available` : "App updates"}</span>
+      <span>{compact ? t("app.update.short") : available ? t("app.update.available", { version: state.version! }) : t("app.update.title")}</span>
       {available ? <span className="update-dot" aria-hidden="true" /> : null}
     </button>
   );
@@ -29,34 +30,36 @@ export function UpdatesDialog() {
   const busy = updateBusy(state.phase);
   const percent = state.total && state.total > 0 ? Math.min(100, Math.round(state.downloaded / state.total * 100)) : null;
   return (
-    <Dialog open={info.open} title="App updates" onClose={closeUpdates} dismissible={state.phase !== "installing"} footer={<>
-      <Button onClick={closeUpdates} disabled={state.phase === "installing"}>Later</Button>
-      {state.phase === "ready" ? <Button variant="primary" onClick={() => void installUpdate()}>Install and restart</Button>
-        : state.phase === "available" ? <Button variant="primary" onClick={() => void updates.download()}>Download update</Button>
-        : state.phase === "downloading" ? <Button busy>Downloading…</Button>
-        : state.phase === "installing" ? <Button busy>Installing…</Button>
-        : <Button variant="primary" busy={state.phase === "checking"} disabled={!info.supported || busy} onClick={() => void updates.check()}>Check for updates</Button>}
+    <Dialog open={info.open} title={t("app.update.title")} onClose={closeUpdates} dismissible={state.phase !== "installing"} footer={<>
+      <Button onClick={closeUpdates} disabled={state.phase === "installing"}>{t("app.update.later")}</Button>
+      {state.phase === "ready" ? <Button variant="primary" onClick={() => void installUpdate()}>{t("app.update.install")}</Button>
+        : state.phase === "available" ? <Button variant="primary" onClick={() => void updates.download()}>{t("app.update.download")}</Button>
+        : state.phase === "downloading" ? <Button busy>{t("app.update.downloadingBusy")}</Button>
+        : state.phase === "installing" ? <Button busy>{t("app.update.installingBusy")}</Button>
+        : <Button variant="primary" busy={state.phase === "checking"} disabled={!info.supported || busy} onClick={() => void updates.check()}>{t("app.update.check")}</Button>}
     </>}>
       <Group>
-        <InfoRow label="Installed version">{info.version}</InfoRow>
-        <SelectRow label="Update channel" value={state.channel} options={[{ value: "stable", label: "Stable" }, { value: "dev", label: "Dev" }]} onChange={chooseUpdateChannel} disabled={busy} />
-        <SwitchRow label="Check automatically" checked={info.auto} onChange={setAutomaticChecks} disabled={state.phase === "installing"} />
+        <InfoRow label={t("app.update.installed")}>{info.version}</InfoRow>
+        <SelectRow label={t("app.update.channel")} value={state.channel} options={[{ value: "stable", label: t("app.update.stable") }, { value: "dev", label: t("app.update.dev") }]} onChange={chooseUpdateChannel} disabled={busy} />
+        <SwitchRow label={t("app.update.auto")} checked={info.auto} onChange={setAutomaticChecks} disabled={state.phase === "installing"} />
       </Group>
-      <p className="muted small">{state.channel === "dev" ? "Dev builds contain the latest changes and may have unfinished features." : "Stable releases only. Switching from Dev waits for a newer stable version; it does not downgrade the app."}</p>
+      <p className="muted small">{state.channel === "dev" ? t("app.update.devNote") : t("app.update.stableNote")}</p>
       <div className="update-status" role="status" aria-live="polite">
-        {!info.ready ? "Loading update settings…" : state.phase === "checking" ? "Checking for updates…"
-          : state.phase === "current" ? "You have the latest version available in this channel."
-          : state.phase === "downloading" ? `Downloading${percent === null ? "…" : ` · ${percent}%`} · ${(state.downloaded / 1_048_576).toFixed(1)} MB`
-          : state.phase === "ready" ? "Downloaded and verified. Ready to install."
-          : state.phase === "installing" ? "Finishing radio requests, saving your data and installing…"
-          : state.version ? `Version ${state.version} is available.` : "Check when you have an internet connection."}
+        {!info.ready ? t("app.update.loading") : state.phase === "checking" ? t("app.update.checking")
+          : state.phase === "current" ? t("app.update.current")
+          : state.phase === "downloading" ? (percent === null
+            ? t("app.update.downloadingSize", { size: (state.downloaded / 1_048_576).toFixed(1) })
+            : t("app.update.downloadingPercent", { percent, size: (state.downloaded / 1_048_576).toFixed(1) }))
+          : state.phase === "ready" ? t("app.update.ready")
+          : state.phase === "installing" ? t("app.update.installing")
+          : state.version ? t("app.update.versionAvailable", { version: state.version }) : t("app.update.offline")}
       </div>
-      {state.phase === "downloading" ? <progress className="update-progress" aria-label="Update download" max={100} value={percent ?? undefined} /> : null}
-      {state.version ? <p><strong>Version {state.version}</strong></p> : null}
+      {state.phase === "downloading" ? <progress className="update-progress" aria-label={t("app.update.progress")} max={100} value={percent ?? undefined} /> : null}
+      {state.version ? <p><strong>{t("app.update.version", { version: state.version })}</strong></p> : null}
       {state.notes ? <div className="update-notes">{state.notes}</div> : null}
-      {state.phase === "ready" ? <p className="muted small">Installation restarts Meshnet and briefly disconnects your radio. Your history, drafts and settings are kept.</p> : null}
+      {state.phase === "ready" ? <p className="muted small">{t("app.update.restartNote")}</p> : null}
       {state.error || info.error ? <p className="connect-error" role="alert">{state.error ?? info.error}</p> : null}
-      {state.checkedAt ? <p className="muted small">Last checked: {new Date(state.checkedAt).toLocaleString()}</p> : null}
+      {state.checkedAt ? <p className="muted small">{t("app.update.lastChecked", { time: new Date(state.checkedAt).toLocaleString(locale()) })}</p> : null}
     </Dialog>
   );
 }

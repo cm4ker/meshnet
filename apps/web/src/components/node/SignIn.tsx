@@ -1,11 +1,14 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { AdvType, MAX_PASSWORD_LEN, NoReplyError, aclRoleName } from "@meshnet/meshcore";
+import { AdvType, MAX_PASSWORD_LEN, NoReplyError } from "@meshnet/meshcore";
+import { errorText } from "../../i18n/errors.js";
+import { t } from "../../i18n/index.js";
 import { addableNodes, hopsLabel, nodeKindName } from "../../lib/nodes.js";
-import { forgetPassword, hasSavedPassword, passwordStoreName, readPassword, savePassword, useSavedPasswords } from "../../lib/secrets.js";
+import { forgetPassword, hasSavedPassword, passwordStoreHint, readPassword, savePassword, useSavedPasswords } from "../../lib/secrets.js";
 import { session, useSession } from "../../lib/session.js";
 import { Button } from "../../ui/Button.js";
 import { Dialog } from "../../ui/Dialog.js";
 import { Avatar } from "../Avatar.js";
+import { roleName } from "./Access.js";
 
 /**
  * Signing in to a repeater, room or sensor; with no node given, picking one
@@ -54,7 +57,7 @@ export function SignIn({
     try {
       const login = await session.login(key, password);
       if (!login.ok) {
-        setError(password ? "The node refused this password." : "The node does not know this radio, and a blank password lets no stranger in here.");
+        setError(password ? t("node.signIn.refused") : t("node.signIn.unknownRadio"));
         return;
       }
       if (remember && password) await savePassword(key, password);
@@ -65,17 +68,13 @@ export function SignIn({
       }
       onSignedIn(key);
     } catch (err) {
-      setError(
-        err instanceof NoReplyError
-          ? `No reply from ${contact.name || contact.prefix}. It may be out of range, or the route to it stale; try again.`
-          : (err as Error).message,
-      );
+      setError(err instanceof NoReplyError ? t("node.signIn.noReply", { name: contact.name || contact.prefix }) : errorText(err));
     } finally {
       setBusy(false);
     }
   };
 
-  const title = nodeKey && contact ? `Sign in to ${contact.name || contact.prefix}` : "Add a node";
+  const title = nodeKey && contact ? t("node.signIn.title", { name: contact.name || contact.prefix }) : t("node.signIn.addNode");
   const login = key ? state.logins[key] : undefined;
 
   return (
@@ -83,11 +82,11 @@ export function SignIn({
       <form className="stack" onSubmit={submit}>
         {nodeKey ? null : (
           <div className="field">
-            <span className="field-label">Repeaters, rooms and sensors in your contacts</span>
+            <span className="field-label">{t("node.signIn.nodes")}</span>
             {choices.length === 0 ? (
-              <p className="muted small">Every one in your contacts is already in the list. Others appear in the contacts when their adverts are heard.</p>
+              <p className="muted small">{t("node.signIn.allListed")}</p>
             ) : (
-              <div className="pick" role="listbox" aria-label="Node">
+              <div className="pick" role="listbox" aria-label={t("node.signIn.node")}>
                 {choices.map((c) => (
                   <button key={c.key} type="button" role="option" aria-selected={picked === c.key} className={picked === c.key ? "on" : ""} onClick={() => setPicked(c.key)}>
                     <Avatar name={c.name || c.prefix} type={c.type} size={28} />
@@ -104,34 +103,34 @@ export function SignIn({
           </div>
         )}
         <label className="field">
-          <span className="field-label">Password</span>
+          <span className="field-label">{t("node.signIn.password")}</span>
           <input
             className="input"
             type="password"
             value={password}
             autoComplete="current-password"
-            placeholder={contact?.type === AdvType.Sensor ? "admin password" : "admin or guest password"}
+            placeholder={contact?.type === AdvType.Sensor ? t("node.signIn.adminPassword") : t("node.signIn.adminOrGuest")}
             onChange={(e) => setPassword(e.target.value)}
             autoFocus={!!nodeKey}
           />
           <span className={["field-hint", tooLong ? "danger" : ""].join(" ")}>
-            {tooLong ? `The node reads only the first ${MAX_PASSWORD_LEN} bytes; this one is longer.` : "Blank works when the node already knows this radio, or lets strangers read."}
+            {tooLong ? t("node.signIn.tooLong", { max: MAX_PASSWORD_LEN }) : t("node.signIn.blank")}
           </span>
         </label>
         <label className="toggle">
           <span className="toggle-text">
-            <span>Remember password</span>
-            <span className="field-hint">Kept in {passwordStoreName()}.</span>
+            <span>{t("node.signIn.remember")}</span>
+            <span className="field-hint">{passwordStoreHint()}</span>
           </span>
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
         </label>
-        {login && !login.ok && !error ? <p className="muted small">The last attempt was refused.</p> : null}
-        {login?.ok && login.role !== null && !error ? <p className="muted small">Signed in as {aclRoleName(login.role)} last time.</p> : null}
+        {login && !login.ok && !error ? <p className="muted small">{t("node.signIn.lastRefused")}</p> : null}
+        {login?.ok && login.role !== null && !error ? <p className="muted small">{t("node.signIn.lastRole", { role: roleName(login.role) })}</p> : null}
         {error ? <p className="connect-error">{error}</p> : null}
         <div className="dialog-foot">
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{t("common.cancel")}</Button>
           <Button variant="primary" type="submit" busy={busy} disabled={!contact || tooLong || state.status !== "ready"}>
-            Sign in
+            {t("node.signIn.signIn")}
           </Button>
         </div>
       </form>

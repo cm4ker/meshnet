@@ -7,6 +7,7 @@
  * leads to it: the word and the weakest leg are of the part between them.
  */
 
+import { t } from "../../i18n/index.js";
 import { nameOfHash } from "../../lib/echoes.js";
 import type { SpanTool } from "../../lib/meshTool.js";
 import { keepLooking, measuredLegs, ping, spanKey, stopPing, usePing } from "../../lib/ping.js";
@@ -27,8 +28,8 @@ export function SpanSheet({ tool, onClose }: { tool: SpanTool; onClose: () => vo
   if (!b || !key) {
     return (
       <div className="tool route-sheet">
-        <SheetHead title={`Check from ${nameA}`} sub="Tap a repeater on the map" onBack={onClose} />
-        <p className="tool-credit muted">The way from you to {nameA}, and home from the one you tap, comes from what the radio has heard.</p>
+        <SheetHead title={t("tools.span.title", { name: nameA })} sub={t("tools.span.tap")} onBack={onClose} />
+        <p className="tool-credit muted">{t("tools.span.explain", { name: nameA })}</p>
       </div>
     );
   }
@@ -42,7 +43,7 @@ export function SpanSheet({ tool, onClose }: { tool: SpanTool; onClose: () => vo
   const chain = p && p.chain.length ? p.chain : null;
   const approach = chain && p ? chain.slice(0, Math.max(0, p.from)) : [];
   const between = chain && p ? chain.slice(Math.max(0, p.from)) : [];
-  const names = chain ? ["You", ...chain.map(name)] : [];
+  const names = chain ? [t("tools.you"), ...chain.map(name)] : [];
   const openLeg = (index: number) => {
     if (!p) return;
     const ends = chainEnds(p.chain, state);
@@ -53,7 +54,7 @@ export function SpanSheet({ tool, onClose }: { tool: SpanTool; onClose: () => vo
 
   return (
     <div className="tool route-sheet">
-      <SheetHead title={`${nameA} → ${nameB}`} sub="Measured from your radio" onBack={onClose} />
+      <SheetHead title={`${nameA} → ${nameB}`} sub={t("tools.span.measured")} onBack={onClose} />
       {between.length ? (
         <p className="tool-line chain">
           {between.map((h, i) => (
@@ -64,12 +65,12 @@ export function SpanSheet({ tool, onClose }: { tool: SpanTool; onClose: () => vo
           ))}
         </p>
       ) : null}
-      {approach.length ? <p className="tool-credit muted">Reached from you via {approach.map(name).join(" › ")}</p> : null}
+      {approach.length ? <p className="tool-credit muted">{t("tools.span.reached", { path: approach.map(name).join(" › ") })}</p> : null}
       {p ? <CheckResult p={p} names={names} reach={null} placed onLeg={openLeg} /> : null}
       <Button variant={running ? "default" : "primary"} size="lg" disabled={!online} onClick={() => (running ? stopPing(key) : gaveUp ? void keepLooking(key) : void ping(key))}>
-        {running ? "Stop" : gaveUp ? "Keep looking" : "Check"}
+        {running ? t("tools.stop") : gaveUp ? t("tools.keepLooking") : t("tools.check")}
       </Button>
-      {!p ? <p className="tool-credit muted">Tap another repeater to change the far end.</p> : null}
+      {!p ? <p className="tool-credit muted">{t("tools.span.tapAnother")}</p> : null}
     </div>
   );
 }

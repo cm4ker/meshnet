@@ -6,6 +6,7 @@
  * houses or trees, so this says what the terrain allows and no more.
  */
 
+import { t } from "../i18n/index.js";
 import { airtimeMs } from "./composer.js";
 
 /** Refraction bends a radio path a little round the Earth: it sees a planet 4/3 the size. */
@@ -88,9 +89,15 @@ export function quality(snr: number): Quality {
   return snr >= 0 ? "good" : snr >= -5 ? "fair" : "weak";
 }
 
-export const QUALITY_WORDS: Record<Quality, string> = { good: "Good", fair: "Fair", weak: "Weak" };
+/** The word for a quality, in the reader's language. */
+export function qualityWord(q: Quality): string {
+  return t(`tools.quality.${q}`);
+}
 
-export const VERDICT_WORDS: Record<Verdict, string> = { clear: "Clear view", grazed: "Fresnel zone grazed", blocked: "Blocked by terrain" };
+/** The words for a verdict, in the reader's language. */
+export function verdictWord(v: Verdict): string {
+  return t(`tools.verdict.${v}`);
+}
 
 /**
  * The line of sight between antennas `heightA` and `heightB` metres above the
@@ -155,5 +162,5 @@ export function formatSnr(snr: number): string {
 
 /** A power in dBm with a real minus sign. */
 export function formatDbm(dbm: number): string {
-  return `${Math.round(dbm)}`.replace("-", "−") + " dBm";
+  return t("tools.unit.dbm", { value: `${Math.round(dbm)}`.replace("-", "−") });
 }

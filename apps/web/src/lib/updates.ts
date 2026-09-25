@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { errorText } from "../i18n/errors.js";
+import { t } from "../i18n/index.js";
 import { flushDrafts } from "./drafts.js";
 import { getLink, pauseForUpdate } from "./link.js";
 import { isTauri } from "./platform.js";
@@ -59,7 +61,7 @@ export function initializeUpdates(): Promise<void> {
         if (document.visibilityState === "visible") void automaticCheck();
       });
     } catch (error) {
-      emit({ ready: true, error: `Could not initialize updates. ${String(error)}` });
+      emit({ ready: true, error: t("app.update.error.init", { reason: errorText(error) }) });
     }
   })();
   return initializing;
@@ -68,7 +70,7 @@ export function initializeUpdates(): Promise<void> {
 async function prepareInstallation(): Promise<() => Promise<void>> {
   const deadline = Date.now() + 45_000;
   while (session.hasPendingCommands || radioBusyForUpdate(session.getState()) || getLink().phase === "connecting") {
-    if (Date.now() >= deadline) throw new Error("The radio is still busy. Wait for its requests to finish and try again.");
+    if (Date.now() >= deadline) throw new Error(t("app.update.error.radioBusy"));
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   flushDrafts();

@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { contactHops, isFavourite, type ContactRecord, type SessionState } from "@meshnet/meshcore";
+import { t, type Key } from "../i18n/index.js";
 import { distanceKm, hasPosition } from "./geo.js";
 import { heardAt } from "./nodes.js";
 import { readSetting, writeSetting } from "./storage.js";
@@ -12,11 +13,12 @@ import { readSetting, writeSetting } from "./storage.js";
 
 export type NodeOrder = "heard" | "name" | "near" | "relays";
 
-export const NODE_ORDERS: readonly { id: NodeOrder; label: string }[] = [
-  { id: "heard", label: "Last heard" },
-  { id: "name", label: "Name" },
-  { id: "near", label: "Nearest" },
-  { id: "relays", label: "Fewest relays" },
+/** Each order and the key of its name, which the view reads with `t()`. */
+export const NODE_ORDERS: readonly { id: NodeOrder; label: Key }[] = [
+  { id: "heard", label: "mesh.order.heard" },
+  { id: "name", label: "mesh.order.name" },
+  { id: "near", label: "mesh.order.near" },
+  { id: "relays", label: "mesh.order.relays" },
 ];
 
 export interface NodeOrderPrefs {
@@ -112,10 +114,10 @@ export function nodeGroups(rows: ContactRecord[], yours: (c: ContactRecord) => b
   const mine = rows.filter(yours);
   const starred = rows.filter((c) => !yours(c) && isFavourite(c));
   const rest = rows.filter((c) => !yours(c) && !isFavourite(c));
-  const restTitle = mine.length || starred.length ? (order === "heard" ? "Heard recently" : "Others") : "";
+  const restTitle = mine.length || starred.length ? t(order === "heard" ? "mesh.list.heardRecently" : "mesh.list.others") : "";
   return [
-    { title: "Yours", rows: mine },
-    { title: "Favourites", rows: starred },
+    { title: t("mesh.list.yours"), rows: mine },
+    { title: t("mesh.list.favourites"), rows: starred },
     { title: restTitle, rows: rest },
   ].filter((g) => g.rows.length > 0);
 }

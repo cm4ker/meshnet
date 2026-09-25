@@ -8,6 +8,7 @@
 
 import { useSyncExternalStore } from "react";
 import { NeighbourOrder, NoReplyError } from "@meshnet/meshcore";
+import { errorText } from "../i18n/errors.js";
 import { PAGE } from "./neighbours.js";
 import { session } from "./session.js";
 
@@ -56,6 +57,6 @@ export async function fetchAllNeighbours(key: string, again = false): Promise<vo
     }
     set(key, { running: false, error: null, silent: false });
   } catch (error) {
-    set(key, { running: false, error: (error as Error).message, silent: error instanceof NoReplyError });
+    set(key, { running: false, error: errorText(error), silent: error instanceof NoReplyError });
   }
 }

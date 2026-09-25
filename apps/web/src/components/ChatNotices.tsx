@@ -1,10 +1,11 @@
 import { kindLevel, setChatLevel, useNoticePrefs, type ChatLevel } from "../lib/noticePrefs.js";
 import { Group, SelectRow } from "../ui/List.js";
 import { BellIcon } from "./Icons.js";
+import { t, type Key } from "../i18n/index.js";
 
-const WORD: Record<ChatLevel, string> = { all: "All", mentions: "Mentions", off: "Off" };
+const WORD: Record<ChatLevel, Key> = { all: "chats.notices.all", mentions: "chats.notices.mentions", off: "common.off" };
 /** A person's chat is on or off: nobody mentions you in a chat that is only yours. */
-const DIRECT_WORD: Record<ChatLevel, string> = { all: "On", mentions: "On", off: "Off" };
+const DIRECT_WORD: Record<ChatLevel, Key> = { all: "common.on", mentions: "common.on", off: "common.off" };
 
 /** A chat's own notification level, on its channel page or its profile; "Default" follows Radio → Notifications. */
 export function ChatNotices({ conversation, direct }: { conversation: string; direct: boolean }) {
@@ -15,11 +16,11 @@ export function ChatNotices({ conversation, direct }: { conversation: string; di
   return (
     <Group>
       <SelectRow
-        label="Notifications"
+        label={t("chats.notices.label")}
         icon={<BellIcon size={17} />}
-        hint={own === "mentions" ? "Only when someone writes your name." : undefined}
+        hint={own === "mentions" ? t("chats.notices.mentionsHint") : undefined}
         value={own ?? "default"}
-        options={[{ value: "default", label: `Default (${words[kindLevel(prefs, direct)]})` }, ...levels.map((l) => ({ value: l, label: words[l] }))]}
+        options={[{ value: "default", label: t("chats.notices.default", { level: t(words[kindLevel(prefs, direct)]) }) }, ...levels.map((l) => ({ value: l, label: t(words[l]) }))]}
         onChange={(v) => setChatLevel(conversation, v === "default" ? null : (v as ChatLevel))}
       />
     </Group>

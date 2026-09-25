@@ -14,6 +14,7 @@ import {
   type MessageRecord,
   type SessionState,
 } from "@meshnet/meshcore";
+import { t } from "../i18n/index.js";
 
 export interface ConversationSummary {
   id: string;
@@ -29,7 +30,7 @@ export interface ConversationSummary {
 }
 
 function preview(message: MessageRecord, kind: ConversationSummary["kind"]): string {
-  if (message.direction === "out") return `You: ${message.text}`;
+  if (message.direction === "out") return t("chats.conversation.you", { text: message.text });
   // A room's posts carry their author the way a channel's messages do.
   if ((kind === "channel" || message.txtType === TxtType.SignedPlain) && message.sender) return `${message.sender}: ${message.text}`;
   return message.text;
@@ -52,7 +53,7 @@ export function summarize(state: SessionState): ConversationSummary[] {
     rows.push({
       id,
       kind: "channel",
-      title: channel.name || `Channel ${channel.index}`,
+      title: channel.name || t("chats.conversation.channel", { index: channel.index }),
       preview: m ? preview(m, "channel") : null,
       lastAt: m?.receivedAt ?? 0,
       unread: state.unread[id] ?? 0,
@@ -69,7 +70,7 @@ export function summarize(state: SessionState): ConversationSummary[] {
       rows.push({
         id,
         kind: "channel",
-        title: `Channel ${target.index}`,
+        title: t("chats.conversation.channel", { index: target.index }),
         preview: preview(m, "channel"),
         lastAt: m.receivedAt,
         unread: state.unread[id] ?? 0,
@@ -92,7 +93,7 @@ export function summarize(state: SessionState): ConversationSummary[] {
       rows.push({
         id,
         kind: "prefix",
-        title: `Unknown ${target.prefix}`,
+        title: t("chats.conversation.unknown", { prefix: target.prefix }),
         preview: preview(m, "prefix"),
         lastAt: m.receivedAt,
         unread: state.unread[id] ?? 0,
@@ -125,10 +126,10 @@ export function titleOf(state: SessionState, conversation: string): string {
   const target = parseConversation(conversation);
   if (target.kind === "channel") {
     const channel = state.channels.find((c) => c.index === target.index);
-    return channel?.name || `Channel ${target.index}`;
+    return channel?.name || t("chats.conversation.channel", { index: target.index });
   }
   if (target.kind === "contact") return (state.contacts[target.key] ?? state.removed[target.key]?.contact)?.name || target.key.slice(0, 12);
-  return `Unknown ${target.prefix}`;
+  return t("chats.conversation.unknown", { prefix: target.prefix });
 }
 
 export function totalUnread(state: SessionState): number {

@@ -6,6 +6,8 @@
  */
 
 import { useSyncExternalStore } from "react";
+import { errorText } from "../i18n/errors.js";
+import { t } from "../i18n/index.js";
 import { hasSavedPassword } from "./secrets.js";
 import { session } from "./session.js";
 import { tidyDays, tidyPlan } from "./tidy.js";
@@ -38,10 +40,6 @@ export function useCleanUpOpen(): boolean {
 
 // ---- removing ----
 
-function nodes(n: number): string {
-  return `${n} ${n === 1 ? "node" : "nodes"}`;
-}
-
 /** Takes these off the radio as a clean-up, then says how many went and how full it is, with Undo. `rule`: the tidy-up rule did it. */
 export async function removeNodes(keys: string[], rule = false): Promise<void> {
   if (keys.length === 0) return;
@@ -49,30 +47,30 @@ export async function removeNodes(keys: string[], rule = false): Promise<void> {
   try {
     result = await session.removeContacts(keys, "tidy");
   } catch (error) {
-    toast((error as Error).message, "error");
+    toast(errorText(error), "error");
     return;
   }
   const { removed, error } = result;
   if (error) {
-    toast(removed.length ? `Stopped after ${nodes(removed.length)}: ${error.message}` : error.message, "error");
+    toast(removed.length ? t("contacts.cleanUp.stoppedAfter", { count: removed.length, reason: errorText(error) }) : errorText(error), "error");
     return;
   }
   if (removed.length === 0) return;
   const max = session.getState().device?.maxContacts;
   const used = Object.values(session.getState().contacts).filter((c) => !c.unsaved).length;
-  const detail = [rule ? "Tidy-up" : null, max ? `${used} of ${max} slots used` : null].filter(Boolean).join(" · ");
+  const detail = [rule ? t("contacts.cleanUp.tidyUp") : null, max ? t("contacts.cleanUp.slotsUsed", { used, max }) : null].filter(Boolean).join(" · ");
   toast(
     // The rule takes only nodes long unheard: say so.
-    rule ? `Removed ${removed.length} old ${removed.length === 1 ? "node" : "nodes"}` : `Removed ${nodes(removed.length)}`,
+    t(rule ? "contacts.cleanUp.removedOld" : "contacts.cleanUp.removed", { count: removed.length }),
     "",
     {
-      label: "Undo",
+      label: t("common.undo"),
       run: async () => {
         try {
           await session.restoreContacts(removed);
-          toast(`Put back ${nodes(removed.length)}`);
+          toast(t("contacts.cleanUp.putBack", { count: removed.length }));
         } catch (e) {
-          toast((e as Error).message, "error");
+          toast(errorText(e), "error");
         }
       },
     },
