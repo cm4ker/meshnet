@@ -15,6 +15,7 @@ import { messagesIn } from "../lib/conversations.js";
 import { getDraft, setDraft } from "../lib/drafts.js";
 import { utf8Length } from "../lib/format.js";
 import { packLookalikes, useLookalikePrefs } from "../lib/lookalikes.js";
+import { touchFirst } from "../lib/platform.js";
 import { usePress } from "../lib/press.js";
 import { session, useSession } from "../lib/session.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
@@ -38,6 +39,7 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
   const [focused, setFocused] = useState(false);
   const [pick, setPick] = useState<{ start: number; end: number; query: string; index: number } | null>(null);
   const [shake, setShake] = useState(false);
+  const [touch] = useState(touchFirst);
   const field = useRef<HTMLTextAreaElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
 
@@ -197,9 +199,12 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
       }
       return;
     }
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    // On a screen keyboard the return key starts a new line and only the button sends. With a real
+    // keyboard Enter sends, and Shift, Ctrl, Alt or ⌘ with it starts a new line instead.
+    if (e.key === "Enter" && !touch && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      void send();
+      if (e.ctrlKey || e.altKey || e.metaKey) replace(e.currentTarget.selectionStart, e.currentTarget.selectionEnd, "\n");
+      else void send();
     }
   };
 
@@ -297,7 +302,7 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
               value={text}
               aria-label={`Message ${title}`}
               aria-describedby={empty ? undefined : `cost-${conversation}`}
-              enterKeyHint="send"
+              enterKeyHint={touch ? "enter" : "send"}
               autoCapitalize="sentences"
               onChange={(e) => setText(e.target.value)}
               onSelect={watchCaret}

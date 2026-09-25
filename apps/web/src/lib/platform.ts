@@ -47,3 +47,8 @@ export function hasWebSerial(): boolean {
 export function canHover(): boolean {
   return window.matchMedia("(hover: hover)").matches;
 }
+
+/** A finger is the main pointer: typing is on a screen keyboard, with no Shift to hold. */
+export function touchFirst(): boolean {
+  return window.matchMedia("(pointer: coarse)").matches;
+}
