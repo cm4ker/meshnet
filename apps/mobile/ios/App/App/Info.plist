@@ -34,7 +34,12 @@
 	<string>Ommesh talks to a MeshCore radio on your Wi-Fi network.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Ommesh sets your radio's position from this phone's location when you ask it to.</string>
-	<!-- A message's notice is a communication notice (MeshWatch.show), made from the message as an intent. -->
+	<!-- A message's notice is a communication notice (MeshWatch.show), made from the message as an intent.
+	     Only with the Communication Notifications capability, which the App ID must have ticked in the
+	     developer portal (the App Store Connect API cannot) and App.entitlements must ask for; until then
+	     MeshnetCommunicationNotices is false and the writer's circle is the notice's picture instead. -->
+	<key>MeshnetCommunicationNotices</key>
+	<false/>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>INSendMessageIntent</string>

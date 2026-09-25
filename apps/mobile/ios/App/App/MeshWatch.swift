@@ -266,8 +266,9 @@ extension MeshWatch {
 
     /// Posts the page's notice now, in place of the one out with its id. A conversation's is a
     /// communication notice: the writer's circle stands where the app's icon would, the app's icon
-    /// a badge on it, as Messages and Telegram draw theirs. Where iOS refuses that (without the
-    /// Communication Notifications entitlement), it is a plain notice with the circle as its picture.
+    /// a badge on it, as Messages and Telegram draw theirs. That takes the Communication
+    /// Notifications entitlement (`MeshnetCommunicationNotices` in Info.plist says the build has it);
+    /// without it, or where iOS refuses, it is a plain notice with the circle as its picture.
     static func show(_ notice: PageNotice, done: @escaping (Error?) -> Void) {
         let content = UNMutableNotificationContent()
         content.title = notice.title
@@ -278,7 +279,7 @@ extension MeshWatch {
         content.userInfo = ["cap_extra": ["tag": notice.tag]]
 
         var shown: UNNotificationContent = content
-        if let thread = notice.thread, let styled = communication(content, tag: notice.tag, thread: thread) {
+        if communicationNotices, let thread = notice.thread, let styled = communication(content, tag: notice.tag, thread: thread) {
             shown = styled
         } else if let avatar = notice.avatar, let picture = picture(avatar, id: notice.id) {
             content.attachments = [picture]
@@ -286,6 +287,8 @@ extension MeshWatch {
         let request = UNNotificationRequest(identifier: String(notice.id), content: shown, trigger: nil)
         UNUserNotificationCenter.current().add(request, withCompletionHandler: done)
     }
+
+    private static let communicationNotices = Bundle.main.object(forInfoDictionaryKey: "MeshnetCommunicationNotices") as? Bool ?? false
 
     private static func communication(_ content: UNMutableNotificationContent, tag: String, thread: JSObject) -> UNNotificationContent? {
         let title = thread["title"] as? String ?? ""

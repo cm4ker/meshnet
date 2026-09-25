@@ -77,11 +77,9 @@ case "$mode" in
     security unlock-keychain -p "$(cat "$KEYCHAIN_PASSWORD_FILE")" "$KEYCHAIN"
 
     # Bluetooth needs no capability on the App ID: the usage strings and the
-    # `bluetooth-central` background mode live in Info.plist. A message's
-    # notice showing who wrote it does (App.entitlements): Communication
-    # Notifications, which the profile must carry to sign the archive.
+    # `bluetooth-central` background mode live in Info.plist.
     say "the App ID and its profile"
-    node "$here/scripts/apple.mjs" bundle "$bundle" Meshnet USERNOTIFICATIONS_COMMUNICATION
+    node "$here/scripts/apple.mjs" bundle "$bundle" Meshnet
     node "$here/scripts/apple.mjs" profile "$bundle" "Meshnet App Store"
     if [ "$mode" = testflight ]; then
       node "$here/scripts/apple.mjs" app "$bundle"
