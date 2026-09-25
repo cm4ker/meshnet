@@ -49,6 +49,19 @@ public class MainActivity extends BridgeActivity {
         });
     }
 
+    // The radio core announces what arrives while the page is out of sight and asleep; in front, the page does.
+    @Override
+    public void onStart() {
+        super.onStart();
+        MeshRelay.shared(this).setBackground(false);
+    }
+
+    @Override
+    public void onStop() {
+        super.onStop();
+        MeshRelay.shared(this).setBackground(true);
+    }
+
     /**
      * Asks for the panel's fastest mode at the current resolution. Some vendors (ColorOS, for one)
      * hold an app they do not know at 60 Hz on a 120 Hz screen, and every scroll and sheet then

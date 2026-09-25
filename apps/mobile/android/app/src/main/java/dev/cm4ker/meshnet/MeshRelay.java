@@ -28,10 +28,16 @@ import android.os.Looper;
 import android.os.ParcelUuid;
 import android.util.Base64;
 import android.util.Log;
+import androidx.core.app.NotificationManagerCompat;
+import dev.cm4ker.meshnet.core.Client;
+import dev.cm4ker.meshnet.core.Effect;
+import dev.cm4ker.meshnet.core.Inbox;
+import dev.cm4ker.meshnet.core.Notice;
+import dev.cm4ker.meshnet.core.Radio;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -40,19 +46,25 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * Shares the radio with a computer nearby, through the phone: the Android side of the iOS
- * app's {@code MeshRelay.swift}.
+ * The app's link to its radio on Android, and the radio shared with a computer nearby through
+ * the phone: the Android side of the iOS app's {@code MeshRelay.swift}.
  *
- * <p>The phone serves the same UART service the radio does (Nordic UART, {@code 6E400001…}),
- * so a computer connects to the phone as if it were the radio, with the client it already has.
- * The page talks to the radio through here too, and {@link RelayMux} decides whose command goes
- * to the radio when and whose an answer is, so both use the radio at once. The framing is BLE's
- * own, one frame per write or notification.
+ * <p>The page talks to its radio through here, and the radio core ({@code crates/meshcore-core},
+ * {@link Radio}) decides whose command goes to the radio when and whose an answer is, reads the
+ * radio's message queue into an inbox per client, and announces what the page leaves unread
+ * while it sleeps: Android stops the page's scripts about a minute after the app leaves the
+ * screen. While linked, {@link MeshRelayService} keeps the app running in the background, so
+ * the messages keep coming, and their notices with them.
+ *
+ * <p>Shared with a computer, the phone serves the same UART service the radio does (Nordic UART,
+ * {@code 6E400001…}), so a computer connects to the phone as if it were the radio, with the
+ * client it already has, and the core takes turns between the two. The framing is BLE's own, one
+ * frame per write or notification.
  *
  * <p>The radio is held by this object's own GATT client, on the link the BLE plugin already
  * made: Android shares one link between the clients on it. The page's plugin stays connected (it
- * is how the page learns of a drop) but the page's frames come and go through here. While on,
- * {@link MeshRelayService} keeps the app running in the background.
+ * is how the page learns of a drop) but the page's frames come and go through here. With
+ * autoConnect, this client comes back by itself when the radio does, the page asleep or not.
  *
  * <p>Both characteristics demand an encrypted link, so a computer has to be paired with the
  * phone first: Android asks on its own screen. Android advertises under the phone's own
@@ -69,10 +81,13 @@ final class MeshRelay {
     private static final UUID CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
     private static final String PREFS = "meshnet.relay";
     private static final String INBOXES_KEY = "inboxes";
+    /** The page's notice settings and names for the core, and the signal its notices ring with. */
+    private static final String WATCH_KEY = "watch";
+    private static final String SOUND_KEY = "sound";
 
     interface Listener {
-        /** Every change: whether sharing is on, and whether a computer is connected. */
-        void changed(boolean on, boolean computer);
+        /** Every change: whether a radio is linked, whether it is shared, and whether a computer is connected. */
+        void changed(boolean linked, boolean sharing, boolean computer);
 
         void pageFrame(byte[] frame);
     }
@@ -87,8 +102,11 @@ final class MeshRelay {
 
     private final Context context;
     private final Handler main = new Handler(Looper.getMainLooper());
-    private final RelayMux mux;
+    private final Radio core;
     private Listener listener;
+    /** The page's writes waiting to hear they went, by the number the core knows them by. */
+    private final Map<Long, Runnable> writes = new HashMap<>();
+    private long lastWrite = 0;
 
     private BluetoothGattServer server;
     private BluetoothGattCharacteristic served;
@@ -96,6 +114,9 @@ final class MeshRelay {
     private boolean advertising = false;
 
     private String radioAddress;
+    /** What the notice about the link calls the radio. */
+    private String radioName = "the radio";
+    private boolean sharing = false;
     private BluetoothGatt radio;
     private BluetoothGattCharacteristic radioRx;
     /** Frames for the radio; Android takes one GATT operation at a time. */
@@ -127,51 +148,100 @@ final class MeshRelay {
 
     private MeshRelay(Context context) {
         this.context = context;
-        mux = new RelayMux(loadInboxes());
-        mux.toRadio = this::writeRadio;
-        mux.toClient = (client, frame) -> {
-            if (client == RelayMux.Client.COMPUTER) {
-                toComputer(frame);
-            } else if (listener != null) {
-                listener.pageFrame(frame);
-            }
-        };
-        mux.timers = (millis, block) -> main.postDelayed(block, millis);
-        mux.inboxesChanged = this::saveInboxes;
-        mux.log = (line) -> Log.w(TAG, line);
+        core = new Radio(loadInboxes());
+        String watch = prefs().getString(WATCH_KEY, null);
+        if (watch != null) run(core.configure(watch));
     }
 
     void setListener(Listener listener) {
         this.listener = listener;
     }
 
+    /** Linked to a radio for the page. */
     boolean isOn() {
         return radioAddress != null;
+    }
+
+    boolean isSharing() {
+        return isOn() && sharing;
     }
 
     boolean hasComputer() {
         return computer != null;
     }
 
-    private void changed() {
-        if (listener != null) listener.changed(isOn(), hasComputer());
-        if (isOn()) MeshRelayService.update(context, hasComputer());
+    private boolean radioUp() {
+        return radio != null && radioRx != null;
     }
 
-    // The inboxes outlive the app: the radio's copy of a message is gone once the relay has read it.
+    private void changed() {
+        if (listener != null) listener.changed(isOn(), isSharing(), hasComputer());
+        if (isOn()) MeshRelayService.update(context, state());
+    }
 
-    private Map<RelayMux.Client, List<byte[]>> loadInboxes() {
-        Map<RelayMux.Client, List<byte[]>> inboxes = new EnumMap<>(RelayMux.Client.class);
+    private MeshRelayService.State state() {
+        return new MeshRelayService.State(radioName, radioUp(), isSharing(), hasComputer());
+    }
+
+    // The core asks; this does.
+
+    private void run(List<Effect> effects) {
+        for (Effect effect : effects) {
+            if (effect instanceof Effect.ToRadio) {
+                writeRadio(((Effect.ToRadio) effect).getFrame());
+            } else if (effect instanceof Effect.ToClient) {
+                Effect.ToClient to = (Effect.ToClient) effect;
+                if (to.getClient() == Client.COMPUTER) {
+                    toComputer(to.getFrame());
+                } else if (listener != null) {
+                    listener.pageFrame(to.getFrame());
+                }
+            } else if (effect instanceof Effect.Written) {
+                Runnable done = writes.remove(((Effect.Written) effect).getWrite());
+                if (done != null) done.run();
+            } else if (effect instanceof Effect.Wait) {
+                Effect.Wait wait = (Effect.Wait) effect;
+                main.postDelayed(() -> run(core.timeout(wait.getTimer())), wait.getMillis());
+            } else if (effect instanceof Effect.InboxesChanged) {
+                saveInboxes();
+            } else if (effect instanceof Effect.Post) {
+                Notice notice = ((Effect.Post) effect).getNotice();
+                NoticesPlugin.show(context, notice.getId(), notice.getTag(), kind(notice), notice.getTitle(), notice.getBody(),
+                    prefs().getString(SOUND_KEY, null));
+            } else if (effect instanceof Effect.Withdraw) {
+                NotificationManagerCompat.from(context).cancel(((Effect.Withdraw) effect).getId());
+            } else if (effect instanceof Effect.Log) {
+                Log.w(TAG, ((Effect.Log) effect).getLine());
+            }
+        }
+    }
+
+    /** The notice's channel, as the page names it. */
+    private static String kind(Notice notice) {
+        switch (notice.getKind()) {
+            case DIRECT:
+                return "direct";
+            case NODES:
+                return "nodes";
+            default:
+                return "chats";
+        }
+    }
+
+    // The inboxes outlive the app: the radio's copy of a message is gone once the core has read it.
+
+    private List<Inbox> loadInboxes() {
+        List<Inbox> inboxes = new ArrayList<>();
         String text = prefs().getString(INBOXES_KEY, null);
         if (text == null) return inboxes;
         try {
             JSONObject saved = new JSONObject(text);
-            for (RelayMux.Client client : RelayMux.Client.values()) {
-                JSONArray frames = saved.optJSONArray(client.key);
+            for (Client client : Client.values()) {
+                JSONArray frames = saved.optJSONArray(key(client));
                 if (frames == null) continue;
                 List<byte[]> list = new ArrayList<>();
                 for (int i = 0; i < frames.length(); i++) list.add(Base64.decode(frames.getString(i), Base64.NO_WRAP));
-                inboxes.put(client, list);
+                inboxes.add(new Inbox(client, list));
             }
         } catch (JSONException | IllegalArgumentException e) {
             Log.w(TAG, "the saved inboxes could not be read", e);
@@ -182,10 +252,10 @@ final class MeshRelay {
     private void saveInboxes() {
         JSONObject saved = new JSONObject();
         try {
-            for (Map.Entry<RelayMux.Client, List<byte[]>> inbox : mux.inboxes().entrySet()) {
+            for (Inbox inbox : core.inboxes()) {
                 JSONArray frames = new JSONArray();
-                for (byte[] frame : inbox.getValue()) frames.put(Base64.encodeToString(frame, Base64.NO_WRAP));
-                saved.put(inbox.getKey().key, frames);
+                for (byte[] frame : inbox.getFrames()) frames.put(Base64.encodeToString(frame, Base64.NO_WRAP));
+                saved.put(key(inbox.getClient()), frames);
             }
         } catch (JSONException e) {
             Log.w(TAG, "the inboxes could not be saved", e);
@@ -194,28 +264,58 @@ final class MeshRelay {
         prefs().edit().putString(INBOXES_KEY, saved.toString()).apply();
     }
 
+    /** Where a client's inbox is saved, as before the core: {@code page} and {@code computer}. */
+    private static String key(Client client) {
+        return client == Client.COMPUTER ? "computer" : "page";
+    }
+
     private SharedPreferences prefs() {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    /** Starts serving, for the radio the page is connected to (the BLE plugin's id: its address). */
-    void start(String address) {
+    /**
+     * Links to the radio the page is connected to (the BLE plugin's id: its address), and shares it
+     * with a computer if {@code share}.
+     */
+    void start(String address, String name, boolean share) {
         if (!address.equals(radioAddress)) {
             releaseRadio();
             radioAddress = address;
         }
+        if (name != null && !name.isEmpty()) radioName = name;
+        sharing = share;
         watchAdapter();
-        MeshRelayService.start(context, hasComputer());
+        MeshRelayService.start(context, state());
         attachRadio();
-        publish();
+        if (sharing) {
+            publish();
+        } else {
+            unpublish();
+            dropComputer();
+        }
         changed();
     }
 
+    /** Shares the linked radio with a computer, or stops. */
+    void share(boolean on) {
+        sharing = on;
+        if (!isOn()) return;
+        if (on) {
+            publish();
+        } else {
+            unpublish();
+            dropComputer();
+        }
+        changed();
+    }
+
+    /** Lets go of the radio: no link, no sharing, and the app is free to stop in the background. */
     void stop() {
         radioAddress = null;
+        sharing = false;
         unpublish();
         dropComputer();
-        mux.detach(RelayMux.Client.PAGE);
+        run(core.detach(Client.PAGE));
         releaseRadio();
         MeshRelayService.stop(context);
         changed();
@@ -224,11 +324,11 @@ final class MeshRelay {
     // The page
 
     void attachPage() {
-        mux.attach(RelayMux.Client.PAGE);
+        run(core.attach(Client.PAGE));
     }
 
     void detachPage() {
-        mux.detach(RelayMux.Client.PAGE);
+        run(core.detach(Client.PAGE));
     }
 
     /** {@code dispatched} is called once the frame has gone to the radio, or been answered here. */
@@ -237,7 +337,28 @@ final class MeshRelay {
             dispatched.run();
             return;
         }
-        mux.fromClient(RelayMux.Client.PAGE, frame, dispatched);
+        long write = ++lastWrite;
+        writes.put(write, dispatched);
+        run(core.fromClient(Client.PAGE, frame, write));
+    }
+
+    /**
+     * The page's notice settings and names, as the JSON the core reads ({@code WatchConfig}), and the
+     * signal file its notices ring with; kept, for a process Android starts again without the page.
+     */
+    void configure(String json, String sound) {
+        prefs().edit().putString(WATCH_KEY, json).putString(SOUND_KEY, sound).apply();
+        run(core.configure(json));
+    }
+
+    /** The app left the screen, or came back to it: the core announces what the page misses meanwhile. */
+    void setBackground(boolean background) {
+        run(core.setBackground(background));
+    }
+
+    /** The page announced this tag itself. */
+    void announced(String tag) {
+        run(core.announced(tag));
     }
 
     // The computer's side
@@ -253,7 +374,7 @@ final class MeshRelay {
     }
 
     private void publish() {
-        if (!isOn() || !poweredOn()) return;
+        if (!isSharing() || !poweredOn()) return;
         if (published) {
             advertise();
             return;
@@ -304,7 +425,7 @@ final class MeshRelay {
 
     /** Only while no computer is connected: this serves one, as the firmware does. */
     private void advertise() {
-        if (!isOn() || !published || computer != null || advertising || !poweredOn()) return;
+        if (!isSharing() || !published || computer != null || advertising || !poweredOn()) return;
         BluetoothLeAdvertiser advertiser = advertiser();
         if (advertiser == null) {
             Log.w(TAG, "this phone cannot advertise");
@@ -348,7 +469,7 @@ final class MeshRelay {
         backlog.clear();
         notifying = false;
         stopAdvertising();
-        mux.attach(RelayMux.Client.COMPUTER);
+        run(core.attach(Client.COMPUTER));
         attachRadio();
         changed();
     }
@@ -360,7 +481,7 @@ final class MeshRelay {
         backlog.clear();
         notifying = false;
         prepared.reset();
-        mux.detach(RelayMux.Client.COMPUTER);
+        run(core.detach(Client.COMPUTER));
         advertise();
         changed();
     }
@@ -488,7 +609,7 @@ final class MeshRelay {
                     // A frame longer than the link's MTU comes as a long write, in pieces with offsets.
                     prepared.write(value, 0, value.length);
                 } else if (value.length > 0) {
-                    mux.fromClient(RelayMux.Client.COMPUTER, value, null);
+                    run(core.fromClient(Client.COMPUTER, value, null));
                 }
             });
         }
@@ -500,7 +621,7 @@ final class MeshRelay {
             main.post(() -> {
                 byte[] frame = prepared.toByteArray();
                 prepared.reset();
-                if (execute && frame.length > 0 && device.equals(computer)) mux.fromClient(RelayMux.Client.COMPUTER, frame, null);
+                if (execute && frame.length > 0 && device.equals(computer)) run(core.fromClient(Client.COMPUTER, frame, null));
             });
         }
 
@@ -534,7 +655,7 @@ final class MeshRelay {
     }
 
     private void releaseRadio() {
-        mux.radioDown();
+        run(core.radioDown());
         radioRx = null;
         radioWrites.clear();
         radioWriting = false;
@@ -544,7 +665,7 @@ final class MeshRelay {
         radio = null;
     }
 
-    /** Only called while the radio is up: the mux holds commands until then. */
+    /** Only called while the radio is up: the core holds commands until then. */
     private void writeRadio(byte[] frame) {
         if (radio == null || radioRx == null) {
             Log.w(TAG, "a frame for the radio with no radio");
@@ -604,7 +725,8 @@ final class MeshRelay {
     /** The radio is up once its TX notifies here: then the waiting commands go. */
     private void radioReady(BluetoothGatt gatt) {
         if (gatt != radio || radioRx == null) return;
-        mux.radioUp();
+        run(core.radioUp());
+        changed();
     }
 
     private final BluetoothGattCallback radioCallback = new BluetoothGattCallback() {
@@ -625,7 +747,8 @@ final class MeshRelay {
                     radioRx = null;
                     radioWrites.clear();
                     radioWriting = false;
-                    mux.radioDown();
+                    run(core.radioDown());
+                    changed();
                     // An autoConnect client reconnects by itself when the radio is back.
                 }
             });
@@ -698,7 +821,7 @@ final class MeshRelay {
             if (!TX.equals(characteristic.getUuid()) || value == null || value.length == 0) return;
             byte[] frame = value.clone();
             main.post(() -> {
-                if (gatt == radio) mux.fromRadio(frame);
+                if (gatt == radio) run(core.fromRadio(frame));
             });
         }
     };
@@ -741,6 +864,7 @@ final class MeshRelay {
         radioRx = null;
         radioWrites.clear();
         radioWriting = false;
-        mux.radioDown();
+        run(core.radioDown());
+        changed();
     }
 }

@@ -1,4 +1,7 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
 
 def appVersion = new groovy.json.JsonSlurper().parse(rootProject.file('../../../package.json')).version
 def buildNumber = System.getenv('ANDROID_VERSION_CODE') ?: '1'
@@ -19,6 +22,7 @@ def hasUploadKey = uploadStore && uploadStorePassword && uploadAlias && uploadKe
 // CI signs every debug APK with one kept key, so a new build installs over the last one.
 // Without it each runner makes its own debug key and Android refuses the update.
 def debugStore = System.getenv('ANDROID_DEBUG_KEYSTORE_PATH')
+def rustOut = layout.buildDirectory.dir('rust').get().asFile
 
 android {
     namespace = "dev.cm4ker.meshnet"
@@ -30,6 +34,10 @@ android {
         versionCode Integer.parseInt(buildNumber)
         versionName appVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // The ABIs the radio core is built for (buildRustCore); JNA brings more, which would run without it.
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+        }
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -51,6 +59,13 @@ android {
             }
         }
     }
+    sourceSets {
+        main {
+            // The radio core (crates/meshcore-core), built by buildRustCore, and its Kotlin bindings.
+            jniLibs.srcDir new File(rustOut, 'jniLibs')
+            java.srcDir new File(rustOut, 'kotlin')
+        }
+    }
     buildTypes {
         release {
             if (hasUploadKey) signingConfig signingConfigs.release
@@ -59,6 +74,44 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_21
+    }
+}
+
+// The radio core: Rust, shared with iOS and the desktop (crates/meshcore-core). Built for the phones'
+// ABIs with cargo-ndk, which finds the NDK under ANDROID_HOME; its Kotlin bindings are read off the
+// built library. Needs cargo, the Android targets (rustup target add aarch64-linux-android
+// armv7-linux-androideabi x86_64-linux-android) and cargo-ndk (cargo install cargo-ndk).
+def rustCore = rootProject.file('../../../crates/meshcore-core')
+
+tasks.register('buildRustCore', Exec) {
+    description = 'Builds the radio core for the phone.'
+    workingDir rustCore
+    inputs.dir(new File(rustCore, 'src'))
+    inputs.files(new File(rustCore, 'Cargo.toml'), new File(rustCore, 'Cargo.lock'))
+    outputs.dir(new File(rustOut, 'jniLibs'))
+    commandLine 'cargo', 'ndk', '-t', 'arm64-v8a', '-t', 'armeabi-v7a', '-t', 'x86_64', '--platform', '24',
+        '-o', new File(rustOut, 'jniLibs').path, 'build', '--release', '--locked'
+}
+
+tasks.register('bindRustCore', Exec) {
+    description = "Writes the radio core's Kotlin bindings."
+    dependsOn 'buildRustCore'
+    workingDir rustCore
+    inputs.dir(new File(rustOut, 'jniLibs'))
+    inputs.file(new File(rustCore, 'uniffi.toml'))
+    outputs.dir(new File(rustOut, 'kotlin'))
+    commandLine 'cargo', 'run', '-q', '--locked', '--features', 'bindgen', '--bin', 'uniffi-bindgen', '--',
+        'generate', '--library', new File(rustOut, 'jniLibs/arm64-v8a/libmeshcore_core.so').path,
+        '--language', 'kotlin', '--no-format', '--out-dir', new File(rustOut, 'kotlin').path
+}
+
+tasks.named('preBuild') {
+    dependsOn 'bindRustCore'
 }
 
 tasks.register('validatePlayRelease') {
@@ -104,6 +157,8 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
+    // How the radio core's Kotlin bindings reach the Rust library.
+    implementation "net.java.dev.jna:jna:$jnaVersion@aar"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

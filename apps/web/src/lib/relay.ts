@@ -1,15 +1,19 @@
 /**
- * Sharing the radio with a computer, from a phone (`MeshRelay.swift` on iOS,
- * `MeshRelay.java` on Android, alike but for the name a computer sees). The
- * phone serves the radio's own Bluetooth service, so a computer nearby
- * connects to the phone as if it were the radio, and uses it through the
- * phone, in the background too.
+ * The phone's native link to the radio (`MeshRelay.java` on Android,
+ * `MeshRelay.swift` on iOS), and the radio shared with a computer through it.
  *
- * Both use the radio at once: while sharing is on, the page's frames go
- * through the relay as well, and the relay takes turns between the two and
- * keeps each a copy of every message (see `MeshRelayMux.swift` and
- * `RelayMux.java`). The BLE transport opens the relay (`openRelay`) when the
- * switch is on.
+ * On Android the page always talks to its BLE radio through the native link:
+ * Android stops the page's scripts about a minute after the app leaves the
+ * screen, and the link, kept up by a foreground service, goes on reading the
+ * radio for it. Its radio core (`crates/meshcore-core`) keeps every message
+ * for the page and announces what arrives while the page sleeps, from the
+ * settings and names `configureCore` hands it. On iOS the page goes through
+ * it only while sharing.
+ *
+ * Shared, the phone serves the radio's own Bluetooth service, so a computer
+ * nearby connects to the phone as if it were the radio, and uses it through
+ * the phone, in the background too. Both use the radio at once: the relay
+ * takes turns between the two and keeps each a copy of every message.
  */
 
 import { useSyncExternalStore } from "react";
@@ -18,14 +22,23 @@ import { nativePlatform, shell } from "./platform.js";
 import { readSetting, writeSetting } from "./storage.js";
 
 interface RelayState {
+  /** Shared with a computer. */
   on: boolean;
   /** A computer is connected to the phone. */
   computer: boolean;
+  /** Linked to a radio (Android's link; iOS does not say). */
+  linked?: boolean;
 }
 
 interface MeshRelayPlugin {
-  start(options: { deviceId: string; name: string }): Promise<RelayState>;
+  start(options: { deviceId: string; name: string; share: boolean }): Promise<RelayState>;
+  /** Android: shares the linked radio, or stops sharing it; the link stays. */
+  share(options: { on: boolean }): Promise<RelayState>;
   stop(): Promise<RelayState>;
+  /** Android: the page's notice settings and names for the radio core, and the signal file its notices ring with. */
+  configure(options: { json: string; sound: string | null }): Promise<void>;
+  /** Android: the page announced this tag itself. */
+  announced(options: { tag: string }): Promise<void>;
   state(): Promise<RelayState>;
   attach(): Promise<void>;
   detach(): Promise<void>;
@@ -45,9 +58,14 @@ export function relayAvailable(): boolean {
   return shell() === "capacitor" && (platform === "ios" || platform === "android");
 }
 
-/** Whether the page should reach its BLE radio through the relay. */
+/** Whether the radio should be shared with a computer. */
 export function relayWanted(): boolean {
   return relayAvailable() && readSetting<boolean>(WANTED_KEY, false);
+}
+
+/** Whether the page reaches its BLE radio through the native link whether shared or not: Android's. */
+export function nativeLink(): boolean {
+  return shell() === "capacitor" && nativePlatform() === "android";
 }
 
 export function setRelayWanted(on: boolean): void {
@@ -115,17 +133,22 @@ function listen(): Promise<unknown> {
     withRelay((api) =>
       api.addListener("state", (next) => {
         set(next);
-        if (!next.on) route?.onStopped();
+        // Android's link is gone, or iOS stopped sharing: either way the page's way to the radio.
+        if (nativeLink() ? next.linked === false : !next.on) route?.onStopped();
       }),
     ),
   ]);
   return listening;
 }
 
-/** Starts sharing the radio the page has just connected to, and talks to it through the relay. */
+/**
+ * Links to the radio the page has just connected to, shared if wanted, and
+ * talks to it through the relay. Closed, Android's link goes too unless the
+ * radio is shared: the app is then free to stop in the background.
+ */
 export async function openRelay(deviceId: string, name: string, onFrame: Route["onFrame"], onStopped: Route["onStopped"]): Promise<RelayLink> {
   await listen();
-  set(await withRelay((api) => api.start({ deviceId, name: name.replace(/^MeshCore-/, "") })));
+  set(await withRelay((api) => api.start({ deviceId, name: name.replace(/^MeshCore-/, ""), share: relayWanted() })));
   const mine: Route = { onFrame, onStopped };
   route = mine;
   await withRelay((api) => api.attach());
@@ -135,8 +158,26 @@ export async function openRelay(deviceId: string, name: string, onFrame: Route["
       if (route !== mine) return;
       route = null;
       await withRelay((api) => api.detach()).catch(() => undefined);
+      if (nativeLink() && !state.on) await withRelay((api) => api.stop().then(set)).catch(() => undefined);
     },
   };
+}
+
+/** Android: shares the linked radio with a computer, or stops, with no new connection. */
+export async function setSharing(on: boolean): Promise<void> {
+  set(await withRelay((api) => api.share({ on })));
+}
+
+/** Android: what the radio core needs to announce messages while the page sleeps. */
+export async function configureCore(json: string, sound: string | null): Promise<void> {
+  if (!nativeLink()) return;
+  await withRelay((api) => api.configure({ json, sound }));
+}
+
+/** Android: the page announced this itself, so the radio core's notice for it waits no more. */
+export async function coreAnnounced(tag: string): Promise<void> {
+  if (!nativeLink()) return;
+  await withRelay((api) => api.announced({ tag }));
 }
 
 /** Stops sharing. The page's link through the relay reports a drop, and is reconnected directly. */

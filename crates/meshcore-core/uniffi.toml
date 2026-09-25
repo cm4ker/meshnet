@@ -1,0 +1,5 @@
+[bindings.kotlin]
+package_name = "dev.cm4ker.meshnet.core"
+
+[bindings.swift]
+module_name = "MeshcoreCore"

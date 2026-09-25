@@ -16,12 +16,14 @@
 
 use std::collections::HashMap;
 
+use serde::Deserialize;
+
 use crate::codes::*;
 use crate::frames::{hex, read_message, read_new_advert, split_channel_text, Received};
 use crate::{Effect, Timer};
 
 /// How long a message waits for an awake page to take it, in ms.
-pub const GRACE_MS: u64 = 5000;
+pub const GRACE_MS: i64 = 5000;
 /// More chats than this with a notice each become one notice for all of them.
 const SEPARATE: usize = 3;
 /// The latest messages a chat's notice shows.
@@ -32,7 +34,8 @@ const NAMED: usize = 4;
 pub const ALL_CHATS: &str = "c:";
 
 /// How much of a chat rings: a person's chat takes `All` or `Off` only.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ChatLevel {
     All,
     Mentions,
@@ -40,7 +43,8 @@ pub enum ChatLevel {
 }
 
 /// Which nodes heard for the first time ring: a person's radio, any, or none.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum NodeLevel {
     People,
     All,
@@ -48,21 +52,25 @@ pub enum NodeLevel {
 }
 
 /// A contact as the page knows it: its whole key in hex, its name, its advert type.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct Contact {
     pub key: String,
+    #[serde(default)]
     pub name: String,
+    #[serde(rename = "type", default)]
     pub kind: u8,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct Channel {
     pub index: u8,
     pub name: String,
 }
 
 /// What the page tells the watch: the reader's wishes (`noticePrefs.ts`) and the names to use.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// The page sends it as JSON, in these names; what it leaves out keeps the page's default.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(default)]
 pub struct WatchConfig {
     /// This radio's name, for the mentions of it (`@[name]`).
     pub me: String,
@@ -92,20 +100,34 @@ impl Default for WatchConfig {
 }
 
 /// Which channel a notice goes on, where the system has channels.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum NoticeKind {
     Direct,
     Chats,
     Nodes,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct Notice {
     /// The page's tag: `c:<conversation>`, `c:` for several chats, `n:<key>` for a node.
     pub tag: String,
+    /// The number the phone knows it by, [`notice_id`] of the tag.
+    pub id: i32,
     pub title: String,
     pub body: String,
     pub kind: NoticeKind,
+}
+
+impl Notice {
+    fn new(tag: String, title: String, body: String, kind: NoticeKind) -> Self {
+        Notice {
+            id: notice_id(&tag),
+            tag,
+            title,
+            body,
+            kind,
+        }
+    }
 }
 
 /// The number the phone knows a notice by, the same as the page's `noticeId`: FNV-1a
@@ -152,7 +174,7 @@ pub(crate) struct Watch {
     background: bool,
     waiting: Vec<Waiting>,
     /// The grace timer's number; bumped to let one that is running do nothing.
-    grace: u32,
+    grace: i32,
     armed: bool,
     chats: Vec<Chat>,
     /// Chats with a notice of their own out.
@@ -195,17 +217,13 @@ impl Watch {
         if !background {
             // The page reads its inbox now and announces what is still unread.
             for conversation in std::mem::take(&mut self.out) {
-                self.effects.push(Effect::Withdraw {
-                    tag: tag_of(&conversation),
-                });
+                self.withdraw(tag_of(&conversation));
             }
             if self.all_out {
-                self.effects.push(Effect::Withdraw {
-                    tag: ALL_CHATS.to_string(),
-                });
+                self.withdraw(ALL_CHATS.to_string());
             }
             for tag in std::mem::take(&mut self.nodes_out) {
-                self.effects.push(Effect::Withdraw { tag });
+                self.withdraw(tag);
             }
         }
         self.waiting.clear();
@@ -264,12 +282,12 @@ impl Watch {
             ADV_TYPE_SENSOR => "sensor",
             _ => "node",
         };
-        self.waiting.push(Waiting::Node(Notice {
-            tag: format!("n:{key}"),
-            title: format!("New {kind}: {name}"),
-            body: "Heard for the first time.".to_string(),
-            kind: NoticeKind::Nodes,
-        }));
+        self.waiting.push(Waiting::Node(Notice::new(
+            format!("n:{key}"),
+            format!("New {kind}: {name}"),
+            "Heard for the first time.".to_string(),
+            NoticeKind::Nodes,
+        )));
         self.arm();
     }
 
@@ -293,7 +311,7 @@ impl Watch {
     }
 
     /// The grace is over: what the page left is announced.
-    pub fn timeout(&mut self, generation: u32) {
+    pub fn timeout(&mut self, generation: i32) {
         if generation != self.grace || !self.armed {
             return;
         }
@@ -473,9 +491,7 @@ impl Watch {
             .count();
         if self.all_out || separate > SEPARATE {
             for conversation in std::mem::take(&mut self.out) {
-                self.effects.push(Effect::Withdraw {
-                    tag: tag_of(&conversation),
-                });
+                self.withdraw(tag_of(&conversation));
             }
             self.all_out = true;
             let notice = self.all_chats_notice();
@@ -507,17 +523,24 @@ impl Watch {
         if chats.len() > NAMED {
             named.push("…".to_string());
         }
-        Notice {
-            tag: ALL_CHATS.to_string(),
-            title: format!(
+        Notice::new(
+            ALL_CHATS.to_string(),
+            format!(
                 "{total} new {} in {} {}",
                 if total == 1 { "message" } else { "messages" },
                 chats.len(),
                 if chats.len() == 1 { "chat" } else { "chats" }
             ),
-            body: named.join(", "),
-            kind: NoticeKind::Chats,
-        }
+            named.join(", "),
+            NoticeKind::Chats,
+        )
+    }
+
+    fn withdraw(&mut self, tag: String) {
+        self.effects.push(Effect::Withdraw {
+            id: notice_id(&tag),
+            tag,
+        });
     }
 }
 
@@ -549,12 +572,7 @@ fn chat_notice(chat: &Chat) -> Notice {
         } else {
             title.clone()
         };
-        return Notice {
-            tag,
-            title: heading,
-            body: line.text.clone(),
-            kind,
-        };
+        return Notice::new(tag, heading, line.text.clone(), kind);
     }
     let mentioned = lines.iter().any(|l| l.mention);
     let body = lines[lines.len().saturating_sub(LINES)..]
@@ -565,16 +583,16 @@ fn chat_notice(chat: &Chat) -> Notice {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    Notice {
+    Notice::new(
         tag,
-        title: format!(
+        format!(
             "{title} · {} new{}",
             lines.len(),
             if mentioned { ", you are mentioned" } else { "" }
         ),
         body,
         kind,
-    }
+    )
 }
 
 #[cfg(test)]
@@ -692,7 +710,7 @@ mod tests {
                         ..
                     } => self.grace.push(timer),
                     Effect::Post { notice } => self.posted.push(notice),
-                    Effect::Withdraw { tag } => self.withdrawn.push(tag),
+                    Effect::Withdraw { tag, .. } => self.withdrawn.push(tag),
                     _ => {}
                 }
             }
@@ -730,6 +748,28 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_pages_config() {
+        let config: WatchConfig = serde_json::from_str(
+            r#"{"me":"Node-21","direct":false,"chats":"mentions","nodes":"all","chat":{"ch:1":"off"},
+                "contacts":[{"key":"a1","name":"Alice","type":1}],"channels":[{"index":0,"name":"Public"}],"extra":1}"#,
+        )
+        .unwrap();
+        assert_eq!(config.me, "Node-21");
+        assert!(!config.direct);
+        assert_eq!(config.chats, ChatLevel::Mentions);
+        assert_eq!(config.nodes, NodeLevel::All);
+        assert_eq!(config.chat.get("ch:1"), Some(&ChatLevel::Off));
+        assert_eq!(config.contacts[0].kind, ADV_TYPE_CHAT);
+        assert_eq!(config.channels[0].name, "Public");
+        let empty: WatchConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            empty,
+            WatchConfig::default(),
+            "what is left out keeps the default"
+        );
+    }
+
+    #[test]
     fn notice_ids_match_the_pages() {
         assert_eq!(notice_id("c:ch:1"), 658017366);
         assert_eq!(notice_id("c:"), 220850104);
@@ -748,12 +788,12 @@ mod tests {
         rig.grace_ends();
         assert_eq!(
             rig.posted,
-            vec![Notice {
-                tag: format!("c:c:{ALICE}"),
-                title: "Alice".into(),
-                body: "hi".into(),
-                kind: NoticeKind::Direct
-            }]
+            vec![Notice::new(
+                format!("c:c:{ALICE}"),
+                "Alice".into(),
+                "hi".into(),
+                NoticeKind::Direct
+            )]
         );
     }
 

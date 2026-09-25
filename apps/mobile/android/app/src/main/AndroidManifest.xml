@@ -40,7 +40,7 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
-        <!-- Keeps the radio shared with a computer while the app is in the background (MeshRelay). -->
+        <!-- Keeps the app linked to its radio in the background, shared with a computer or not (MeshRelay). -->
         <service
             android:name=".MeshRelayService"
             android:exported="false"

@@ -15,30 +15,56 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 
 /**
- * Keeps the app running while the radio is shared with a computer ({@link MeshRelay}), with the
- * app in the background or swiped away: a foreground service of the connected-device kind, with
- * the notice Android requires for one. It holds nothing itself; the relay lives in the process.
+ * Keeps the app running while it is linked to a radio ({@link MeshRelay}), with the app in the
+ * background or swiped away: a foreground service of the connected-device kind, with the notice
+ * Android requires for one. Without it Android may stop or freeze the app soon after it leaves
+ * the screen, and the radio's messages would wait unread. It holds nothing itself; the link
+ * lives in the process.
  */
 public class MeshRelayService extends Service {
     private static final String TAG = "MeshRelay";
-    private static final String CHANNEL = "relay";
+    private static final String CHANNEL = "link";
+    /** The channel of the notice from when it only showed while the radio was shared. */
+    private static final String OLD_CHANNEL = "relay";
     private static final int NOTICE_ID = 0x4d52;
+    private static final String EXTRA_NAME = "name";
+    private static final String EXTRA_UP = "up";
+    private static final String EXTRA_SHARING = "sharing";
     private static final String EXTRA_COMPUTER = "computer";
 
-    static void start(Context context, boolean computer) {
-        Intent intent = new Intent(context, MeshRelayService.class).putExtra(EXTRA_COMPUTER, computer);
+    /** What the notice says: which radio, and how it is. */
+    static final class State {
+        final String name;
+        final boolean up;
+        final boolean sharing;
+        final boolean computer;
+
+        State(String name, boolean up, boolean sharing, boolean computer) {
+            this.name = name;
+            this.up = up;
+            this.sharing = sharing;
+            this.computer = computer;
+        }
+    }
+
+    static void start(Context context, State state) {
+        Intent intent = new Intent(context, MeshRelayService.class)
+            .putExtra(EXTRA_NAME, state.name)
+            .putExtra(EXTRA_UP, state.up)
+            .putExtra(EXTRA_SHARING, state.sharing)
+            .putExtra(EXTRA_COMPUTER, state.computer);
         try {
             ContextCompat.startForegroundService(context, intent);
         } catch (RuntimeException e) {
-            // Refused from the background (Android 12 and later): the relay still works while the app is open.
+            // Refused from the background (Android 12 and later): the link still works while the app is open.
             Log.w(TAG, "the background service did not start", e);
         }
     }
 
-    /** A new line in the notice, when a computer comes or goes. */
-    static void update(Context context, boolean computer) {
+    /** A new line in the notice, when the radio or a computer comes or goes. */
+    static void update(Context context, State state) {
         NotificationManager notices = context.getSystemService(NotificationManager.class);
-        if (notices != null && notices.areNotificationsEnabled()) notices.notify(NOTICE_ID, notice(context, computer));
+        if (notices != null && notices.areNotificationsEnabled()) notices.notify(NOTICE_ID, notice(context, state));
     }
 
     static void stop(Context context) {
@@ -47,8 +73,15 @@ public class MeshRelayService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        boolean computer = intent != null && intent.getBooleanExtra(EXTRA_COMPUTER, false);
-        Notification notice = notice(this, computer);
+        State state = intent == null
+            ? new State("the radio", false, false, false)
+            : new State(
+                intent.getStringExtra(EXTRA_NAME),
+                intent.getBooleanExtra(EXTRA_UP, false),
+                intent.getBooleanExtra(EXTRA_SHARING, false),
+                intent.getBooleanExtra(EXTRA_COMPUTER, false)
+            );
+        Notification notice = notice(this, state);
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTICE_ID, notice, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
@@ -60,7 +93,7 @@ public class MeshRelayService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
-        // Not restarted by Android after the process dies: the relay's state went with it.
+        // Not restarted by Android after the process dies: the link went with it.
         return START_NOT_STICKY;
     }
 
@@ -69,20 +102,34 @@ public class MeshRelayService extends Service {
         return null;
     }
 
-    private static Notification notice(Context context, boolean computer) {
+    private static Notification notice(Context context, State state) {
         NotificationManager notices = context.getSystemService(NotificationManager.class);
         if (notices != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && notices.getNotificationChannel(CHANNEL) == null) {
-            NotificationChannel channel = new NotificationChannel(CHANNEL, "Sharing the radio", NotificationManager.IMPORTANCE_LOW);
-            channel.setDescription("Shown while a computer can use the radio through this phone.");
+            NotificationChannel channel = new NotificationChannel(CHANNEL, "Radio connection", NotificationManager.IMPORTANCE_LOW);
+            channel.setDescription("Shown while the app keeps the radio connected in the background.");
             channel.setShowBadge(false);
             notices.createNotificationChannel(channel);
+            notices.deleteNotificationChannel(OLD_CHANNEL);
+        }
+        String name = state.name == null || state.name.isEmpty() ? "the radio" : state.name;
+        String title;
+        String text;
+        if (!state.up) {
+            title = "Reconnecting to " + name;
+            text = "Waiting for the radio";
+        } else if (state.sharing) {
+            title = "Sharing " + name;
+            text = state.computer ? "A computer is connected" : "Waiting for a computer";
+        } else {
+            title = "Connected to " + name;
+            text = "Messages arrive with the app closed";
         }
         Intent open = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
         PendingIntent tap = open == null ? null : PendingIntent.getActivity(context, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_meshnet)
-            .setContentTitle("Sharing the radio")
-            .setContentText(computer ? "A computer is connected" : "Waiting for a computer")
+            .setContentTitle(title)
+            .setContentText(text)
             .setContentIntent(tap)
             .setOngoing(true)
             .setSilent(true)

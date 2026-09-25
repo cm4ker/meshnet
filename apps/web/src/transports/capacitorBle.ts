@@ -8,7 +8,7 @@ import { BaseTransport, BLE } from "@meshnet/meshcore";
 import type { Connector, FoundDevice } from "./types.js";
 import { unwatchRadio, watchRadio } from "../lib/notify.js";
 import { nativePlatform } from "../lib/platform.js";
-import { openRelay, relayWanted, type RelayLink } from "../lib/relay.js";
+import { nativeLink, openRelay, relayWanted, type RelayLink } from "../lib/relay.js";
 import { readSetting, writeSetting } from "../lib/storage.js";
 
 type BleModule = typeof import("@capacitor-community/bluetooth-le");
@@ -29,8 +29,9 @@ async function ble(): Promise<BleModule["BleClient"]> {
 class CapacitorBleTransport extends BaseTransport {
   readonly kind = "ble" as const;
   /**
-   * While the radio is shared with a computer, the page's frames go through
-   * the relay, which takes turns with the computer (see lib/relay.ts). The
+   * On Android, and while the radio is shared with a computer, the page's
+   * frames go through the native link, which goes on reading the radio while
+   * the page sleeps and takes turns with a computer (see lib/relay.ts). The
    * plugin's link stays, for the pairing and to hear of a drop.
    */
   private relay: RelayLink | null = null;
@@ -48,7 +49,7 @@ class CapacitorBleTransport extends BaseTransport {
       this.deviceId,
       name,
       (frame) => this.emitFrame(frame),
-      () => this.emitClose(new Error("sharing with a computer was turned off")),
+      () => this.emitClose(new Error(nativeLink() ? "the phone's link to the radio was closed" : "sharing with a computer was turned off")),
     );
   }
 
@@ -169,7 +170,7 @@ export const capacitorBleConnector: Connector = {
       await client.disconnect(device.id).catch(() => undefined);
       throw error;
     }
-    if (relayWanted()) {
+    if (nativeLink() || relayWanted()) {
       try {
         await transport.useRelay(device.name);
       } catch (error) {

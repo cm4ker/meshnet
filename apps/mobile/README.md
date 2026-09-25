@@ -32,6 +32,18 @@ methods and events on both. The framing is the client's
     pnpm android         # builds the client, syncs, opens Android Studio
     pnpm --filter @meshnet/mobile android:apk
 
+The build also compiles the radio core (`crates/meshcore-core`, Rust) for the
+phone and writes its Kotlin bindings (Gradle's `buildRustCore` and
+`bindRustCore`), so it needs cargo, the Android targets and cargo-ndk:
+
+    rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+    cargo install cargo-ndk
+
+On Android the page always reaches a Bluetooth radio through `MeshRelay.java`,
+which runs the core: it keeps reading the radio while Android has the page's
+scripts stopped in the background, kept alive by a connected-device foreground
+service ("Connected to …"), and posts what arrives meanwhile as notices.
+
 CI builds a debug APK on every push (`.github/workflows/build.yml`).
 
 ### Sharing a radio with Windows: realme service discovery timeout

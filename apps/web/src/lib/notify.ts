@@ -34,6 +34,7 @@ import { withNotices, withWatch, type NativeNotice } from "./nativeNotices.js";
 import { avatarPng } from "./noticeAvatar.js";
 import { anyMessageWanted, getNoticePrefs, subscribeNoticePrefs, type NoticePrefs } from "./noticePrefs.js";
 import { nativePlatform, shell } from "./platform.js";
+import { coreAnnounced } from "./relay.js";
 
 export type { NoticeKind } from "./announce.js";
 
@@ -225,6 +226,7 @@ async function system(notice: Notice, prefs: NoticePrefs): Promise<void> {
       }
       // One notice per message: the watch's "New message" for the same news goes.
       await withWatch((w) => w.announced({ tag })).catch(() => undefined);
+      await coreAnnounced(tag).catch(() => undefined);
       return;
     }
     default: {

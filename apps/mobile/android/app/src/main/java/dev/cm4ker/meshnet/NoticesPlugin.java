@@ -58,6 +58,10 @@ import org.json.JSONObject;
  *
  * Also the system's notification settings for the app, and the signal on its own for the app's
  * banner, played on the notification stream so the ringer mode and Do not disturb keep it quiet.
+ *
+ * <p>The radio core's notices ({@link #show}, from {@link MeshRelay}), for what arrived while the
+ * page slept, go on the same channels with the page's tags and ids, so the page's own notice for a
+ * chat takes the place of the core's, and a tap on either opens the chat.
  */
 @CapacitorPlugin(name = "Notices")
 public class NoticesPlugin extends Plugin {
@@ -87,7 +91,7 @@ public class NoticesPlugin extends Plugin {
     /** The channels, ringing with {@code sound} ({@code signal_<id>.wav}, or none for quiet ones). */
     @PluginMethod
     public void channels(PluginCall call) {
-        channels(call.getString("sound"));
+        channels(getContext(), call.getString("sound"));
         call.resolve();
     }
 
@@ -100,22 +104,8 @@ public class NoticesPlugin extends Plugin {
             call.reject("A notice needs an id");
             return;
         }
-        String sound = call.getString("sound");
-        channels(sound);
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, channelId(call.getString("kind", "chats"), sound))
-            .setSmallIcon(R.drawable.ic_stat_meshnet)
-            .setColor(COLOR)
-            .setContentTitle(call.getString("title", ""))
-            .setContentText(call.getString("body", ""))
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(opener(id, tag));
-        // Before Android 8 a notice carries its own sound; after, its channel does.
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            Uri uri = soundUri(sound);
-            if (uri != null) builder.setSound(uri);
-            else builder.setSilent(true);
-        }
+        NotificationCompat.Builder builder =
+            builder(context, id, tag, call.getString("kind", "chats"), call.getString("title", ""), call.getString("body", ""), call.getString("sound"));
 
         JSObject thread = call.getObject("thread");
         try {
@@ -134,6 +124,37 @@ public class NoticesPlugin extends Plugin {
         } catch (SecurityException refused) {
             call.reject("Notifications are not allowed", refused);
         }
+    }
+
+    /** A plain notice of the radio core's, on the page's channel for its kind, under the page's id for its tag. */
+    static void show(Context context, int id, String tag, String kind, String title, String body, String sound) {
+        NotificationCompat.Builder builder = builder(context, id, tag, kind, title, body, sound)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(body));
+        try {
+            NotificationManagerCompat.from(context).notify(id, builder.build());
+        } catch (SecurityException refused) {
+            // Notifications are not allowed: there is nowhere to show it.
+        }
+    }
+
+    /** What every notice has: its channel and sound, its words, and the tap that opens its chat. */
+    private static NotificationCompat.Builder builder(Context context, int id, String tag, String kind, String title, String body, String sound) {
+        channels(context, sound);
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, channelId(kind, sound))
+            .setSmallIcon(R.drawable.ic_stat_meshnet)
+            .setColor(COLOR)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(opener(context, id, tag));
+        // Before Android 8 a notice carries its own sound; after, its channel does.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            Uri uri = soundUri(context, sound);
+            if (uri != null) builder.setSound(uri);
+            else builder.setSilent(true);
+        }
+        return builder;
     }
 
     @PluginMethod
@@ -157,7 +178,7 @@ public class NoticesPlugin extends Plugin {
         }
         int mode = audio.getRingerMode();
         if (mode == AudioManager.RINGER_MODE_NORMAL) {
-            Uri uri = soundUri("signal_" + call.getString("signal", "chirp") + ".wav");
+            Uri uri = soundUri(context, "signal_" + call.getString("signal", "chirp") + ".wav");
             Ringtone tone = uri != null ? RingtoneManager.getRingtone(context, uri) : null;
             if (tone != null) {
                 tone.setAudioAttributes(attributes());
@@ -209,7 +230,7 @@ public class NoticesPlugin extends Plugin {
         ShortcutInfoCompat.Builder shortcut = new ShortcutInfoCompat.Builder(context, tag)
             .setShortLabel(title.isEmpty() ? "Chat" : title)
             .setLongLived(true)
-            .setIntent(openIntent(0, tag));
+            .setIntent(openIntent(context, 0, tag));
         if (chat != null) shortcut.setIcon(IconCompat.createWithBitmap(chat));
         if (!group && last != null) shortcut.setPerson(last);
         try {
@@ -221,12 +242,12 @@ public class NoticesPlugin extends Plugin {
     }
 
     /** The three channels ringing with this sound, and none of ours ringing with another. */
-    private void channels(String sound) {
+    private static void channels(Context context, String sound) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
-        NotificationManager manager = (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+        NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null) return;
         Set<String> wanted = new HashSet<>();
-        Uri uri = soundUri(sound);
+        Uri uri = soundUri(context, sound);
         for (String[] kind : KINDS) {
             String id = channelId(kind[0], sound);
             wanted.add(id);
@@ -256,9 +277,8 @@ public class NoticesPlugin extends Plugin {
     }
 
     /** A raw resource by its file name, {@code signal_chirp.wav}; null when there is none. */
-    private Uri soundUri(String sound) {
+    private static Uri soundUri(Context context, String sound) {
         if (sound == null) return null;
-        Context context = getContext();
         int res = context.getResources().getIdentifier(sound.replace(".wav", ""), "raw", context.getPackageName());
         return res == 0 ? null : Uri.parse("android.resource://" + context.getPackageName() + "/" + res);
     }
@@ -270,19 +290,19 @@ public class NoticesPlugin extends Plugin {
             .build();
     }
 
-    private PendingIntent opener(int id, String tag) {
-        return PendingIntent.getActivity(getContext(), id, openIntent(id, tag), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    private static PendingIntent opener(Context context, int id, String tag) {
+        return PendingIntent.getActivity(context, id, openIntent(context, id, tag), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     /** To the app, carrying the tag the way LocalNotifications' taps do. */
-    private Intent openIntent(int id, String tag) {
+    private static Intent openIntent(Context context, int id, String tag) {
         String object;
         try {
             object = new JSONObject().put("id", id).put("extra", new JSONObject().put("tag", tag)).toString();
         } catch (JSONException impossible) {
             object = "{}";
         }
-        return new Intent(getContext(), MainActivity.class)
+        return new Intent(context, MainActivity.class)
             .setAction(Intent.ACTION_MAIN)
             .addCategory(Intent.CATEGORY_LAUNCHER)
             .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP)

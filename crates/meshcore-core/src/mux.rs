@@ -37,7 +37,7 @@ struct Command {
     source: Option<Client>,
     frame: Vec<u8>,
     /// Told (`Effect::Written`) once the command is written to the radio, or dropped.
-    write: Option<u64>,
+    write: Option<i64>,
 }
 
 pub(crate) struct Mux {
@@ -45,7 +45,7 @@ pub(crate) struct Mux {
     queue: VecDeque<Command>,
     in_flight: Option<Command>,
     /// Bumped per command sent, so a timer for an answered command does nothing.
-    flight: u32,
+    flight: i32,
     radio_ready: bool,
     draining: bool,
     drain_again: bool,
@@ -60,7 +60,7 @@ impl Mux {
     pub fn new(saved: Vec<(Client, Vec<Vec<u8>>)>) -> Self {
         let mut inboxes: [Vec<Vec<u8>>; Client::COUNT] = Default::default();
         for (client, frames) in saved {
-            inboxes[client as usize] = frames;
+            inboxes[client.index()] = frames;
         }
         Mux {
             attached: [false; Client::COUNT],
@@ -77,7 +77,7 @@ impl Mux {
     }
 
     pub fn inbox(&self, client: Client) -> &[Vec<u8>] {
-        &self.inboxes[client as usize]
+        &self.inboxes[client.index()]
     }
 
     /// What the mux asks of its owner, and what happened, since the last call.
@@ -89,7 +89,7 @@ impl Mux {
     }
 
     fn is_attached(&self, client: Client) -> bool {
-        self.attached[client as usize]
+        self.attached[client.index()]
     }
 
     fn tell(&mut self, client: Client, frame: Vec<u8>) {
@@ -99,7 +99,7 @@ impl Mux {
     // Clients
 
     pub fn attach(&mut self, client: Client) {
-        self.attached[client as usize] = true;
+        self.attached[client.index()] = true;
         // Messages kept while it was away.
         if !self.inbox(client).is_empty() {
             self.tell(client, vec![PUSH_MSG_WAITING]);
@@ -108,7 +108,7 @@ impl Mux {
 
     /// Its waiting commands are dropped; one in flight is still answered, to nobody.
     pub fn detach(&mut self, client: Client) {
-        self.attached[client as usize] = false;
+        self.attached[client.index()] = false;
         let (dropped, kept): (VecDeque<Command>, VecDeque<Command>) =
             std::mem::take(&mut self.queue)
                 .into_iter()
@@ -123,7 +123,7 @@ impl Mux {
 
     /// A frame a client wrote; `write` is told when it reaches the radio, which for
     /// "next message" is at once, from the inbox.
-    pub fn from_client(&mut self, client: Client, frame: Vec<u8>, write: Option<u64>) {
+    pub fn from_client(&mut self, client: Client, frame: Vec<u8>, write: Option<i64>) {
         if frame.is_empty() || frame[0] == CMD_SYNC_NEXT_MESSAGE {
             if let Some(write) = write {
                 self.out.push(Effect::Written { write });
@@ -146,8 +146,8 @@ impl Mux {
         let mut answer = vec![RESP_NO_MORE_MESSAGES];
         let mut pushes = Vec::new();
         let mut changed = false;
-        while !self.inboxes[client as usize].is_empty() {
-            let frame = self.inboxes[client as usize].remove(0);
+        while !self.inboxes[client.index()].is_empty() {
+            let frame = self.inboxes[client.index()].remove(0);
             changed = true;
             if frame[0] == PUSH_MIRROR {
                 pushes.push(frame);
@@ -235,7 +235,7 @@ impl Mux {
     }
 
     /// A timer the mux asked for is due.
-    pub fn timeout(&mut self, flight: u32) {
+    pub fn timeout(&mut self, flight: i32) {
         if flight != self.flight {
             return;
         }
@@ -310,7 +310,7 @@ impl Mux {
     }
 
     fn add(&mut self, frame: Vec<u8>, client: Client) {
-        let inbox = &mut self.inboxes[client as usize];
+        let inbox = &mut self.inboxes[client.index()];
         inbox.push(frame);
         if inbox.len() > INBOX_LIMIT {
             let excess = inbox.len() - INBOX_LIMIT;
@@ -354,7 +354,7 @@ impl Mux {
 }
 
 /// How long a command may wait for its answer (ms), and whether the radio answers it at all.
-pub fn patience(frame: &[u8]) -> (u64, bool) {
+pub fn patience(frame: &[u8]) -> (i64, bool) {
     match frame.first() {
         Some(&CMD_REBOOT) => (1500, true),
         Some(&CMD_FACTORY_RESET) => (3000, true),
@@ -394,8 +394,8 @@ mod tests {
         radio: Vec<Vec<u8>>,
         page: Vec<Vec<u8>>,
         computer: Vec<Vec<u8>>,
-        written: Vec<u64>,
-        timers: Vec<u32>,
+        written: Vec<i64>,
+        timers: Vec<i32>,
     }
 
     impl Rig {

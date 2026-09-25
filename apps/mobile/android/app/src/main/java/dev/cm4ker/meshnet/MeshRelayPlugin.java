@@ -13,15 +13,17 @@ import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
 /**
- * The page's side of the relay ({@link MeshRelay}), the same plugin the iOS app carries, used by
- * the web client's {@code lib/relay.ts}: {@code start({ deviceId, name })} with the radio the page
- * is connected to, {@code stop()}, {@code state()}, and a {@code state} event
- * {@code { on, computer }} whenever a computer comes or goes. While {@code attach()}ed, the page
- * talks to the radio through here: {@code send({ data })} (base64), answered once the frame has
- * gone to the radio, and {@code frame} events {@code { data }}.
+ * The page's side of its link to the radio ({@link MeshRelay}), the plugin the iOS app carries
+ * too, used by the web client's {@code lib/relay.ts}: {@code start({ deviceId, name, share })}
+ * with the radio the page is connected to, {@code share({ on })}, {@code stop()},
+ * {@code state()}, and a {@code state} event {@code { linked, on, computer }} ({@code on}: shared)
+ * whenever one of them changes. While {@code attach()}ed, the page talks to the radio through
+ * here: {@code send({ data })} (base64), answered once the frame has gone to the radio, and
+ * {@code frame} events {@code { data }}. {@code configure({ json, sound })} hands the radio core
+ * the page's notice settings and names, {@code announced({ tag })} what the page announced itself.
  *
  * <p>Advertising to a computer takes Bluetooth's "nearby devices" permission for advertising on
- * Android 12 and later, asked on the first start.
+ * Android 12 and later, asked the first time sharing is turned on.
  */
 @CapacitorPlugin(
     name = "MeshRelay",
@@ -38,8 +40,8 @@ public class MeshRelayPlugin extends Plugin {
     public void load() {
         relay().setListener(new MeshRelay.Listener() {
             @Override
-            public void changed(boolean on, boolean computer) {
-                notifyListeners("state", state(on, computer));
+            public void changed(boolean linked, boolean sharing, boolean computer) {
+                notifyListeners("state", state(linked, sharing, computer));
             }
 
             @Override
@@ -51,15 +53,30 @@ public class MeshRelayPlugin extends Plugin {
         });
     }
 
-    private static JSObject state(boolean on, boolean computer) {
+    private static JSObject state(boolean linked, boolean sharing, boolean computer) {
         JSObject state = new JSObject();
-        state.put("on", on);
+        state.put("linked", linked);
+        state.put("on", sharing);
         state.put("computer", computer);
         return state;
     }
 
     private JSObject state() {
-        return state(relay().isOn(), relay().hasComputer());
+        return state(relay().isOn(), relay().isSharing(), relay().hasComputer());
+    }
+
+    /** Sharing asks for the permission to advertise first, where Android has one. */
+    private boolean mayAdvertise(PluginCall call, String then) {
+        if (!call.getBoolean("share", call.getBoolean("on", false))) return true;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || getPermissionState(ADVERTISE) == PermissionState.GRANTED) return true;
+        requestPermissionForAlias(ADVERTISE, call, then);
+        return false;
+    }
+
+    private boolean refused(PluginCall call) {
+        if (getPermissionState(ADVERTISE) == PermissionState.GRANTED) return false;
+        call.reject("Allow nearby devices for Ommesh to share the radio with a computer");
+        return true;
     }
 
     @PluginMethod
@@ -68,26 +85,37 @@ public class MeshRelayPlugin extends Plugin {
             call.reject("start needs the radio's deviceId");
             return;
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && getPermissionState(ADVERTISE) != PermissionState.GRANTED) {
-            requestPermissionForAlias(ADVERTISE, call, "startAllowed");
-            return;
-        }
-        begin(call);
+        if (mayAdvertise(call, "startAllowed")) begin(call);
     }
 
     @PermissionCallback
     private void startAllowed(PluginCall call) {
-        if (getPermissionState(ADVERTISE) != PermissionState.GRANTED) {
-            call.reject("Allow nearby devices for Ommesh to share the radio with a computer");
-            return;
-        }
-        begin(call);
+        if (!refused(call)) begin(call);
     }
 
     private void begin(PluginCall call) {
         String address = call.getString("deviceId", "");
+        String name = call.getString("name", "");
+        boolean share = call.getBoolean("share", false);
         getActivity().runOnUiThread(() -> {
-            relay().start(address);
+            relay().start(address, name, share);
+            call.resolve(state());
+        });
+    }
+
+    @PluginMethod
+    public void share(PluginCall call) {
+        if (mayAdvertise(call, "shareAllowed")) share(call, call.getBoolean("on", false));
+    }
+
+    @PermissionCallback
+    private void shareAllowed(PluginCall call) {
+        if (!refused(call)) share(call, true);
+    }
+
+    private void share(PluginCall call, boolean on) {
+        getActivity().runOnUiThread(() -> {
+            relay().share(on);
             call.resolve(state());
         });
     }
@@ -136,5 +164,28 @@ public class MeshRelayPlugin extends Plugin {
         }
         byte[] bytes = frame;
         getActivity().runOnUiThread(() -> relay().fromPage(bytes, call::resolve));
+    }
+
+    @PluginMethod
+    public void configure(PluginCall call) {
+        String json = call.getString("json");
+        if (json == null) {
+            call.reject("configure needs json");
+            return;
+        }
+        String sound = call.getString("sound");
+        getActivity().runOnUiThread(() -> {
+            relay().configure(json, sound);
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
+    public void announced(PluginCall call) {
+        String tag = call.getString("tag", "");
+        getActivity().runOnUiThread(() -> {
+            relay().announced(tag);
+            call.resolve();
+        });
     }
 }

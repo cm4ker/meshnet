@@ -12,7 +12,7 @@ import { askPermission, hasNoticeSettings, openNoticeSettings } from "../lib/not
 import { previewSignal } from "../lib/chime.js";
 import { push, type RadioPage } from "../lib/nav.js";
 import { nativePlatform, shell } from "../lib/platform.js";
-import { relayAvailable, relayWanted, setRelayWanted, stopRelay, useRelay } from "../lib/relay.js";
+import { nativeLink, relayAvailable, relayWanted, setRelayWanted, setSharing, stopRelay, useRelay } from "../lib/relay.js";
 import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
 import { SEND_TRIES_MAX, setSendTries, triesPhrase, useSendTries } from "../lib/sendTries.js";
 import { session, storage, useSelector, useSession } from "../lib/session.js";
@@ -791,7 +791,10 @@ function ConnectionPage() {
               setLend(v);
               setRelayWanted(v);
               try {
-                if (v) {
+                if (nativeLink()) {
+                  // Android's page already goes through the phone's link: only the computer's side changes.
+                  await setSharing(v);
+                } else if (v) {
                   // The page goes through the relay from its next connection on. The
                   // old link is closed first: closing it after would drop the new one,
                   // since both are the plugin's link to the same radio.

@@ -14,6 +14,7 @@ import { quickReply } from "./lib/quickReply.js";
 import { toast } from "./lib/toast.js";
 import { session, useSelector } from "./lib/session.js";
 import { startTray } from "./lib/tray.js";
+import { startCoreWatch } from "./lib/coreWatch.js";
 import { startTidyRule } from "./lib/cleanUp.js";
 import { isWide, subscribeWide } from "./lib/layout.js";
 import { getNav, openConversation, openProfile, shownConversation, subscribeNav } from "./lib/nav.js";
@@ -91,6 +92,9 @@ export function App() {
 
   // The desktop's tray icon shows whether anything is unread, and from whom.
   useEffect(() => startTray(() => session.getState(), (listener) => session.subscribe(listener)), []);
+
+  // Android's radio core announces what arrives while the page sleeps, in the page's words and names.
+  useEffect(() => startCoreWatch(() => session.getState(), (listener) => session.subscribe(listener)), []);
 
   // A node the radio hears for the first time.
   useEffect(
