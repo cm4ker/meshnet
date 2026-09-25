@@ -3,7 +3,8 @@ import { AdvType, isConversationType, parseConversation, type ContactRecord, typ
 import { GEO, MENTION } from "../lib/composer.js";
 import { messagesIn, shownAt, titleOf } from "../lib/conversations.js";
 import { nameOfHash, relaysOf } from "../lib/echoes.js";
-import { agoPhrase, dayLabel, timeOfDay } from "../lib/format.js";
+import { getOpenAtUnread, takeUnread } from "../lib/firstUnread.js";
+import { agoPhrase, dayLabel, plural, timeOfDay } from "../lib/format.js";
 import { openChannel, openMessage, openProfile } from "../lib/nav.js";
 import { heardAt, hopsLabel, kindLabel } from "../lib/nodes.js";
 import { openRoute } from "../lib/toolActions.js";
@@ -20,6 +21,7 @@ import { NotOnRadio } from "./ContactsPages.js";
 import {
   AlertIcon,
   CheckIcon,
+  ChevronDownIcon,
   ChevronRightIcon,
   ClockIcon,
   CopyIcon,
@@ -74,11 +76,58 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
     [answer],
   );
 
-  // Pinned to the bottom, as a chat is, unless the reader has scrolled up to read.
+  // What was unread when the chat opened: a line goes above the first of them until the chat is left.
+  // Not on screen yet (a notice tapped on a locked phone), the chat is still unread in the session.
+  const [unread] = useState(() => {
+    const heard = messages.filter((m) => m.direction === "in");
+    const count = Math.min(heard.length, takeUnread(conversation) || (state.unread[conversation] ?? 0));
+    return count > 0 ? { first: heard[heard.length - count]!.id, count, ids: heard.slice(-count).map((m) => m.id) } : null;
+  });
+
+  // Messages heard that the reader has not yet had on screen, in order: the unread on opening, and
+  // those that come while they read further up. Each drops off once it has been in sight.
+  const unseen = useRef<string[]>(unread?.ids ?? []);
+  const known = useRef<Set<string> | null>(null);
+  known.current ??= new Set(messages.map((m) => m.id));
+  const [below, setBelow] = useState(0);
+  const [away, setAway] = useState(false);
+  const measure = useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const edge = el.getBoundingClientRect().bottom + 2;
+    let seen = 0;
+    for (const id of unseen.current) {
+      const row = el.querySelector(`[data-id="${CSS.escape(id)}"]`);
+      if (row && row.getBoundingClientRect().bottom > edge) break;
+      seen++;
+    }
+    if (seen) unseen.current = unseen.current.slice(seen);
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setBelow(unseen.current.length);
+    setAway(distance > 160 || (unseen.current.length > 0 && distance > 40));
+  }, []);
+
+  // Pinned to the bottom, as a chat is, unless the reader has scrolled up to read. Opened with
+  // messages unread, and the setting on, it starts at the first of them instead.
   const stuck = useRef(true);
+  const opened = useRef(false);
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (el && stuck.current) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    const line = opened.current || !getOpenAtUnread() ? null : el.querySelector(".unread-line");
+    opened.current = true;
+    if (line) {
+      el.scrollTop += line.getBoundingClientRect().top - el.getBoundingClientRect().top - 8;
+      stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    } else if (stuck.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+    const added = messages.filter((m) => !known.current!.has(m.id));
+    for (const m of added) {
+      known.current!.add(m.id);
+      if (m.direction === "in") unseen.current.push(m.id);
+    }
+    measure();
   }, [messages.length, conversation]);
   // The keyboard coming up shrinks the list from below; the last message stays in sight.
   useEffect(() => {
@@ -86,10 +135,16 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
     if (!el || typeof ResizeObserver === "undefined") return;
     const keep = new ResizeObserver(() => {
       if (stuck.current) el.scrollTop = el.scrollHeight;
+      measure();
     });
     keep.observe(el);
     return () => keep.disconnect();
-  }, []);
+  }, [measure]);
+  const toLatest = () => {
+    const el = scroller.current;
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el?.scrollTo({ top: el.scrollHeight, behavior: still ? "auto" : "smooth" });
+  };
 
   useReveal(scroller, inner, (id) => {
     const message = messages.find((m) => m.id === id);
@@ -138,6 +193,7 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
         onScroll={(e) => {
           const el = e.currentTarget;
           stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+          measure();
         }}
       >
         <div className="chat-inner" ref={inner}>
@@ -146,15 +202,17 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
             const prev = messages[i - 1];
             const next = messages[i + 1];
             const newDay = !prev || dayLabel(shownAt(prev)) !== dayLabel(shownAt(m));
-            const first = !prev || !sameRun(prev, m);
-            const last = !next || !sameRun(m, next);
+            const opens = m.id === unread?.first;
+            const first = !prev || !sameRun(prev, m) || opens;
+            const last = !next || !sameRun(m, next) || next.id === unread?.first;
             const voice = many && m.direction === "in";
             return (
-              <div key={m.id}>
+              <div key={m.id} data-id={m.id}>
                 {newDay ? <div className="day">{dayLabel(shownAt(m))}</div> : null}
+                {opens && unread ? <div className="unread-line">{plural(unread.count, "new message")}</div> : null}
                 <Message
                   message={m}
-                  lead={many && first && !newDay}
+                  lead={many && first && !newDay && !opens}
                   showSender={voice && first}
                   avatar={voice ? (last && m.sender ? "show" : "gap") : null}
                   me={me}
@@ -166,6 +224,19 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
             );
           })}
         </div>
+      </div>
+
+      {/* Back to the latest, once scrolled away from it; the count is of the new ones still below. */}
+      <div className="chat-jump-slot">
+        <button
+          type="button"
+          className={["chat-jump", away ? "" : "off"].join(" ")}
+          aria-label={below ? `Latest message, ${plural(below, "new message")} below` : "Latest message"}
+          onClick={toLatest}
+        >
+          {below ? <span className="badge">{below}</span> : null}
+          <ChevronDownIcon size={20} />
+        </button>
       </div>
 
       {target.kind === "contact" && (contact?.unsaved || (!contact && state.removed[target.key])) ? (

@@ -7,6 +7,7 @@ import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "./
 import { useLink } from "./lib/link.js";
 import { ALL_CHATS, createAnnouncer } from "./lib/announce.js";
 import { getNoticePrefs, messageWanted, nodeWanted } from "./lib/noticePrefs.js";
+import { noteUnread } from "./lib/firstUnread.js";
 import { askPermissionOnce, notify, onNotificationClick, pageOnScreen, tellWatch, withdraw } from "./lib/notify.js";
 import { session, useSelector } from "./lib/session.js";
 import { startTray } from "./lib/tray.js";
@@ -41,7 +42,11 @@ export function App() {
   // The conversation on screen is read as its messages arrive. Behind another
   // window or app, or on a locked phone, it is not, and they are announced.
   useEffect(() => {
-    const update = () => session.focus(pageOnScreen() ? shownConversation(getNav(), isWide()) : null);
+    const update = () => {
+      const conversation = pageOnScreen() ? shownConversation(getNav(), isWide()) : null;
+      noteUnread(conversation, conversation ? (session.getState().unread[conversation] ?? 0) : 0);
+      session.focus(conversation);
+    };
     update();
     const stopNav = subscribeNav(update);
     const stopWide = subscribeWide(update);

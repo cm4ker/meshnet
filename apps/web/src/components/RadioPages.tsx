@@ -4,6 +4,7 @@ import { autostartEnabled, autostartLabel, hasAutostart, setAutostart } from "..
 import { bandwidth, frequency } from "../lib/format.js";
 import { disconnect, pauseForUpdate, useLink } from "../lib/link.js";
 import { setLookalikePrefs, useLookalikePrefs } from "../lib/lookalikes.js";
+import { setOpenAtUnread, useOpenAtUnread } from "../lib/firstUnread.js";
 import type { RadioPage } from "../lib/nav.js";
 import { setNoticePrefs, useNoticePrefs, type NoticePrefs } from "../lib/noticePrefs.js";
 import { askPermission, hasNoticeSettings, openNoticeSettings } from "../lib/notify.js";
@@ -453,8 +454,17 @@ function NotificationsPage() {
 function MessagesPage() {
   const state = useSession();
   const lookalikes = useLookalikePrefs();
+  const openAtUnread = useOpenAtUnread();
   return (
     <>
+      <Group>
+        <SwitchRow
+          label="Open at first unread"
+          hint="A chat with new messages opens where they begin, not at the latest one."
+          checked={openAtUnread}
+          onChange={setOpenAtUnread}
+        />
+      </Group>
       <Group>
         <SwitchRow
           label="Swap lookalike letters"
