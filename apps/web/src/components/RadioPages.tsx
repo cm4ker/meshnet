@@ -3,6 +3,7 @@ import { AdvertLocPolicy, TelemMode, type SessionState } from "@meshnet/meshcore
 import { autostartEnabled, autostartLabel, hasAutostart, setAutostart } from "../lib/autostart.js";
 import { agoPhrase, battery as volts, bandwidth, batteryPercent, frequency } from "../lib/format.js";
 import { BATTERY_TYPES, setBatteryType, useBatteryType } from "../lib/batteryType.js";
+import { parseLatLon } from "../lib/geo.js";
 import { disconnect, pauseForUpdate, useLink } from "../lib/link.js";
 import { setLookalikePrefs, useLookalikePrefs } from "../lib/lookalikes.js";
 import { setOpenAtUnread, useOpenAtUnread } from "../lib/firstUnread.js";
@@ -141,6 +142,15 @@ const number = (min: number, max: number, what: string) => (text: string) => {
   return Number.isFinite(n) && text !== "" && n >= min && n <= max ? null : `${what} is between ${min} and ${max}.`;
 };
 
+/** A position field also takes both halves at once, pasted from a map. */
+const orBoth = (check: (text: string) => string | null) => (text: string) => (parseLatLon(text) ? null : check(text));
+
+/** Both halves when the field was given both, or its own half. */
+function setPosition(text: string, one: (n: number) => Promise<void>): Promise<void> {
+  const both = parseLatLon(text);
+  return both ? session.setLocation(both.lat, both.lon) : one(Number(text));
+}
+
 export function RadioPageView({ page, chrome }: { page: RadioPage; chrome: Chrome }) {
   return (
     <div className="screen">
@@ -216,8 +226,16 @@ function NamePage({ self, online }: { self: Self; online: boolean }) {
         <CommitField label="Name" hint="Other radios see it in adverts and before your channel messages." value={self.name} maxLength={31} disabled={!online} onCommit={(name) => session.setName(name)} check={(t) => (t ? null : "A name cannot be empty.")} />
       </Group>
       <Group title="Position">
-        <CommitField label="Latitude" value={String(self.lat)} inputMode="decimal" disabled={!online} check={number(-90, 90, "Latitude")} onCommit={(t) => session.setLocation(Number(t), self.lon)} />
-        <CommitField label="Longitude" value={String(self.lon)} inputMode="decimal" disabled={!online} check={number(-180, 180, "Longitude")} onCommit={(t) => session.setLocation(self.lat, Number(t))} />
+        <CommitField
+          label="Latitude"
+          hint="Or paste both, as a map copies them: 55.75580, 37.61730."
+          value={String(self.lat)}
+          inputMode="decimal"
+          disabled={!online}
+          check={orBoth(number(-90, 90, "Latitude"))}
+          onCommit={(t) => setPosition(t, (n) => session.setLocation(n, self.lon))}
+        />
+        <CommitField label="Longitude" value={String(self.lon)} inputMode="decimal" disabled={!online} check={orBoth(number(-180, 180, "Longitude"))} onCommit={(t) => setPosition(t, (n) => session.setLocation(self.lat, n))} />
         {/* Android location permissions are limited to legacy BLE scanning; positions remain editable manually. */}
         {nativePlatform() !== "android" && "geolocation" in navigator ? <ActionRow label="Use this device's position" disabled={!online} onClick={locate} /> : null}
         <SwitchRow

@@ -5,6 +5,25 @@ export function hasPosition(lat: number, lon: number): boolean {
   return (lat !== 0 || lon !== 0) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
 }
 
+/**
+ * Both halves of a position in one line, as a map copies them
+ * ("55.75580, 37.61730") or as a geo: link carries them; null when the text
+ * is not that, or lies off the globe.
+ */
+export function parseLatLon(text: string): { lat: number; lon: number } | null {
+  const bare = text.trim().replace(/^geo:/i, "").split(/[;?]/)[0]!;
+  const m = /^\s*(-?\d+(?:\.\d+)?)\s*(?:,|\s)\s*(-?\d+(?:\.\d+)?)\s*$/.exec(bare);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lon = Number(m[2]);
+  return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat, lon } : null;
+}
+
+/** A spot as a map copies it: five decimals, about a metre. */
+export function formatLatLon(lat: number, lon: number): string {
+  return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+}
+
 const EARTH_KM = 6371.0088;
 const rad = (deg: number) => (deg * Math.PI) / 180;
 

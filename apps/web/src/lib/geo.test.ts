@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AdvType } from "@meshnet/meshcore";
-import { bearingDeg, compass, distanceKm, formatDistance, freshness, hasPosition } from "./geo.js";
+import { bearingDeg, compass, distanceKm, formatDistance, formatLatLon, freshness, hasPosition, parseLatLon } from "./geo.js";
 
 test("0, 0 is no position, and so is anything off the globe", () => {
   assert.equal(hasPosition(0, 0), false);
@@ -29,4 +29,20 @@ test("a repeater stays fresh for hours, a person for an hour", () => {
   assert.equal(freshness(AdvType.Chat, 2 * 86400), "stale");
   assert.equal(freshness(AdvType.Repeater, 3 * 3600), "fresh");
   assert.equal(freshness(AdvType.Repeater, 30 * 3600), "aging");
+});
+
+test("a position pasted from a map, or a geo: link, gives both halves", () => {
+  assert.deepEqual(parseLatLon("55.75580, 37.61730"), { lat: 55.7558, lon: 37.6173 });
+  assert.deepEqual(parseLatLon(" -33.8688,151.2093 "), { lat: -33.8688, lon: 151.2093 });
+  assert.deepEqual(parseLatLon("43.2381 76.9452"), { lat: 43.2381, lon: 76.9452 });
+  assert.deepEqual(parseLatLon("geo:43.2381,76.9452;u=35"), { lat: 43.2381, lon: 76.9452 });
+  assert.equal(parseLatLon("55.7558"), null);
+  assert.equal(parseLatLon("95.1, 37.6"), null);
+  assert.equal(parseLatLon("55.7, 37.6, 12z"), null);
+  assert.equal(parseLatLon("Moscow"), null);
+});
+
+test("a spot reads as a map copies it, and reads back the same", () => {
+  assert.equal(formatLatLon(55.7558, -37.6173), "55.75580, -37.61730");
+  assert.deepEqual(parseLatLon(formatLatLon(55.7558, -37.6173)), { lat: 55.7558, lon: -37.6173 });
 });

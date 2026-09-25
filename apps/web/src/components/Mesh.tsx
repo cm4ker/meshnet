@@ -5,10 +5,10 @@
  */
 
 import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AdvType, contactConversation, isConversationType, isFavourite, isNodeType, type ContactRecord, type SessionState } from "@meshnet/meshcore";
+import { AdvertLocPolicy, AdvType, contactConversation, isConversationType, isFavourite, isNodeType, type ContactRecord, type SessionState } from "@meshnet/meshcore";
 import { useBackLayer } from "../lib/back.js";
 import { ago, agoPhrase } from "../lib/format.js";
-import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "../lib/geo.js";
+import { bearingDeg, compass, distanceKm, formatDistance, formatLatLon, hasPosition } from "../lib/geo.js";
 import { useHears } from "../lib/hears.js";
 import { legId, useLegVerdicts } from "../lib/legVerdicts.js";
 import type { LinkRadio } from "../lib/los.js";
@@ -25,7 +25,7 @@ import { useSavedPasswords } from "../lib/secrets.js";
 import { openCleanUp } from "../lib/cleanUp.js";
 import { isYours, memoryTight, memoryUse } from "../lib/tidy.js";
 import { session, useSelector, useSession } from "../lib/session.js";
-import { act } from "../lib/toast.js";
+import { act, toast } from "../lib/toast.js";
 import { isComplete, neighbourRows } from "../lib/neighbours.js";
 import { closeTool, dropOnRoute, lineOfSightTo, openLineOfSight, openNeighbourLink, tapInNeighbours, tapInRoute, tapInSpan, whoHearsMe } from "../lib/toolActions.js";
 import { getTextScale, subscribeTextSize } from "../theme/textSize.js";
@@ -33,7 +33,7 @@ import { IconButton } from "../ui/Button.js";
 import { AirMark, Group } from "../ui/List.js";
 import { showMenu } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
-import { ChatIcon, ChevronDownIcon, CloseIcon, InfoIcon, RefreshIcon, SearchIcon, SortIcon, StarFilledIcon, WavesIcon } from "./Icons.js";
+import { ChartIcon, ChatIcon, ChevronDownIcon, CloseIcon, CopyIcon, InfoIcon, LocationIcon, RefreshIcon, SearchIcon, SortIcon, StarFilledIcon, WavesIcon } from "./Icons.js";
 import { LOW_BATTERY_MV } from "./node/Status.js";
 import { RouteLink } from "./tools/RouteSheet.js";
 import { ToolPanel } from "./tools/ToolPanel.js";
@@ -428,6 +428,43 @@ function useMeshOverlay(selected: string | null, state: SessionState): MapOverla
   return useMemo(() => overlay, [same]);
 }
 
+/** A long press or a right click on the map: what can be done with that spot. */
+function openSpotMenu(lat: number, lon: number, at: MenuAt): void {
+  const self = session.getState().self;
+  const online = session.getState().status === "ready";
+  const here = formatLatLon(lat, lon);
+  showMenu(
+    [
+      {
+        label: "Line of sight from this radio",
+        icon: <ChartIcon size={17} />,
+        disabled: !self || !hasPosition(self.lat, self.lon),
+        hint: self && hasPosition(self.lat, self.lon) ? undefined : "This radio has no position yet",
+        onSelect: () => lineOfSightTo(lat, lon),
+      },
+      {
+        label: "Put this radio here",
+        icon: <LocationIcon size={17} />,
+        disabled: !online || !self,
+        hint: online && self ? undefined : "Connect the radio to move it",
+        onSelect: () => void moveSelfTo(lat, lon),
+      },
+      { label: "Copy the coordinates", icon: <CopyIcon size={17} />, group: true, onSelect: () => void navigator.clipboard?.writeText(here).then(() => toast("Copied", "", undefined, here)) },
+    ],
+    { title: here, at },
+  );
+}
+
+/** This radio's position set to a spot on the map; Undo puts it back where it was. */
+async function moveSelfTo(lat: number, lon: number): Promise<void> {
+  const self = session.getState().self;
+  if (!self) return;
+  const was = { lat: self.lat, lon: self.lon };
+  if (!(await act(() => session.setLocation(Number(lat.toFixed(6)), Number(lon.toFixed(6)))))) return;
+  const detail = self.advertLocPolicy === AdvertLocPolicy.None ? "Not shared in adverts: Radio › Name and position." : "Others see it with its next advert.";
+  toast("This radio is here now", "", { label: "Undo", run: () => void act(() => session.setLocation(was.lat, was.lon), "Moved back") }, detail);
+}
+
 /** The map with the filter applied, the focus and the tool drawn, and taps handed up or to the tool. */
 export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zoomButtons }: { selected: string | null; onSelect: (key: string | null) => void; onGroup: (keys: string[]) => void; coverTop?: number | undefined; coverBottom?: number | undefined; zoomButtons?: boolean | undefined }) {
   const state = useSession();
@@ -489,7 +526,7 @@ export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zo
   const fit = hub ? { id: `${hub}:${whole ? "all" : "part"}`, points: fitPoints } : null;
   return (
     <Suspense fallback={<div className="empty muted">Loading the map…</div>}>
-      <MapView selected={selected} onSelect={pick} onGroup={onGroup} filter={test} coverTop={coverTop} coverBottom={coverBottom} zoomButtons={zoomButtons} overlay={overlay} onLeg={leg} onHold={lineOfSightTo} onHandleDrop={drop} fit={fit} />
+      <MapView selected={selected} onSelect={pick} onGroup={onGroup} filter={test} coverTop={coverTop} coverBottom={coverBottom} zoomButtons={zoomButtons} overlay={overlay} onLeg={leg} onHold={openSpotMenu} onHandleDrop={drop} fit={fit} />
     </Suspense>
   );
 }

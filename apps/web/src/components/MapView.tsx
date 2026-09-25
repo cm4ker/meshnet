@@ -21,6 +21,7 @@ import { hasPosition } from "../lib/geo.js";
 import { EMPTY_OVERLAY, type MapHandle, type MapOverlay } from "../lib/mapOverlay.js";
 import type { LosEnd } from "../lib/meshTool.js";
 import { NodeCanvas } from "../lib/nodeCanvas.js";
+import type { MenuAt } from "../lib/press.js";
 import { useSession } from "../lib/session.js";
 import { TILE_ATTRIBUTION, TILE_URL, tileBlob } from "../lib/tiles.js";
 import { IconButton } from "../ui/Button.js";
@@ -115,8 +116,8 @@ export interface MapProps {
   overlay?: MapOverlay | undefined;
   /** A line of the overlay tapped. */
   onLeg?: ((from: LosEnd, to: LosEnd) => void) | undefined;
-  /** A long press, or a right click, on the map itself. */
-  onHold?: ((lat: number, lon: number) => void) | undefined;
+  /** A long press, or a right click, on the map itself: the spot, and where on the screen it was. */
+  onHold?: ((lat: number, lon: number, at: MenuAt) => void) | undefined;
   /** A point of a route dragged onto a node: its key, or "self" for this radio. */
   onHandleDrop?: ((handle: MapHandle, onto: string) => void) | undefined;
   /** Points to bring into view together, once for each `id`: a repeater and its neighbours. */
@@ -202,7 +203,10 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
     m.on("contextmenu", (e: L.LeafletMouseEvent) => {
       if (!calls.current.onHold) return;
       heldAt = Date.now();
-      calls.current.onHold(e.latlng.lat, e.latlng.lng);
+      // A map panned round the world gives longitudes past 180; the spot is the same one back on the globe.
+      const spot = e.latlng.wrap();
+      const box = m.getContainer().getBoundingClientRect();
+      calls.current.onHold(spot.lat, spot.lng, { x: box.left + e.containerPoint.x, y: box.top + e.containerPoint.y });
     });
     // The canvas takes no pointer events: a tap lands on the map, and is looked up among the nodes drawn.
     m.on("click", (e: L.LeafletMouseEvent) => {
