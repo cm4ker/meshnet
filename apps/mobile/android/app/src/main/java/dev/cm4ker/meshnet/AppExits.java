@@ -5,6 +5,7 @@ import android.app.ApplicationExitInfo;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Build;
+import androidx.annotation.RequiresApi;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import java.util.ArrayList;
@@ -79,6 +80,7 @@ final class AppExits {
         return new JSObject().put("at", at).put("what", what).put("reason", reason).put("detail", detail);
     }
 
+    @RequiresApi(Build.VERSION_CODES.R)
     private static String reason(int code) {
         switch (code) {
             case ApplicationExitInfo.REASON_EXIT_SELF:
@@ -107,6 +109,7 @@ final class AppExits {
     }
 
     /** What Android adds, and whether the app was in sight or kept up by its service when it went. */
+    @RequiresApi(Build.VERSION_CODES.R)
     private static String detail(ApplicationExitInfo exit) {
         String where;
         int importance = exit.getImportance();

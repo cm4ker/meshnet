@@ -1,5 +1,8 @@
 [bindings.kotlin]
 package_name = "dev.cm4ker.meshnet.core"
+# Android's own cleaner, chosen by API level at run time; the JVM one names java.lang.ref.Cleaner,
+# which Android has only from API 33, and fails the release build's lint.
+android_cleaner = true
 
 [bindings.swift]
 module_name = "MeshcoreCore"

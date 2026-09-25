@@ -2,6 +2,7 @@ package dev.cm4ker.meshnet;
 
 import android.app.ActivityManager;
 import android.content.ComponentCallbacks2;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -52,7 +53,7 @@ public class MainActivity extends BridgeActivity {
         // The page's renderer is a process of its own, which Android lowers to a cached one once the
         // app is out of sight: the first a phone short of memory kills. Held as important, it keeps
         // the app's own standing, which the link's foreground service keeps high.
-        if (view != null) view.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
+        if (view != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) view.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
         if (getBridge() != null) {
             getBridge().addWebViewListener(new WebViewListener() {
                 @Override
@@ -163,7 +164,7 @@ public class MainActivity extends BridgeActivity {
      * page is made anew instead, and finds the link where it left it.
      */
     private boolean pageGone(WebView webView, RenderProcessGoneDetail detail) {
-        boolean crashed = detail != null && detail.didCrash();
+        boolean crashed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && detail != null && detail.didCrash();
         Log.w("MeshRelay", "the page's renderer is gone" + (crashed ? ", crashed" : ", killed"));
         AppExits.notePage(this, crashed ? "crashed" : "killed for memory");
         long now = SystemClock.elapsedRealtime();
