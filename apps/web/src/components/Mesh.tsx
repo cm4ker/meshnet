@@ -4,7 +4,7 @@
  * down to see the map; on a desktop it is the column beside the map.
  */
 
-import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AdvType, contactConversation, isConversationType, isFavourite, isNodeType, type ContactRecord, type SessionState } from "@meshnet/meshcore";
 import { useBackLayer } from "../lib/back.js";
 import { ago, agoPhrase } from "../lib/format.js";
@@ -17,6 +17,8 @@ import { contactEnd, defaultHeight, discoveryOverlay, EMPTY_OVERLAY, editOverlay
 import { useMeshTool, type LosEnd } from "../lib/meshTool.js";
 import { focusOnMap, openConversation, openProfile, useNav } from "../lib/nav.js";
 import { heardAt as heard, kindLabel } from "../lib/nodes.js";
+import { getNodeOrder, NODE_ORDERS, nodeComparator, nodeGroups, orderInForce, placed, setNodeOrder, useNodeOrder } from "../lib/nodeOrder.js";
+import type { MenuAt } from "../lib/press.js";
 import { usePing, measuredLegs, spanKey } from "../lib/ping.js";
 import { routeWords } from "../lib/routes.js";
 import { useSavedPasswords } from "../lib/secrets.js";
@@ -28,8 +30,9 @@ import { closeTool, dropOnRoute, lineOfSightTo, openLineOfSight, tapInRoute, tap
 import { getTextScale, subscribeTextSize } from "../theme/textSize.js";
 import { IconButton } from "../ui/Button.js";
 import { AirMark, Group } from "../ui/List.js";
+import { showMenu } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
-import { ChatIcon, CloseIcon, InfoIcon, RefreshIcon, SearchIcon, StarFilledIcon, WavesIcon } from "./Icons.js";
+import { ChatIcon, ChevronDownIcon, CloseIcon, InfoIcon, RefreshIcon, SearchIcon, SortIcon, StarFilledIcon, WavesIcon } from "./Icons.js";
 import { LOW_BATTERY_MV } from "./node/Status.js";
 import { RouteLink } from "./tools/RouteSheet.js";
 import { ToolPanel } from "./tools/ToolPanel.js";
@@ -157,11 +160,11 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
   const state = useSession();
   const saved = useSavedPasswords();
   const { kind, query } = useFilter();
+  const { order, pinned } = useNodeOrder();
   const all = Object.values(state.contacts);
-  const rows = all.filter(only ? (c) => only.includes(c.key) : matcher(state, saved, kind, query)).sort((a, b) => heard(b) - heard(a) || (a.name || a.prefix).localeCompare(b.name || b.prefix));
-  const yours = rows.filter((c) => isYours(state, saved, c));
-  const favourites = rows.filter((c) => !isYours(state, saved, c) && isFavourite(c));
-  const rest = rows.filter((c) => !isYours(state, saved, c) && !isFavourite(c));
+  const rows = all.filter(only ? (c) => only.includes(c.key) : matcher(state, saved, kind, query)).sort(nodeComparator(order, state.self));
+  const mine = (c: ContactRecord) => isYours(state, saved, c);
+  const groups = nodeGroups(rows, mine, pinned, orderInForce(order, state.self));
   const unplaced = all.filter((c) => !hasPosition(c.lat, c.lon)).length;
   // Rows are memoised, so they get a stable opener and the minute their "5 min" is counted from.
   const openRef = useRef(onOpen);
@@ -169,27 +172,26 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
   const open = useCallback((key: string) => openRef.current(key), []);
   const minute = Math.floor(Date.now() / 60_000);
 
-  const group = (title: string, list: ContactRecord[]) =>
-    list.length ? (
-      <>
-        <div className="list-group">{title}</div>
-        <ul className="list-rows" role="list">
-          {list.map((c) => (
-            <NodeRow
-              key={c.key}
-              contact={c}
-              selected={selected === c.key}
-              yours={title === "Yours"}
-              onOpen={open}
-              login={state.logins[c.key]}
-              last={state.statusHistory[c.key]?.at(-1)}
-              self={state.self}
-              minute={minute}
-            />
-          ))}
-        </ul>
-      </>
-    ) : null;
+  const group = (title: string, list: ContactRecord[]) => (
+    <Fragment key={title}>
+      <div className="list-group">{title}</div>
+      <ul className="list-rows" role="list">
+        {list.map((c) => (
+          <NodeRow
+            key={c.key}
+            contact={c}
+            selected={selected === c.key}
+            yours={mine(c)}
+            onOpen={open}
+            login={state.logins[c.key]}
+            last={state.statusHistory[c.key]?.at(-1)}
+            self={state.self}
+            minute={minute}
+          />
+        ))}
+      </ul>
+    </Fragment>
+  );
 
   return (
     <>
@@ -217,16 +219,69 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
           <>
             {only ? null : <MemoryStrip state={state} />}
             <div className="list-summary muted">
-              {all.length} {all.length === 1 ? "node" : "nodes"}
-              {unplaced ? ` · ${unplaced} without position` : ""}
+              <span className="grow">
+                {all.length} {all.length === 1 ? "node" : "nodes"}
+                {unplaced ? ` · ${unplaced} without position` : ""}
+              </span>
+              {only ? null : <SortButton self={state.self} />}
             </div>
-            {group("Yours", yours)}
-            {group("Favourites", favourites)}
-            {group(yours.length || favourites.length ? "Heard recently" : "", rest)}
+            {groups.map((g) => group(g.title, g.rows))}
           </>
         )}
       </div>
     </>
+  );
+}
+
+/** The list's order, named, and the menu that changes it. */
+function SortButton({ self }: { self: SessionState["self"] }) {
+  const { order, pinned } = useNodeOrder();
+  const shown = orderInForce(order, self);
+  const label = NODE_ORDERS.find((o) => o.id === shown)!.label;
+  return (
+    <button
+      type="button"
+      className={["sort-btn", shown !== "heard" || !pinned ? "changed" : ""].join(" ")}
+      aria-label={`Sort nodes, now by ${label.toLowerCase()}`}
+      onClick={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        openSortMenu({ x: r.left, y: r.bottom + 4 }, self);
+      }}
+    >
+      <SortIcon size={14} />
+      {label}
+      <ChevronDownIcon size={12} />
+    </button>
+  );
+}
+
+/** Opened again after the switch flips, so the menu shows it flipped. */
+function openSortMenu(at: MenuAt, self: SessionState["self"]): void {
+  const { order, pinned } = getNodeOrder();
+  const shown = orderInForce(order, self);
+  const lost = !placed(self);
+  showMenu(
+    [
+      ...NODE_ORDERS.map((o) => ({
+        label: o.label,
+        checked: o.id === shown,
+        disabled: o.id === "near" && lost,
+        hint: o.id === "near" && lost ? "Your radio has no position" : undefined,
+        onSelect: () => setNodeOrder({ order: o.id }),
+      })),
+      {
+        label: "Yours and favourites on top",
+        hint: pinned ? "In their own groups above the rest" : "One list, in the order above",
+        toggle: true,
+        checked: pinned,
+        group: true,
+        onSelect: () => {
+          setNodeOrder({ pinned: !pinned });
+          openSortMenu(at, self);
+        },
+      },
+    ],
+    { title: "Sort nodes", at },
   );
 }
 

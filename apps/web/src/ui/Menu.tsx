@@ -4,8 +4,9 @@
  * the click was; on a phone it is a sheet of rows.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { CheckIcon } from "../components/Icons.js";
 import type { MenuAt } from "../lib/press.js";
 import { useWide } from "../lib/layout.js";
 import { dismissToast, useToast } from "../lib/toast.js";
@@ -21,6 +22,12 @@ export interface MenuItem {
   air?: boolean | undefined;
   disabled?: boolean | undefined;
   hint?: string | undefined;
+  /** One of a choice: the chosen one carries a check. With `toggle`, whether it is on. */
+  checked?: boolean | undefined;
+  /** A setting turned on and off: a switch, and the menu stays open when it flips. */
+  toggle?: boolean | undefined;
+  /** Starts a group of its own, set apart from the items above it. */
+  group?: boolean | undefined;
 }
 
 interface MenuState {
@@ -57,8 +64,25 @@ function useMenuState(): MenuState | null {
 }
 
 function pick(item: MenuItem): void {
-  closeMenu();
+  if (!item.toggle) closeMenu();
   item.onSelect();
+}
+
+/** What sits at an item's right edge: its switch, the check of a choice made, or the air mark. */
+function Trailing({ item }: { item: MenuItem }) {
+  if (item.toggle) return <span className={["switch", item.checked ? "on" : ""].join(" ")} aria-hidden="true" />;
+  if (item.checked) return <CheckIcon size={18} className="menu-check" />;
+  return item.air ? <AirMark /> : null;
+}
+
+/** The items cut where a group starts, each piece with where it began. */
+function groups(items: MenuItem[]): { at: number; items: MenuItem[] }[] {
+  const out: { at: number; items: MenuItem[] }[] = [];
+  items.forEach((item, i) => {
+    if (item.group || out.length === 0) out.push({ at: i, items: [] });
+    out.at(-1)!.items.push(item);
+  });
+  return out;
 }
 
 export function MenuHost() {
@@ -68,19 +92,30 @@ export function MenuHost() {
   // Mounted while closed too, so the sheet can slide away with the menu it held.
   return (
     <Sheet open={menu !== null} onClose={closeMenu} title={menu?.title}>
-      <div className="group-body">
-        {menu?.items.map((item, i) => (
-          // By place: two nodes of one name make two items of one label.
-          <button key={i} type="button" className={["line", "line-action", item.danger ? "danger" : ""].join(" ")} disabled={item.disabled} onClick={() => pick(item)}>
-            {item.icon ? <span className="line-icon">{item.icon}</span> : null}
-            <span className="line-text">
-              <span>{item.label}</span>
-              {item.hint ? <small>{item.hint}</small> : null}
-            </span>
-            {item.air ? <AirMark /> : null}
-          </button>
-        ))}
-      </div>
+      {groups(menu?.items ?? []).map((g) => (
+        <div key={g.at} className="group-body">
+          {g.items.map((item, i) => (
+            // By place: two nodes of one name make two items of one label.
+            <button
+              key={g.at + i}
+              type="button"
+              className={["line", item.toggle ? "line-switch" : item.checked === undefined ? "line-action" : "", item.danger ? "danger" : ""].join(" ")}
+              role={item.toggle ? "switch" : undefined}
+              aria-checked={item.toggle ? !!item.checked : undefined}
+              aria-current={!item.toggle && item.checked ? "true" : undefined}
+              disabled={item.disabled}
+              onClick={() => pick(item)}
+            >
+              {item.icon ? <span className="line-icon">{item.icon}</span> : null}
+              <span className="line-text">
+                <span>{item.label}</span>
+                {item.hint ? <small>{item.hint}</small> : null}
+              </span>
+              <Trailing item={item} />
+            </button>
+          ))}
+        </div>
+      ))}
     </Sheet>
   );
 }
@@ -124,11 +159,21 @@ function Popover({ menu }: { menu: MenuState }) {
   return createPortal(
     <div ref={box} className="popover" role="menu" style={pos}>
       {menu.items.map((item, i) => (
-        <button key={i} type="button" role="menuitem" className={item.danger ? "danger" : ""} disabled={item.disabled} onClick={() => pick(item)}>
-          {item.icon ? <span className="popover-icon">{item.icon}</span> : null}
-          <span>{item.label}</span>
-          {item.air ? <AirMark /> : null}
-        </button>
+        <Fragment key={i}>
+          {item.group && i > 0 ? <div className="popover-sep" role="separator" /> : null}
+          <button
+            type="button"
+            role={item.toggle ? "menuitemcheckbox" : item.checked === undefined ? "menuitem" : "menuitemradio"}
+            aria-checked={item.checked === undefined && !item.toggle ? undefined : !!item.checked}
+            className={item.danger ? "danger" : ""}
+            disabled={item.disabled}
+            onClick={() => pick(item)}
+          >
+            {item.icon ? <span className="popover-icon">{item.icon}</span> : null}
+            <span className="popover-label">{item.label}</span>
+            <Trailing item={item} />
+          </button>
+        </Fragment>
       ))}
     </div>,
     document.body,

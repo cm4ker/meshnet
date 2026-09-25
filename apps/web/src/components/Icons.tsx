@@ -71,6 +71,8 @@ export const NodesIcon = icon('<circle cx="12" cy="5.5" r="2.5"/><circle cx="5.5
 export const LockIcon = icon('<rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>');
 export const DownIcon = icon('<path d="M12 5v14M6 13l6 6 6-6"/>');
 export const ChevronDownIcon = icon('<path d="M7 10l5 5 5-5"/>');
+/** The order of a list. */
+export const SortIcon = icon('<path d="M4 7h16M7 12h10M10 17h4"/>');
 /** A flood: messages that go everywhere rather than along a route. */
 export const WavesIcon = icon(
   '<path d="M3 8.5c1.5-1.4 3-1.4 4.5 0s3 1.4 4.5 0 3-1.4 4.5 0 3 1.4 4.5 0"/><path d="M3 13c1.5-1.4 3-1.4 4.5 0s3 1.4 4.5 0 3-1.4 4.5 0 3 1.4 4.5 0"/><path d="M3 17.5c1.5-1.4 3-1.4 4.5 0s3 1.4 4.5 0 3-1.4 4.5 0 3 1.4 4.5 0"/>',

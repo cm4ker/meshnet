@@ -1067,8 +1067,42 @@ textarea.input {
   display: none;
 }
 .list-summary {
-  padding: 2px var(--space-4) 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: calc(28px * var(--box-scale));
+  padding: 2px var(--space-2) 0 var(--space-4);
   font-size: var(--text-xs);
+}
+/* The list's order, at the end of its count line; in the accent when it is not the usual one. */
+.sort-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: calc(28px * var(--box-scale));
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sort-btn.changed {
+  color: var(--accent);
+}
+.sort-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+@media (hover: hover) {
+  .sort-btn:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
 }
 .row {
   width: 100%;
@@ -1603,8 +1637,22 @@ details.more .kv-grid {
   text-align: left;
   cursor: pointer;
 }
-.popover button > span:nth-child(2) {
+.popover-label {
   flex: 1;
+}
+/* Between the groups of a menu. */
+.popover-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+/* The choice in force, in a menu of choices. */
+.menu-check {
+  flex: none;
+  color: var(--accent);
+}
+.sheet-body > .group-body + .group-body {
+  margin-top: var(--space-3);
 }
 .popover button:focus-visible {
   background: var(--hover);
