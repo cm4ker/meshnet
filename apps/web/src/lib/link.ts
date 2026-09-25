@@ -19,9 +19,11 @@ export interface LinkState {
   attempt: number;
   /** The last try failed for want of a bond, and the connector can make one with a PIN (`pairLink`). */
   pair: boolean;
+  /** A dropped link waits for its next try; `reconnectNow` brings it forward. */
+  waiting: boolean;
 }
 
-let state: LinkState = { phase: "idle", error: null, retrying: false, attempt: 0, pair: false };
+let state: LinkState = { phase: "idle", error: null, retrying: false, attempt: 0, pair: false, waiting: false };
 const listeners = new Set<() => void>();
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let wantedLink: { connector: Connector; device: FoundDevice | null } | null = null;
@@ -29,7 +31,7 @@ let wantedLink: { connector: Connector; device: FoundDevice | null } | null = nu
 let generation = 0;
 
 function set(patch: Partial<LinkState>): void {
-  state = { ...state, pair: false, ...patch };
+  state = { ...state, pair: false, waiting: false, ...patch };
   for (const listener of listeners) listener();
 }
 
@@ -163,7 +165,11 @@ function cancelRetry(): void {
   retryTimer = null;
 }
 
-/** On a drop that was not asked for, try again with a growing pause, up to a point. */
+/**
+ * On a drop that was not asked for, try again with a growing pause, for as
+ * long as it takes: a radio out of range or switched off comes back on its
+ * own time, and the app is left running to be there when it does.
+ */
 session.subscribe(() => {
   const status = session.getState().status;
   if (status !== "closed" || !wantedLink || state.phase !== "connected") return;
@@ -175,37 +181,59 @@ session.subscribe(() => {
   scheduleRetry();
 });
 
+/** The longest pause between two tries. */
+const RETRY_MAX_MS = 30_000;
+
 function scheduleRetry(): void {
   const attempt = state.attempt + 1;
-  if (attempt > 6) {
-    set({ phase: "failed", error: "link dropped and could not be restored", retrying: false });
-    return;
-  }
-  const delay = Math.min(30_000, 1000 * 2 ** (attempt - 1));
+  const delay = Math.min(RETRY_MAX_MS, 1000 * 2 ** (attempt - 1));
   const gen = generation;
-  set({ phase: "connecting", retrying: true, attempt, error: null });
-  retryTimer = setTimeout(async () => {
-    retryTimer = null;
-    const link = wantedLink;
-    if (!link || gen !== generation) return;
-    try {
-      const transport = await open(link.connector, link.device, gen);
-      if (!transport) return;
-      await session.connect(transport);
-      if (gen !== generation) return;
-      set({ phase: "connected", retrying: false, attempt: 0, error: null });
-    } catch (error) {
-      if (gen !== generation) return;
-      const message = error instanceof Error ? error.message : String(error);
-      if (canPair(link.connector, link.device, error)) {
-        // A radio that wants a bond will not stop wanting it: ask for the PIN instead of trying again.
-        set({ phase: "failed", error: message, retrying: false, attempt: 0, pair: true });
-        return;
-      }
-      set({ error: message });
-      scheduleRetry();
+  set({ phase: "connecting", retrying: true, attempt, error: null, waiting: true });
+  retryTimer = setTimeout(() => void retry(gen), delay);
+}
+
+async function retry(gen: number): Promise<void> {
+  retryTimer = null;
+  const link = wantedLink;
+  if (!link || gen !== generation) return;
+  set({ waiting: false });
+  try {
+    const transport = await open(link.connector, link.device, gen);
+    if (!transport) return;
+    await session.connect(transport);
+    if (gen !== generation) return;
+    set({ phase: "connected", retrying: false, attempt: 0, error: null });
+  } catch (error) {
+    if (gen !== generation) return;
+    const message = error instanceof Error ? error.message : String(error);
+    if (canPair(link.connector, link.device, error)) {
+      // A radio that wants a bond will not stop wanting it: ask for the PIN instead of trying again.
+      set({ phase: "failed", error: message, retrying: false, attempt: 0, pair: true });
+      return;
     }
-  }, delay);
+    set({ error: message });
+    scheduleRetry();
+  }
+}
+
+/**
+ * Tries the dropped link at once: the next try, brought forward, or the link
+ * that failed, again. A try already under way is left to finish.
+ */
+export function reconnectNow(): void {
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    void retry(generation);
+  } else if (state.phase === "failed" && wantedLink) {
+    void connectWith(wantedLink.connector, wantedLink.device).catch(() => undefined);
+  }
+}
+
+// Back on screen (the window out of the tray, a phone unlocked), the next try goes at once.
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && retryTimer) reconnectNow();
+  });
 }
 
 /** At launch: the last link, if it can be reached without a chooser. */

@@ -858,7 +858,13 @@ class DemoRadio extends BaseTransport {
         return [new Uint8Array([Resp.Ok])];
       }
       case Cmd.Reboot:
-        this.timers.push(setTimeout(() => this.emitClose(new Error("the radio rebooted")), 200));
+        // A radio that reboots says nothing more on this link.
+        this.timers.push(
+          setTimeout(() => {
+            void this.shutdown();
+            this.emitClose(new Error("the radio rebooted"));
+          }, 200),
+        );
         return [];
       default:
         // Everything else is a setting: say yes.

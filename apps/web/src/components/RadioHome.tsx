@@ -1,6 +1,6 @@
 import { useRef, useSyncExternalStore } from "react";
 import { battery, batteryPercent, plural } from "../lib/format.js";
-import { disconnect } from "../lib/link.js";
+import { disconnect, useLink } from "../lib/link.js";
 import { useLookalikePrefs } from "../lib/lookalikes.js";
 import { openRadioPage, type RadioPage } from "../lib/nav.js";
 import { canHover } from "../lib/platform.js";
@@ -50,6 +50,7 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
   const use = memoryUse(state);
   const contactsValue = state.contactsFull ? "Full" : use ? `${use.used} of ${use.max}` : undefined;
   const reading = useResync();
+  const link = useLink();
   const scroller = useRef<HTMLDivElement>(null);
   const pull = usePull(scroller, onPull, online && !reading);
 
@@ -83,7 +84,7 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
             <span className="row-main">
               <span className="row-title">{self?.name ?? "Radio"}</span>
               <span className={["row-sub", online ? "muted" : "danger"].join(" ")}>
-                {!online ? "Offline · reconnecting" : reading ? `${STEP_LABELS[reading.step]} · ${reading.index + 1} of ${STEP_COUNT}` : state.link ? state.link.label : "online"}
+                {!online ? (link.phase === "connecting" ? "Offline · reconnecting" : "Offline") : reading ? `${STEP_LABELS[reading.step]} · ${reading.index + 1} of ${STEP_COUNT}` : state.link ? state.link.label : "online"}
               </span>
             </span>
             <button type="button" className="radio-battery" disabled={!online} title="Read the battery again" onClick={() => void act(() => session.refreshBattery())}>

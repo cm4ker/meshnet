@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useBackLayer, useSectionsBack } from "../lib/back.js";
 import { summarize, totalUnread } from "../lib/conversations.js";
 import { batteryPercent } from "../lib/format.js";
-import { pairLink, useLink } from "../lib/link.js";
+import { pairLink, reconnectNow, useLink } from "../lib/link.js";
 import { useWide } from "../lib/layout.js";
 import { back, focusOnMap, getNav, goSection, openConversation, setStack, shownConversation, topOf, useNav, type Nav, type Screen, type Section } from "../lib/nav.js";
 import { useMeshTool } from "../lib/meshTool.js";
@@ -78,7 +78,13 @@ function Offline() {
     <div className="offline" role="status">
       {link.phase === "connecting" ? (
         <>
-          <span className="spinner" /> Reconnecting{link.attempt ? ` · attempt ${link.attempt}` : ""}
+          <span className="spinner" />
+          <span className="offline-text">Reconnecting{link.attempt ? ` · attempt ${link.attempt}` : ""}</span>
+          {link.retrying ? (
+            <Button size="sm" disabled={!link.waiting} onClick={reconnectNow}>
+              Try now
+            </Button>
+          ) : null}
         </>
       ) : (
         <>
@@ -86,6 +92,10 @@ function Offline() {
           {link.pair ? (
             <Button size="sm" onClick={() => setAsking(true)}>
               Pair…
+            </Button>
+          ) : link.phase === "failed" ? (
+            <Button size="sm" onClick={reconnectNow}>
+              Reconnect
             </Button>
           ) : null}
         </>

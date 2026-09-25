@@ -2,7 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { AdvertLocPolicy, TelemMode, type SessionState } from "@meshnet/meshcore";
 import { autostartEnabled, autostartLabel, hasAutostart, setAutostart } from "../lib/autostart.js";
 import { bandwidth, frequency } from "../lib/format.js";
-import { disconnect, pauseForUpdate } from "../lib/link.js";
+import { disconnect, pauseForUpdate, useLink } from "../lib/link.js";
 import { setLookalikePrefs, useLookalikePrefs } from "../lib/lookalikes.js";
 import type { RadioPage } from "../lib/nav.js";
 import { setNoticePrefs, useNoticePrefs, type NoticePrefs } from "../lib/noticePrefs.js";
@@ -555,6 +555,7 @@ function AboutPage() {
 
 function ConnectionPage() {
   const state = useSession();
+  const link = useLink();
   const [auto, setAuto] = useState(autoConnectWanted);
   const [lend, setLend] = useState(relayWanted);
   const relay = useRelay();
@@ -567,7 +568,7 @@ function ConnectionPage() {
   return (
     <>
       <Group>
-        <InfoRow label="Connected">{state.status === "ready" ? (state.link?.label ?? "yes") : "reconnecting…"}</InfoRow>
+        <InfoRow label="Connected">{state.status === "ready" ? (state.link?.label ?? "yes") : link.phase === "connecting" ? "reconnecting…" : "no"}</InfoRow>
         <SwitchRow
           label="Reconnect at launch"
           checked={auto}
