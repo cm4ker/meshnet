@@ -20,6 +20,8 @@ class ScriptedRadio extends BaseTransport {
   readonly label = "MeshCore-test";
   sent: Uint8Array[] = [];
   queue: Uint8Array[] = [];
+  /** Pushes a phone's relay kept while this app was away: they go out ahead of the next message it reads. */
+  kept: Uint8Array[] = [];
   contacts: Uint8Array[] = [contactFrame(BOB, "Bob", 10)];
   time = 1_700_000_000;
   nextAck = 0x11223344;
@@ -93,7 +95,7 @@ class ScriptedRadio extends BaseTransport {
       }
       case Cmd.SyncNextMessage: {
         const next = this.queue.shift();
-        return [next ?? new Uint8Array([Resp.NoMoreMessages])];
+        return [...this.kept.splice(0), next ?? new Uint8Array([Resp.NoMoreMessages])];
       }
       case Cmd.GetBattAndStorage:
         return [new ByteWriter().u8(Resp.BattAndStorage).u16(4100).u32(1).u32(2).toBytes()];
@@ -706,6 +708,31 @@ test("a link that drops inside the window leaves the message sent, not unheard",
   await settle();
   t.mock.timers.tick(20_000);
   assert.equal(session.getState().messages.find((m) => m.id === sent.id)!.status, "sent");
+});
+
+test("what the other app sent while this one was away is kept as sent, not waited on for an echo or an ack", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  const connecting = session.connect(radio);
+  await settle();
+  await connecting;
+  const said = (text: string, at: number) => new ByteWriter().u8(Cmd.SendChannelTxtMsg).u8(TxtType.Plain).u8(0).u32(at).string(text).toBytes();
+  const direct = new ByteWriter().u8(Cmd.SendTxtMsg).u8(TxtType.Plain).u8(0).u32(1_699_990_100).bytes(BOB.subarray(0, 6)).string("to Bob this morning").toBytes();
+  radio.kept.push(
+    mirrorFrame(said("said this morning", 1_699_990_000), new Uint8Array([Resp.Ok])),
+    mirrorFrame(direct, new ByteWriter().u8(Resp.Sent).u8(0).u32(0x31313131).u32(2000).toBytes()),
+    // Sent again an hour later: the same message, moved to then, not to now.
+    mirrorFrame(said("said this morning", 1_699_993_600), new Uint8Array([Resp.Ok])),
+  );
+  radio.push(new Uint8Array([Push.MsgWaiting]));
+  await settle();
+  t.mock.timers.tick(60_000);
+  const channel = session.getState().messages.filter((m) => m.text === "said this morning");
+  assert.equal(channel.length, 1);
+  assert.equal(channel[0]?.status, "sent");
+  assert.equal(channel[0]?.sentAt, 1_699_993_600);
+  assert.equal(session.getState().messages.find((m) => m.text === "to Bob this morning")?.status, "sent");
 });
 
 test("a channel message sent again goes out with a fresh stamp, and the new packet's echo counts", async (t) => {

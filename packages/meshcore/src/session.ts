@@ -2137,6 +2137,11 @@ export class MeshSession {
    * the whole conversation. Its acknowledgement reaches both, so a direct
    * message is marked delivered here too. The same text again, a retry, is
    * the same message.
+   *
+   * The relay keeps what was sent while this app was away, and hands it over
+   * ahead of the next message this app reads: one that comes during a sync
+   * went out long ago. What came of it only the other app saw, so it is kept
+   * as sent, not waited on for an echo or an ack that will not come again.
    */
   private mirrored(command: Uint8Array, answer: Uint8Array): void {
     try {
@@ -2144,6 +2149,7 @@ export class MeshSession {
       const code = r.u8();
       if (code !== Cmd.SendTxtMsg && code !== Cmd.SendChannelTxtMsg) return;
       if (r.u8() !== TxtType.Plain) return;
+      const late = this.state.syncing;
       let conversation: string;
       let contact: ContactRecord | undefined;
       let attempt = 0;
@@ -2154,7 +2160,7 @@ export class MeshSession {
         contact = Object.values(this.state.contacts).find((c) => c.prefix === prefix);
         if (!contact) return;
         conversation = contactConversation(contact.key);
-        this.keepMirrored(conversation, timestamp, r.restString(), attempt, (id) => {
+        this.keepMirrored(conversation, timestamp, r.restString(), attempt, late, (id) => {
           const sent = decodeFrame(answer);
           if (sent.kind === "sent") this.armAck(id, sent, sent.flood ? null : contactRoute(contact!));
           else this.patchMessage(id, { status: "sent" });
@@ -2164,7 +2170,7 @@ export class MeshSession {
         const timestamp = r.u32();
         conversation = channelConversation(index);
         const text = r.restString();
-        this.keepMirrored(conversation, timestamp, text, attempt, (id, fresh) => {
+        this.keepMirrored(conversation, timestamp, text, attempt, late, (id, fresh) => {
           this.patchMessage(id, { status: "sent" });
           if (fresh) {
             const message = this.state.messages.find((m) => m.id === id);
@@ -2182,7 +2188,7 @@ export class MeshSession {
    * `fresh` says the packet is new to us: a message we did not have, or a
    * channel retry, which goes with a new stamp and so is a different packet.
    */
-  private keepMirrored(conversation: string, timestamp: number, text: string, attempt: number, sent: (id: string, fresh: boolean) => void): void {
+  private keepMirrored(conversation: string, timestamp: number, text: string, attempt: number, late: boolean, sent: (id: string, fresh: boolean) => void): void {
     const same = (m: MessageRecord) => m.direction === "out" && m.conversation === conversation && m.text === text;
     // A direct retry keeps its stamp. A channel retry carries a new one and
     // no attempt count, so it is known by being the same text as ours that
@@ -2194,6 +2200,19 @@ export class MeshSession {
       );
     if (known) {
       const again = known.timestamp !== timestamp || attempt > known.attempt;
+      if (late) {
+        // Sent again while this app was away: moved to when it went, its outcome unknown here.
+        if (again) {
+          this.patchMessage(known.id, {
+            timestamp,
+            attempt: Math.max(known.attempt, attempt),
+            error: null,
+            ...(known.timestamp !== timestamp ? { sentAt: timestamp } : {}),
+            ...(known.status === "delivered" ? {} : { status: "sent" as const }),
+          });
+        }
+        return;
+      }
       this.patchMessage(known.id, {
         timestamp,
         attempt: Math.max(known.attempt, attempt),
@@ -2218,7 +2237,7 @@ export class MeshSession {
       snr: null,
       hops: null,
       txtType: TxtType.Plain,
-      status: "sending",
+      status: late ? "sent" : "sending",
       ackTag: null,
       roundTripMs: null,
       flood: null,
@@ -2229,7 +2248,7 @@ export class MeshSession {
       retryPlan: null,
     };
     this.set({ messages: [...this.state.messages, message] });
-    sent(message.id, true);
+    if (!late) sent(message.id, true);
   }
 
   /** How many bytes of text a message to this conversation may carry. */
