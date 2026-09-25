@@ -1,5 +1,6 @@
 import { locale, t } from "../i18n/index.js";
 import { bubbleVariable, cssVariable, defaultDark, defaultLight, findTheme, themes, type BubbleToken, type Theme, type ThemeToken } from "./themes.js";
+import { paintSystemBars } from "../lib/systemBars.js";
 
 const BUBBLE_TOKENS: BubbleToken[] = ["text", "textMuted", "textFaint", "accent", "danger"];
 
@@ -70,6 +71,7 @@ function apply(): void {
   }
   root.style.colorScheme = theme.appearance;
   root.dataset["appearance"] = theme.appearance;
+  paintSystemBars(theme.appearance);
   setData(root, "bubbles", theme.bubble?.appearance);
   setData(root, "look", theme.look);
   for (const listener of listeners) listener();

@@ -43,6 +43,26 @@ export function followKeyboard(): void {
   });
 }
 
+/**
+ * On Android the web view shrinks for the keyboard itself, and the page only
+ * needs to know whether the keyboard is up. The focus does not say: a field
+ * keeps it after Back or the keyboard's own ˅ has put the keyboard away, and a
+ * composer that took that for a keyboard gave up its room above the buttons at
+ * the foot of the screen and sat under them.
+ */
+export function watchKeyboard(): void {
+  const root = document.documentElement;
+  root.classList.add("keyboard-heard");
+  const up = (on: boolean) => root.classList.toggle("keyboard-up", on);
+  window.addEventListener("keyboardWillShow", () => up(true));
+  window.addEventListener("keyboardDidShow", () => up(true));
+  window.addEventListener("keyboardWillHide", () => up(false));
+  window.addEventListener("keyboardDidHide", () => up(false));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") up(false);
+  });
+}
+
 /** Whether one of the page's own fields has the focus, so that the keyboard up is the page's. */
 function typing(): boolean {
   const field = document.activeElement;

@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.js";
 import { goBack } from "./lib/back.js";
-import { followKeyboard } from "./lib/keyboard.js";
+import { followKeyboard, watchKeyboard } from "./lib/keyboard.js";
 import { autoConnect, connectWith, disconnect, getLink } from "./lib/link.js";
 import { linkBook, startLinks } from "./lib/links.js";
 import { getPing } from "./lib/ping.js";
@@ -53,6 +53,8 @@ if (nativePlatform() === "ios") {
   window.addEventListener("scroll", () => {
     if (window.scrollY !== 0) window.scrollTo(0, 0);
   }, { passive: true });
+} else if (nativePlatform() === "android") {
+  watchKeyboard();
 }
 
 const root = document.getElementById("root");

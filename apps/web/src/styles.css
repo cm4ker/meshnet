@@ -2780,9 +2780,12 @@ button.hop {
 }
 /* With the keyboard up the home bar is under it, so no room is kept for it. Where the page
    follows the keyboard (iOS), --safe-bottom already shrinks as the keyboard rises, and
-   dropping it at once on focus would jump before the keyboard moves. */
+   dropping it at once on focus would jump before the keyboard moves. Where the shell says
+   whether the keyboard is up (Android), that is asked rather than the focus, which a field
+   keeps with the keyboard put away. */
 @media (pointer: coarse) {
-  :root:not(.keyboard-follows) .compose.focus {
+  :root:not(.keyboard-follows):not(.keyboard-heard) .compose.focus,
+  :root.keyboard-up .compose.focus {
     padding-bottom: var(--space-2);
   }
   /* A touch screen's fields are at least 16 px (see the end of this file), and the layer under this one must match. */

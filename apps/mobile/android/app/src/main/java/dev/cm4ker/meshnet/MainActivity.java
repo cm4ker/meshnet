@@ -2,6 +2,7 @@ package dev.cm4ker.meshnet;
 
 import android.app.ActivityManager;
 import android.content.ComponentCallbacks2;
+import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -10,10 +11,12 @@ import android.os.SystemClock;
 import android.util.Log;
 import android.view.Display;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebView;
 import androidx.activity.OnBackPressedCallback;
+import androidx.core.view.WindowCompat;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.WebViewListener;
 
@@ -44,6 +47,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NoticesPlugin.class);
         registerPlugin(MeshRelayPlugin.class);
         super.onCreate(savedInstanceState);
+
+        drawUnderBars();
 
         // The page draws its text at the system's size itself (SystemTextPlugin); the WebView scaling
         // it as well would apply the setting twice.
@@ -176,6 +181,23 @@ public class MainActivity extends BridgeActivity {
         webView.destroy();
         new Handler(Looper.getMainLooper()).post(this::recreate);
         return true;
+    }
+
+    /**
+     * Edge to edge on every Android, as Android 15 and later make it anyway, so there is one layout:
+     * the page keeps clear of the bars with env(safe-area-inset-*), and the SystemBars plugin lifts
+     * the web view above the keyboard. Left to fit the bars below Android 15, the window stopped
+     * above the buttons while the plugin still lifted it by the keyboard's full height, buttons
+     * included, and the composer floated a button bar's height above the keyboard.
+     */
+    @SuppressWarnings("deprecation") // The bar colours are what Android before 15 paints the bars with.
+    private void drawUnderBars() {
+        Window window = getWindow();
+        WindowCompat.setDecorFitsSystemWindows(window, false);
+        window.setStatusBarColor(Color.TRANSPARENT);
+        window.setNavigationBarColor(Color.TRANSPARENT);
+        // No veil behind the three buttons: the page is under them, and their colour follows its theme.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) window.setNavigationBarContrastEnforced(false);
     }
 
     /**
