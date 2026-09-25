@@ -5,7 +5,7 @@ import type { Notice } from "./announce.js";
 import { dismissBanner, getBanner, showBanner } from "./banner.js";
 import type { NativeNotice } from "./nativeNotices.js";
 import { DEFAULT_PREFS, setNoticePrefs } from "./noticePrefs.js";
-import { askPermissionOnce, noticeId, notify, pageOnScreen, tellWatch, unwatchRadio, watchRadio, withdraw } from "./notify.js";
+import { askPermissionOnce, noticeId, notify, pageOnScreen, tellChannels, withdraw } from "./notify.js";
 
 const calls: { plugin: string; method: string; options: unknown }[] = [];
 let platform = "ios";
@@ -21,7 +21,8 @@ Object.assign(Capacitor, {
   getPlatform: () => platform,
   PluginHeaders: [
     methods("LocalNotifications", ["checkPermissions", "requestPermissions", "removeDeliveredNotificationsById"]),
-    methods("MeshWatch", ["configure", "announced", "follow", "post", "chime", "openSettings"]),
+    methods("MeshWatch", ["post", "chime", "openSettings"]),
+    methods("MeshRelay", ["announced", "configure"]),
     methods("Notices", ["post", "cancel", "chime", "channels", "openSettings"]),
   ],
   nativePromise: async (plugin: string, method: string, options: unknown) => {
@@ -48,7 +49,7 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 // The first native call imports the plugin layer; done once here, it is not racing the first test.
 before(async () => {
-  await tellWatch();
+  await tellChannels();
 });
 
 beforeEach(async () => {
@@ -83,11 +84,11 @@ test("an iOS message goes to the native side with the app's signal and its threa
   assert.equal(native.avatar, null);
 });
 
-test("an iOS notice the page shows withdraws the native watch's stand-in for it, after it is posted", async () => {
+test("an iOS notice the page shows tells the radio core, after it is posted, that it needs no stand-in", async () => {
   await notify(channelMessage);
   assert.deepEqual(calls.map(({ plugin, method, options }) => ({ plugin, method, tag: method === "announced" ? options : undefined })), [
     { plugin: "MeshWatch", method: "post", tag: undefined },
-    { plugin: "MeshWatch", method: "announced", tag: { tag: "c:ch:1" } },
+    { plugin: "MeshRelay", method: "announced", tag: { tag: "c:ch:1" } },
   ]);
 });
 
@@ -157,35 +158,15 @@ test("the first connection checks and requests notification permission", async (
   ]);
 });
 
-test("the native watch receives notification preferences and the signal without treating its proxy as a Promise", async () => {
-  await tellWatch();
-  assert.deepEqual(calls, [
-    { plugin: "MeshWatch", method: "configure", options: { messages: true, nodes: true, people: true, sound: "signal_chirp.wav" } },
-  ]);
-});
-
-test("the native watch follows the radio the page connected to, and a radio let go only while it is the one followed", async () => {
-  await watchRadio("A");
-  await watchRadio("B");
-  // The old radio's link closes after the new one opened.
-  await unwatchRadio("A");
-  await unwatchRadio("B");
-  assert.deepEqual(calls, [
-    { plugin: "MeshWatch", method: "follow", options: { deviceId: "A" } },
-    { plugin: "MeshWatch", method: "follow", options: { deviceId: "B" } },
-    { plugin: "MeshWatch", method: "follow", options: {} },
-  ]);
-});
-
-test("Android makes its channels ring with the signal, posts through its own plugin and withdraws there, never calling the iOS watch", async () => {
+test("Android makes its channels ring with the signal, posts through its own plugin and withdraws there, never calling the iOS one", async () => {
   platform = "android";
-  await tellWatch();
+  await tellChannels();
   await notify(channelMessage);
   await withdraw("c:ch:1");
-  assert.deepEqual(calls.map((c) => `${c.plugin}.${c.method}`), ["Notices.channels", "Notices.post", "Notices.cancel"]);
+  assert.deepEqual(calls.map((c) => `${c.plugin}.${c.method}`), ["Notices.channels", "Notices.post", "MeshRelay.announced", "Notices.cancel"]);
   assert.deepEqual(calls[0]?.options, { sound: "signal_chirp.wav" });
   const native = calls[1]?.options as NativeNotice;
   assert.equal(native.kind, "chats");
   assert.equal(native.sound, "signal_chirp.wav");
-  assert.deepEqual(calls[2]?.options, { id: noticeId("c:ch:1") });
+  assert.deepEqual(calls[3]?.options, { id: noticeId("c:ch:1") });
 });

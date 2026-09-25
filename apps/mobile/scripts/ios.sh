@@ -36,6 +36,10 @@ pnpm --filter @meshnet/web build
 say "sync the client and the plugins into the Xcode project"
 cd "$here"
 npx cap sync ios
+
+# The local package ios/MeshcoreCore links it; Xcode resolves the package from what this writes.
+say "build the radio core"
+bash "$here/scripts/core-ios.sh"
 cd "$here/ios/App"
 
 case "$mode" in
@@ -110,6 +114,8 @@ case "$mode" in
         -authenticationKeyPath "${ASC_KEY_PATH:-$HOME/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8}" \
         -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
       rm -rf "$archive" "$cache/export" "$cache/export-review.plist" "$derived"
+      # The radio core's Rust build, a gigabyte; the next ship starts from a fresh tree anyway.
+      rm -rf "$repo/crates/meshcore-core/target"
     fi
     ;;
 

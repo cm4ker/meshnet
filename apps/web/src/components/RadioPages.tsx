@@ -4,7 +4,7 @@ import { autostartEnabled, autostartLabel, hasAutostart, setAutostart } from "..
 import { agoPhrase, battery as volts, bandwidth, batteryPercent, frequency } from "../lib/format.js";
 import { BATTERY_TYPES, setBatteryType, useBatteryType } from "../lib/batteryType.js";
 import { parseLatLon } from "../lib/geo.js";
-import { disconnect, pauseForUpdate, useLink } from "../lib/link.js";
+import { disconnect, useLink } from "../lib/link.js";
 import { setLookalikePrefs, useLookalikePrefs } from "../lib/lookalikes.js";
 import { setOpenAtUnread, useOpenAtUnread } from "../lib/firstUnread.js";
 import { SIGNALS, setNoticePrefs, useNoticePrefs, type Corner, type NoticePrefs } from "../lib/noticePrefs.js";
@@ -12,7 +12,7 @@ import { askPermission, hasNoticeSettings, openNoticeSettings } from "../lib/not
 import { previewSignal } from "../lib/chime.js";
 import { push, type RadioPage } from "../lib/nav.js";
 import { nativePlatform, shell } from "../lib/platform.js";
-import { nativeLink, relayAvailable, relayWanted, setRelayWanted, setSharing, stopRelay, useRelay } from "../lib/relay.js";
+import { relayAvailable, relayWanted, setRelayWanted, setSharing, useRelay } from "../lib/relay.js";
 import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
 import { SEND_TRIES_MAX, setSendTries, triesPhrase, useSendTries } from "../lib/sendTries.js";
 import { session, storage, useSelector, useSession } from "../lib/session.js";
@@ -791,20 +791,8 @@ function ConnectionPage() {
               setLend(v);
               setRelayWanted(v);
               try {
-                if (nativeLink()) {
-                  // Android's page already goes through the phone's link: only the computer's side changes.
-                  await setSharing(v);
-                } else if (v) {
-                  // The page goes through the relay from its next connection on. The
-                  // old link is closed first: closing it after would drop the new one,
-                  // since both are the plugin's link to the same radio.
-                  const resume = await pauseForUpdate();
-                  await resume();
-                } else {
-                  // What the relay kept for the page first; the link then drops and comes back direct.
-                  await session.syncMessages().catch(() => undefined);
-                  await stopRelay();
-                }
+                // The page already goes through the phone's link: only the computer's side changes.
+                await setSharing(v);
               } catch (err) {
                 toast(`Could not change it: ${(err as Error).message ?? err}`, "error");
               }

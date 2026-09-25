@@ -9,7 +9,7 @@ import { useLink } from "./lib/link.js";
 import { ALL_CHATS, createAnnouncer } from "./lib/announce.js";
 import { getNoticePrefs, messageWanted, nodeWanted } from "./lib/noticePrefs.js";
 import { noteUnread } from "./lib/firstUnread.js";
-import { askPermissionOnce, notify, onCardAction, onNotificationClick, pageOnScreen, tellWatch, withdraw } from "./lib/notify.js";
+import { askPermissionOnce, notify, onCardAction, onNotificationClick, pageOnScreen, tellChannels, withdraw } from "./lib/notify.js";
 import { quickReply } from "./lib/quickReply.js";
 import { toast } from "./lib/toast.js";
 import { session, useSelector } from "./lib/session.js";
@@ -93,7 +93,7 @@ export function App() {
   // The desktop's tray icon shows whether anything is unread, and from whom.
   useEffect(() => startTray(() => session.getState(), (listener) => session.subscribe(listener)), []);
 
-  // Android's radio core announces what arrives while the page sleeps, in the page's words and names.
+  // The phone's radio core announces what arrives while the page sleeps, in the page's words and names.
   useEffect(() => startCoreWatch(() => session.getState(), (listener) => session.subscribe(listener)), []);
 
   // A node the radio hears for the first time.
@@ -130,8 +130,8 @@ export function App() {
     [],
   );
 
-  // The iPhone's native watch learns the switches at every start.
-  useEffect(() => { void tellWatch(); }, []);
+  // Android's notification channels ring with the reader's signal, from the start.
+  useEffect(() => { void tellChannels(); }, []);
 
   // A phone may end the app in the background without a word, and history is
   // saved a moment after it changes: on the way out it is saved at once.

@@ -1,5 +1,5 @@
 /**
- * What Android's radio core (`crates/meshcore-core`, behind `MeshRelay.java`)
+ * What the phone's radio core (`crates/meshcore-core`, behind `MeshRelay`)
  * needs to announce messages while the page sleeps: the reader's notice
  * settings (noticePrefs.ts) and the names of this radio, its contacts and its
  * channels, so that its notices read as the page's own do. Sent whenever any
@@ -9,7 +9,7 @@
 import type { SessionState } from "@meshnet/meshcore";
 import { signalFile } from "./chime.js";
 import { getNoticePrefs, subscribeNoticePrefs } from "./noticePrefs.js";
-import { configureCore, nativeLink } from "./relay.js";
+import { configureCore, relayAvailable } from "./relay.js";
 
 /** The JSON the core reads (`WatchConfig` in `watch.rs`). */
 export function coreConfig(state: SessionState): string {
@@ -25,9 +25,9 @@ export function coreConfig(state: SessionState): string {
   });
 }
 
-/** Keeps the core told, on Android; stops when the returned function is called. */
+/** Keeps the core told, on a phone; stops when the returned function is called. */
 export function startCoreWatch(state: () => SessionState, subscribe: (listener: () => void) => () => void): () => void {
-  if (!nativeLink()) return () => undefined;
+  if (!relayAvailable()) return () => undefined;
   // The session changes often; the names only now and then.
   let names: [unknown, unknown, unknown] = [null, null, null];
   let told = "";

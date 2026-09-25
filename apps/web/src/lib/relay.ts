@@ -2,13 +2,14 @@
  * The phone's native link to the radio (`MeshRelay.java` on Android,
  * `MeshRelay.swift` on iOS), and the radio shared with a computer through it.
  *
- * On Android the page always talks to its BLE radio through the native link:
- * Android stops the page's scripts about a minute after the app leaves the
- * screen, and the link, kept up by a foreground service, goes on reading the
- * radio for it. Its radio core (`crates/meshcore-core`) keeps every message
- * for the page and announces what arrives while the page sleeps, from the
- * settings and names `configureCore` hands it. On iOS the page goes through
- * it only while sharing.
+ * On a phone the page always talks to its BLE radio through the native link:
+ * the phone stops the page's scripts soon after the app leaves the screen
+ * (iOS within seconds, Android in about a minute), and the link goes on
+ * reading the radio for it, kept up by a foreground service on Android and by
+ * the `bluetooth-central` background mode on iOS. Its radio core
+ * (`crates/meshcore-core`) keeps every message for the page and announces
+ * what arrives while the page sleeps, from the settings and names
+ * `configureCore` hands it (`coreWatch.ts`).
  *
  * Shared, the phone serves the radio's own Bluetooth service, so a computer
  * nearby connects to the phone as if it were the radio, and uses it through
@@ -26,18 +27,18 @@ interface RelayState {
   on: boolean;
   /** A computer is connected to the phone. */
   computer: boolean;
-  /** Linked to a radio (Android's link; iOS does not say). */
-  linked?: boolean;
+  /** Linked to a radio for the page. */
+  linked: boolean;
 }
 
 interface MeshRelayPlugin {
   start(options: { deviceId: string; name: string; share: boolean }): Promise<RelayState>;
-  /** Android: shares the linked radio, or stops sharing it; the link stays. */
+  /** Shares the linked radio, or stops sharing it; the link stays. */
   share(options: { on: boolean }): Promise<RelayState>;
   stop(): Promise<RelayState>;
-  /** Android: the page's notice settings and names for the radio core, and the signal file its notices ring with. */
+  /** The page's notice settings and names for the radio core, and the signal file its notices ring with. */
   configure(options: { json: string; sound: string | null }): Promise<void>;
-  /** Android: the page announced this tag itself. */
+  /** The page announced this tag itself. */
   announced(options: { tag: string }): Promise<void>;
   state(): Promise<RelayState>;
   attach(): Promise<void>;
@@ -50,9 +51,10 @@ interface MeshRelayPlugin {
 const WANTED_KEY = "meshnet.relay.on";
 
 let plugin: MeshRelayPlugin | null = null;
-let state: RelayState = { on: false, computer: false };
+let state: RelayState = { on: false, computer: false, linked: false };
 const listeners = new Set<() => void>();
 
+/** Whether the page reaches its BLE radio through the phone's native link: a phone's shell. */
 export function relayAvailable(): boolean {
   const platform = nativePlatform();
   return shell() === "capacitor" && (platform === "ios" || platform === "android");
@@ -61,11 +63,6 @@ export function relayAvailable(): boolean {
 /** Whether the radio should be shared with a computer. */
 export function relayWanted(): boolean {
   return relayAvailable() && readSetting<boolean>(WANTED_KEY, false);
-}
-
-/** Whether the page reaches its BLE radio through the native link whether shared or not: Android's. */
-export function nativeLink(): boolean {
-  return shell() === "capacitor" && nativePlatform() === "android";
 }
 
 export function setRelayWanted(on: boolean): void {
@@ -133,8 +130,8 @@ function listen(): Promise<unknown> {
     withRelay((api) =>
       api.addListener("state", (next) => {
         set(next);
-        // Android's link is gone, or iOS stopped sharing: either way the page's way to the radio.
-        if (nativeLink() ? next.linked === false : !next.on) route?.onStopped();
+        // The link is gone, and the page's way to the radio with it.
+        if (!next.linked) route?.onStopped();
       }),
     ),
   ]);
@@ -143,8 +140,8 @@ function listen(): Promise<unknown> {
 
 /**
  * Links to the radio the page has just connected to, shared if wanted, and
- * talks to it through the relay. Closed, Android's link goes too unless the
- * radio is shared: the app is then free to stop in the background.
+ * talks to it through the relay. Closed, the link goes too unless the radio
+ * is shared: the app is then free to stop in the background.
  */
 export async function openRelay(deviceId: string, name: string, onFrame: Route["onFrame"], onStopped: Route["onStopped"]): Promise<RelayLink> {
   await listen();
@@ -158,31 +155,24 @@ export async function openRelay(deviceId: string, name: string, onFrame: Route["
       if (route !== mine) return;
       route = null;
       await withRelay((api) => api.detach()).catch(() => undefined);
-      if (nativeLink() && !state.on) await withRelay((api) => api.stop().then(set)).catch(() => undefined);
+      if (!state.on) await withRelay((api) => api.stop().then(set)).catch(() => undefined);
     },
   };
 }
 
-/** Android: shares the linked radio with a computer, or stops, with no new connection. */
+/** Shares the linked radio with a computer, or stops, with no new connection. */
 export async function setSharing(on: boolean): Promise<void> {
   set(await withRelay((api) => api.share({ on })));
 }
 
-/** Android: what the radio core needs to announce messages while the page sleeps. */
+/** What the radio core needs to announce messages while the page sleeps. */
 export async function configureCore(json: string, sound: string | null): Promise<void> {
-  if (!nativeLink()) return;
+  if (!relayAvailable()) return;
   await withRelay((api) => api.configure({ json, sound }));
 }
 
-/** Android: the page announced this itself, so the radio core's notice for it waits no more. */
+/** The page announced this itself, so the radio core's notice for it waits no more. */
 export async function coreAnnounced(tag: string): Promise<void> {
-  if (!nativeLink()) return;
-  await withRelay((api) => api.announced({ tag }));
-}
-
-/** Stops sharing. The page's link through the relay reports a drop, and is reconnected directly. */
-export async function stopRelay(): Promise<void> {
   if (!relayAvailable()) return;
-  set(await withRelay((api) => api.stop()));
-  route?.onStopped();
+  await withRelay((api) => api.announced({ tag }));
 }

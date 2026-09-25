@@ -30,6 +30,7 @@ apps/mobile/ios/App/App.xcworkspace/xcuserdata/
 apps/mobile/ios/App/App.xcodeproj/xcuserdata/
 apps/mobile/ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
 apps/mobile/ios/DerivedData/
+apps/mobile/ios/MeshcoreCore/build/
 
 .playwright-mcp/
 .DS_Store

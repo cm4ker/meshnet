@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
 		4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */ = {isa = PBXBuildFile; productRef = 4D22ABE82AF431CB00220026 /* CapApp-SPM */; };
+		7E5A1C012F9A00000000B001 /* MeshcoreCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7E5A1C012F9A00000000B002 /* MeshcoreCore */; };
 		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
 		504EC3081FED79650016851F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 504EC3071FED79650016851F /* AppDelegate.swift */; };
 		504EC30D1FED79650016851F /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30B1FED79650016851F /* Main.storyboard */; };
@@ -20,7 +21,6 @@
 		7E5A1C012F9A00000000A003 /* MeshViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5A1C012F9A00000000A004 /* MeshViewController.swift */; };
 		7E5A1C012F9A00000000A005 /* MeshWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5A1C012F9A00000000A006 /* MeshWatch.swift */; };
 		7E5A1C012F9A00000000A007 /* MeshRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5A1C012F9A00000000A008 /* MeshRelay.swift */; };
-		7E5A1C012F9A00000000A009 /* MeshRelayMux.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5A1C012F9A00000000A00A /* MeshRelayMux.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,7 +38,6 @@
 		7E5A1C012F9A00000000A004 /* MeshViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshViewController.swift; sourceTree = "<group>"; };
 		7E5A1C012F9A00000000A006 /* MeshWatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshWatch.swift; sourceTree = "<group>"; };
 		7E5A1C012F9A00000000A008 /* MeshRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshRelay.swift; sourceTree = "<group>"; };
-		7E5A1C012F9A00000000A00A /* MeshRelayMux.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshRelayMux.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -48,6 +47,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */,
+				7E5A1C012F9A00000000B001 /* MeshcoreCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -81,7 +81,6 @@
 				7E5A1C012F9A00000000A002 /* MeshTcpPlugin.swift */,
 				7E5A1C012F9A00000000A006 /* MeshWatch.swift */,
 				7E5A1C012F9A00000000A008 /* MeshRelay.swift */,
-				7E5A1C012F9A00000000A00A /* MeshRelayMux.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
@@ -110,6 +109,7 @@
 			name = App;
 			packageProductDependencies = (
 				4D22ABE82AF431CB00220026 /* CapApp-SPM */,
+				7E5A1C012F9A00000000B002 /* MeshcoreCore */,
 			);
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
@@ -142,6 +142,7 @@
 			mainGroup = 504EC2FB1FED79650016851F;
 			packageReferences = (
 				D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */,
+				7E5A1C012F9A00000000B003 /* XCLocalSwiftPackageReference "../MeshcoreCore" */,
 			);
 			productRefGroup = 504EC3051FED79650016851F /* Products */;
 			projectDirPath = "";
@@ -179,7 +180,6 @@
 				7E5A1C012F9A00000000A003 /* MeshViewController.swift in Sources */,
 				7E5A1C012F9A00000000A005 /* MeshWatch.swift in Sources */,
 				7E5A1C012F9A00000000A007 /* MeshRelay.swift in Sources */,
-				7E5A1C012F9A00000000A009 /* MeshRelayMux.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -390,6 +390,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "CapApp-SPM";
 		};
+		7E5A1C012F9A00000000B003 /* XCLocalSwiftPackageReference "../MeshcoreCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../MeshcoreCore;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -397,6 +401,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */;
 			productName = "CapApp-SPM";
+		};
+		7E5A1C012F9A00000000B002 /* MeshcoreCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7E5A1C012F9A00000000B003 /* XCLocalSwiftPackageReference "../MeshcoreCore" */;
+			productName = MeshcoreCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -8,7 +8,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
 
         window = UIWindow(windowScene: windowScene)
-        // Our bridge, which registers the plugins that live in this app (Wi-Fi, the lock-screen watch).
+        // Our bridge, which registers the plugins that live in this app (Wi-Fi, the radio link, the notices).
         window?.rootViewController = MeshViewController()
         window?.makeKeyAndVisible()
 

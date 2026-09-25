@@ -8,6 +8,6 @@ class MeshViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(MeshTcpPlugin())
         bridge?.registerPluginInstance(MeshWatchPlugin())
         bridge?.registerPluginInstance(MeshRelayPlugin())
-        MeshWatch.shared.start()
+        MeshWatch.installSounds()
     }
 }

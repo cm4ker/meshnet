@@ -37,17 +37,11 @@ export interface NativeNotice {
 }
 
 /**
- * The iPhone's native side (`MeshWatch.swift`): the watch that announces what
- * the radio pushes while the page is asleep, and the page's own notices,
- * drawn there so they can show who wrote.
+ * The iPhone's native notices (`MeshWatch.swift`): the page's own, drawn there
+ * so they can show who wrote. What arrives while the page sleeps is the radio
+ * core's to announce (`lib/relay.ts`).
  */
 export interface MeshWatchPlugin {
-  /** `people`: only a person's radio is a new node worth a notice. `sound`: the file its notices ring with. */
-  configure(options: { messages: boolean; nodes: boolean; people: boolean; sound: string | null }): Promise<void>;
-  /** The page has announced this tag itself, so the watch withdraws its own notice for it. */
-  announced(options: { tag: string }): Promise<void>;
-  /** The radio the page is connected to, by the BLE plugin's device id; none without one. */
-  follow(options: { deviceId?: string }): Promise<void>;
   /** Opens the system's notification settings for the app. */
   openSettings(): Promise<void>;
   post(options: NativeNotice): Promise<void>;

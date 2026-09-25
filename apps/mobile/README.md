@@ -94,6 +94,12 @@ cause the timeout again.
 
 ## iOS
 
+As on Android, the page reaches a Bluetooth radio through `MeshRelay.swift`,
+which runs the radio core: iOS suspends the page's scripts soon after the app
+leaves the screen, while the `bluetooth-central` background mode keeps the link
+up and wakes the core for every frame, and the core reads the radio's queue and
+posts what arrives as notices.
+
 It needs a Mac with Xcode. The Mac here is `server.lan`, the same one the Sovabox
 phone app is built on, and the same Apple team (8CNDTQVA32). The build keeps its
 derived data under `~/Library/Caches/meshnet-ios` and the tree under
@@ -111,8 +117,11 @@ Then, on the Mac:
     cd ~/build/meshnet
     bash apps/mobile/scripts/ios.sh simulator
 
-That installs the packages, builds the client, syncs it into the project, builds,
-creates the simulator "Meshnet iPhone" if it is missing, installs the app and
+That installs the packages, builds the client, syncs it into the project,
+builds the radio core (`crates/meshcore-core`, Rust) for the phone and the
+simulator with `scripts/core-ios.sh` into the local package `ios/MeshcoreCore`
+(cargo with the `aarch64-apple-ios`, `aarch64-apple-ios-sim` and
+`x86_64-apple-ios` targets), builds, creates the simulator "Meshnet iPhone" if it is missing, installs the app and
 opens it. The simulator has no Bluetooth, so the connect screen says "BLE
 unsupported" there; a radio needs a phone. `xcrun simctl delete "Meshnet iPhone"`
 afterwards: a simulator is about 2 GB, and that Mac's disk is short.

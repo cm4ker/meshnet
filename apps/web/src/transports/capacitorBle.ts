@@ -6,9 +6,8 @@
 
 import { BaseTransport, BLE } from "@meshnet/meshcore";
 import type { Connector, FoundDevice } from "./types.js";
-import { unwatchRadio, watchRadio } from "../lib/notify.js";
 import { nativePlatform } from "../lib/platform.js";
-import { nativeLink, openRelay, relayWanted, type RelayLink } from "../lib/relay.js";
+import { openRelay, type RelayLink } from "../lib/relay.js";
 import { readSetting, writeSetting } from "../lib/storage.js";
 
 type BleModule = typeof import("@capacitor-community/bluetooth-le");
@@ -29,10 +28,10 @@ async function ble(): Promise<BleModule["BleClient"]> {
 class CapacitorBleTransport extends BaseTransport {
   readonly kind = "ble" as const;
   /**
-   * On Android, and while the radio is shared with a computer, the page's
-   * frames go through the native link, which goes on reading the radio while
-   * the page sleeps and takes turns with a computer (see lib/relay.ts). The
-   * plugin's link stays, for the pairing and to hear of a drop.
+   * The page's frames go through the phone's native link, which goes on
+   * reading the radio while the page sleeps and takes turns with a computer
+   * the radio is shared with (see lib/relay.ts). The plugin's link stays, for
+   * the pairing and to hear of a drop.
    */
   private relay: RelayLink | null = null;
 
@@ -49,7 +48,7 @@ class CapacitorBleTransport extends BaseTransport {
       this.deviceId,
       name,
       (frame) => this.emitFrame(frame),
-      () => this.emitClose(new Error(nativeLink() ? "the phone's link to the radio was closed" : "sharing with a computer was turned off")),
+      () => this.emitClose(new Error("the phone's link to the radio was closed")),
     );
   }
 
@@ -72,7 +71,6 @@ class CapacitorBleTransport extends BaseTransport {
   }
 
   protected async shutdown(): Promise<void> {
-    void unwatchRadio(this.deviceId);
     if (this.relay) {
       // Not unsubscribed: Android shares the subscription with the relay's own
       // client on the same link, and the computer would stop hearing the radio.
@@ -170,16 +168,13 @@ export const capacitorBleConnector: Connector = {
       await client.disconnect(device.id).catch(() => undefined);
       throw error;
     }
-    if (nativeLink() || relayWanted()) {
-      try {
-        await transport.useRelay(device.name);
-      } catch (error) {
-        await transport.close().catch(() => undefined);
-        throw error;
-      }
+    try {
+      await transport.useRelay(device.name);
+    } catch (error) {
+      await transport.close().catch(() => undefined);
+      throw error;
     }
     remember(device);
-    void watchRadio(device.id);
     return transport;
   },
 };

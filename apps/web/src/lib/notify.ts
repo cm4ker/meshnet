@@ -39,17 +39,13 @@ import { coreAnnounced } from "./relay.js";
 export type { NoticeKind } from "./announce.js";
 
 /**
- * Hands the settings to the native side, which cannot read the page's
- * storage: the iPhone's watch, which cannot tell one message from another
- * either, only that one is waiting, so it announces them all while any
- * message may ring; and Android's channels, whose sound is fixed when they
- * are made.
+ * Makes Android's notification channels ring with the reader's signal: a
+ * channel's sound is fixed when it is made. (What the radio core behind the
+ * phone's link needs to announce in the page's place is `coreWatch.ts`'s.)
  */
-export async function tellWatch(): Promise<void> {
-  const prefs = getNoticePrefs();
-  const sound = signalFile(prefs.signal);
+export async function tellChannels(): Promise<void> {
+  const sound = signalFile(getNoticePrefs().signal);
   try {
-    await withWatch((w) => w.configure({ messages: anyMessageWanted(prefs), nodes: prefs.nodes !== "off", people: prefs.nodes === "people", sound }));
     await withNotices((n) => n.channels({ sound }));
   } catch (error) {
     console.warn("Could not configure native notifications", error);
@@ -58,35 +54,12 @@ export async function tellWatch(): Promise<void> {
 
 let told = "";
 subscribeNoticePrefs(() => {
-  // Only what the native side keeps: a corner moved on the desktop is not news to a phone.
-  const prefs = getNoticePrefs();
-  const now = JSON.stringify([anyMessageWanted(prefs), prefs.nodes, prefs.signal]);
+  // Only what the channels keep: a corner moved on the desktop is not news to a phone.
+  const now = getNoticePrefs().signal;
   if (now === told) return;
   told = now;
-  void tellWatch();
+  void tellChannels();
 });
-
-let followed: string | null = null;
-
-/**
- * Points the watch at the radio the page has just connected to, or at none.
- * The watch listens to that one only: the phone may hold links to other
- * radios, and subscribing to one it is not paired with makes iOS ask for
- * that radio's PIN.
- */
-export async function watchRadio(deviceId: string | null): Promise<void> {
-  followed = deviceId;
-  try {
-    await withWatch((w) => w.follow(deviceId ? { deviceId } : {}));
-  } catch (error) {
-    console.warn("Could not point iOS background notifications at the radio", error);
-  }
-}
-
-/** The page let go of this radio: so does the watch, unless it already follows another. */
-export async function unwatchRadio(deviceId: string): Promise<void> {
-  if (followed === deviceId) await watchRadio(null);
-}
 
 type LocalNotificationsModule = typeof import("@capacitor/local-notifications");
 
@@ -220,12 +193,11 @@ async function system(notice: Notice, prefs: NoticePrefs): Promise<void> {
         await withWatch((w) => w.post(native));
         await withNotices((n) => n.post(native));
       } catch (error) {
-        // Nothing shown, so the watch's stand-in, if any, is left to show.
+        // Nothing shown, so the radio core's stand-in, if any, is left to show.
         console.warn("Could not show notification", error);
         return;
       }
-      // One notice per message: the watch's "New message" for the same news goes.
-      await withWatch((w) => w.announced({ tag })).catch(() => undefined);
+      // One notice per news: the radio core's for the same news waits no more.
       await coreAnnounced(tag).catch(() => undefined);
       return;
     }
