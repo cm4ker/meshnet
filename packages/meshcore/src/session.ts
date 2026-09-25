@@ -157,7 +157,17 @@ export interface MessageRecord {
    * this, the moment it went.
    */
   sentAt?: number;
-  /** Set while the message is being sent again and again; null when nothing is being tried. */
+  /**
+   * Our direct message sent more than once: the acknowledgements the earlier
+   * tries wait for. Each try is its own packet with its own, and one that
+   * comes late still says the text arrived.
+   */
+  pastAckTags?: number[];
+  /**
+   * Set while the message is being sent again and again; null when nothing is
+   * being tried. A direct message keeps it once its tries are spent or stopped
+   * (`made` equals `total`), so the chat can say how many went unanswered.
+   */
   retryPlan: RetryPlan | null;
 }
 
@@ -424,6 +434,11 @@ export interface HeardPacket {
 
 export function contactConversation(key: string): string {
   return `c:${key}`;
+}
+
+/** A message in a chat with one node, a person or a room, which acknowledges it; not one on a channel. */
+export function isDirect(message: Pick<MessageRecord, "conversation">): boolean {
+  return message.conversation.startsWith("c:");
 }
 
 export function channelConversation(index: number): string {
@@ -704,6 +719,16 @@ const SILENCE_MS = 20 * 1000;
  */
 const RETRY_LADDER_MS = [0, 45_000, 120_000, 300_000, 720_000];
 
+/**
+ * The gaps after each try of a direct message before the next, by the number
+ * of tries made, counted from when the last went out; a try also waits out its
+ * acknowledgement. The second goes as soon as the first is given up on, and by
+ * flood: a route that broke is the likeliest reason. Then the gaps grow as on a
+ * channel, since a node out of reach stays out of reach for a while and every
+ * flood takes the whole mesh's air. Past the end the last gap repeats.
+ */
+const DIRECT_LADDER_MS = [0, 0, 45_000, 120_000, 300_000, 720_000];
+
 /** How often messages with a retry plan are checked against their next send. */
 const RETRY_SWEEP_MS = 5 * 1000;
 
@@ -780,6 +805,8 @@ export class MeshSession {
   private contactsRefreshQueued = false;
   private focused: string | null = null;
   private ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** How many tries a direct message gets before it is given up on; 1 leaves the next to the user. */
+  private sendTries = 1;
   /** Channel messages waiting to hear a repeater send them on, by message id. */
   private silenceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Drives the retry loops while the radio is here. */
@@ -1679,9 +1706,19 @@ export class MeshSession {
       // A room relays its members' posts signed with the author's key prefix.
       const signer = frame.signerPrefix ? toHex(frame.signerPrefix) : null;
       const author = signer ? this.contactByKeyStart(signer) : null;
+      const conversation = contact ? contactConversation(contact.key) : `p:${prefix}`;
+      // A sender that heard no acknowledgement sends the same message again,
+      // stamp and all, and the radio hands up every copy that arrives.
+      const twin = this.state.messages.some(
+        (m) => m.direction === "in" && m.conversation === conversation && m.timestamp === frame.timestamp && m.senderPrefix === (signer ?? prefix) && m.text === frame.text,
+      );
+      if (twin) {
+        this.log("message", `another copy of a message from ${contact?.name ?? prefix}, sent again`);
+        return;
+      }
       message = {
         id: newId(now),
-        conversation: contact ? contactConversation(contact.key) : `p:${prefix}`,
+        conversation,
         direction: "in",
         text: frame.text,
         sender: signer ? (author?.name ?? signer) : (contact?.name ?? null),
@@ -1932,9 +1969,10 @@ export class MeshSession {
     if (!message || message.direction !== "out") throw new Error("not an outgoing message");
     const attempt = message.attempt + 1;
     const flood = message.status === "unconfirmed" && message.flood === false;
+    const past = message.ackTag === null ? {} : { pastAckTags: [...(message.pastAckTags ?? []), message.ackTag] };
     if (!this.isReady) {
       // It goes again with the queue, once the radio is back.
-      this.patchMessage(id, { status: "queued", error: null, attempt, ackTag: null, roundTripMs: null, route: null, flood: flood ? true : null });
+      this.patchMessage(id, { status: "queued", error: null, attempt, ackTag: null, roundTripMs: null, route: null, flood: flood ? true : null, ...past });
       return;
     }
     const client = this.need();
@@ -1945,8 +1983,28 @@ export class MeshSession {
     // repeater that did hear the first one.
     const timestamp = target.kind === "channel" ? Math.max(Math.floor(this.now() / 1000), message.timestamp + 1) : message.timestamp;
     const sentAt = Math.max(Math.floor(this.now() / 1000), timestamp);
-    this.patchMessage(id, { status: "sending", error: null, attempt, timestamp, sentAt, ackTag: null, roundTripMs: null, route: null });
+    this.patchMessage(id, { status: "sending", error: null, attempt, timestamp, sentAt, ackTag: null, roundTripMs: null, route: null, ...past });
     await this.transmit(client, { ...message, attempt, timestamp }, target, flood ? "no acknowledgement" : false);
+  }
+
+  /**
+   * Sends one of ours again as the user asks: a direct message whose tries
+   * were spent or stopped starts a fresh run of them, the rest go once more.
+   */
+  async sendAgain(id: string): Promise<void> {
+    const message = this.state.messages.find((m) => m.id === id);
+    if (message?.retryPlan && message.retryPlan.made >= message.retryPlan.total) this.patchMessage(id, { retryPlan: null });
+    await this.retry(id);
+  }
+
+  /** How many tries a direct message gets before it is given up on; 1 sends it once and leaves the rest to the user. */
+  setSendTries(tries: number): void {
+    this.sendTries = Math.max(1, Math.floor(tries));
+  }
+
+  /** The gaps between the tries of a direct message, so the app can say how long they take. */
+  get directRetryLadder(): readonly number[] {
+    return DIRECT_LADDER_MS;
   }
 
   /** Whether a retry of this message will drop the route and flood. */
@@ -1994,6 +2052,8 @@ export class MeshSession {
         attempt: long && message.attempt > 3 ? message.attempt & 3 : message.attempt,
         timestamp: message.timestamp,
       });
+      // An earlier try's acknowledgement came while this one was going out: the text is there already.
+      if (this.state.messages.find((m) => m.id === message.id)?.status === "delivered") return;
       this.armAck(message.id, result, result.flood ? null : route);
     } catch (error) {
       this.patchMessage(message.id, { status: "failed", error: (error as Error).message });
@@ -2073,10 +2133,17 @@ export class MeshSession {
     await this.sendUnderPlan(id);
   }
 
-  /** Stops a loop; what it has already sent stays as it is. */
+  /**
+   * Stops a loop; what it has already sent stays as it is. A direct message
+   * keeps its plan, cut to the tries made: with none, going unanswered would
+   * start a fresh run of them.
+   */
   stopTrying(id: string): void {
     const message = this.state.messages.find((m) => m.id === id);
-    if (message?.retryPlan) this.patchMessage(id, { retryPlan: null });
+    const plan = message?.retryPlan;
+    if (!message || !plan) return;
+    if (isDirect(message)) this.patchMessage(id, { retryPlan: { ...plan, total: plan.made, nextAt: null } });
+    else this.patchMessage(id, { retryPlan: null });
   }
 
   /** How many sends a loop makes, so the app can say so before one is started. */
@@ -2095,8 +2162,9 @@ export class MeshSession {
       return;
     }
     const made = plan.made + 1;
-    const gap = RETRY_LADDER_MS[made] ?? null;
-    const jittered = gap === null ? null : this.now() + Math.round(gap * (0.8 + Math.random() * 0.4));
+    const ladder = isDirect(message) ? DIRECT_LADDER_MS : RETRY_LADDER_MS;
+    const gap = ladder[made] ?? ladder.at(-1) ?? 0;
+    const jittered = this.now() + Math.round(gap * (0.8 + Math.random() * 0.4));
     this.patchMessage(id, { retryPlan: { ...plan, made, nextAt: made >= plan.total ? null : jittered } });
     try {
       await this.retry(id);
@@ -2105,14 +2173,39 @@ export class MeshSession {
     }
   }
 
-  /** Sends whatever loop is due; run from the sweep while the radio is here. */
+  /**
+   * Sends whatever loop is due; run from the sweep while the radio is here. A
+   * direct message still waiting for its acknowledgement waits it out first.
+   */
   private async sweepRetries(): Promise<void> {
     if (!this.isReady) return;
-    const now = this.now();
-    const due = this.state.messages.filter(
-      (m) => m.retryPlan && m.retryPlan.nextAt !== null && m.retryPlan.nextAt <= now && m.retryPlan.made < m.retryPlan.total && m.status !== "sending" && m.status !== "queued",
-    );
-    for (const message of due) await this.sendUnderPlan(message.id);
+    const isDue = (m: MessageRecord | undefined): m is MessageRecord =>
+      !!m &&
+      !!m.retryPlan &&
+      m.retryPlan.nextAt !== null &&
+      m.retryPlan.nextAt <= this.now() &&
+      m.retryPlan.made < m.retryPlan.total &&
+      m.status !== "sending" &&
+      m.status !== "queued" &&
+      m.status !== "delivered" &&
+      !this.ackTimers.has(m.id);
+    const due = this.state.messages.filter(isDue).map((m) => m.id);
+    // Asked again before each send: another sweep may have sent one while this one waited on the radio.
+    for (const id of due) if (isDue(this.state.messages.find((m) => m.id === id))) await this.sendUnderPlan(id);
+  }
+
+  /**
+   * A direct message that went unanswered goes again on its own, as many
+   * times as the app allows; the first time it does, a plan is made for it.
+   */
+  private tryAgainOnItsOwn(id: string): void {
+    const message = this.state.messages.find((m) => m.id === id);
+    if (!message || !isDirect(message)) return;
+    if (!message.retryPlan) {
+      if (this.sendTries < 2) return;
+      this.patchMessage(id, { retryPlan: { made: 1, total: this.sendTries, nextAt: this.now() } });
+    }
+    void this.sweepRetries();
   }
 
   /** The link dropped: the loops stop counting down until it is back. */
@@ -2141,7 +2234,9 @@ export class MeshSession {
     const timer = setTimeout(() => {
       this.ackTimers.delete(id);
       const current = this.state.messages.find((m) => m.id === id);
-      if (current?.status === "sent") this.patchMessage(id, { status: "unconfirmed" });
+      if (current?.status !== "sent") return;
+      this.patchMessage(id, { status: "unconfirmed" });
+      this.tryAgainOnItsOwn(id);
     }, wait);
     const previous = this.ackTimers.get(id);
     if (previous) clearTimeout(previous);
@@ -2922,7 +3017,8 @@ export class MeshSession {
         this.mirrored(frame.command, frame.answer);
         return;
       case "sendConfirmed": {
-        const message = this.state.messages.find((m) => m.ackTag === frame.ackTag && m.direction === "out");
+        // The latest try's acknowledgement, or a late one of an earlier try: either way the text arrived.
+        const message = this.state.messages.find((m) => m.direction === "out" && (m.ackTag === frame.ackTag || m.pastAckTags?.includes(frame.ackTag)));
         if (message) {
           const timer = this.ackTimers.get(message.id);
           if (timer) clearTimeout(timer);

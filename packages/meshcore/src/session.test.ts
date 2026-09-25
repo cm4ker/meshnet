@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { ByteWriter, fromHex } from "./protocol/bytes.js";
 import { Cmd, Push, Resp, TxtType } from "./protocol/codes.js";
@@ -866,6 +866,112 @@ test("starting a loop stops the other one in the same chat", async (t) => {
   assert.equal(plan(second.id)?.made, 1);
   session.stopTrying(second.id);
   assert.equal(plan(second.id), null);
+});
+
+/** A session with Bob one relay away, trying a direct message `tries` times, on the mocked clock. */
+async function tryingSession(t: TestContext, tries: number) {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  t.mock.method(Math, "random", () => 0.5); // no jitter
+  const clock = { now: 1_700_000_000_000 };
+  const radio = new ScriptedRadio();
+  radio.contacts = [contactFrame(BOB, "Bob", 1_699_999_990, 1, [0x7f])];
+  const session = new MeshSession({ now: () => clock.now });
+  session.setSendTries(tries);
+  const connecting = session.connect(radio);
+  await settle();
+  await connecting;
+  const sent = await session.sendText(contactConversation(bobKey()), "hello?");
+  const sends = () => radio.sent.filter((f) => f[0] === Cmd.SendTxtMsg).length;
+  const message = () => session.getState().messages.find((m) => m.id === sent.id)!;
+  // The radio guesses 2 s for the ack, which the session stretches to 6.
+  const wait = async (ms: number) => {
+    clock.now += ms;
+    t.mock.timers.tick(ms);
+    await settle();
+  };
+  return { clock, radio, session, sends, message, wait };
+}
+
+test("a direct message nobody acknowledges goes again on its own, as many times as set", async (t) => {
+  const { clock, radio, sends, message, wait } = await tryingSession(t, 3);
+  assert.equal(sends(), 1);
+
+  // No ack in time: the second try goes at once, the route dropped so that it floods.
+  await wait(6_000);
+  await until(() => sends() === 2);
+  assert.ok(radio.sent.some((f) => f[0] === Cmd.ResetPath));
+  assert.equal(message().attempt, 1);
+  assert.deepEqual(message().retryPlan, { made: 2, total: 3, nextAt: clock.now + 45_000 });
+
+  // Its own wait runs out before the gap does: the third waits for the gap.
+  await wait(6_000);
+  assert.equal(message().status, "unconfirmed");
+  assert.equal(sends(), 2);
+  await wait(40_000);
+  await until(() => sends() === 3);
+  assert.equal(sends(), 3);
+
+  await wait(6_000);
+  await wait(3_600_000);
+  assert.equal(sends(), 3, "the tries are spent");
+  assert.equal(message().status, "unconfirmed");
+  assert.deepEqual(message().retryPlan, { made: 3, total: 3, nextAt: null });
+});
+
+test("one try is left to the user", async (t) => {
+  const { sends, message, wait } = await tryingSession(t, 1);
+  await wait(6_000);
+  await wait(3_600_000);
+  assert.equal(sends(), 1);
+  assert.equal(message().status, "unconfirmed");
+  assert.equal(message().retryPlan, null);
+});
+
+test("a late acknowledgement of an earlier try still counts, and the tries stop", async (t) => {
+  const { radio, sends, message, wait } = await tryingSession(t, 5);
+  radio.nextAck = 0x55555555;
+  await wait(6_000);
+  await until(() => sends() === 2);
+  assert.equal(message().ackTag, 0x55555555);
+  assert.deepEqual(message().pastAckTags, [0x11223344]);
+
+  radio.push(new ByteWriter().u8(Push.SendConfirmed).u32(0x11223344).u32(7_000).toBytes());
+  await settle();
+  assert.equal(message().status, "delivered");
+  assert.equal(message().retryPlan, null);
+  await wait(3_600_000);
+  assert.equal(sends(), 2);
+  assert.equal(message().status, "delivered");
+});
+
+test("stopped tries stay stopped; sending again starts them over", async (t) => {
+  const { session, sends, message, wait } = await tryingSession(t, 3);
+  await wait(6_000);
+  await until(() => sends() === 2);
+  session.stopTrying(message().id);
+  assert.deepEqual(message().retryPlan, { made: 2, total: 2, nextAt: null });
+  await wait(6_000);
+  await wait(3_600_000);
+  assert.equal(sends(), 2);
+  assert.equal(message().status, "unconfirmed");
+
+  await session.sendAgain(message().id);
+  assert.equal(sends(), 3);
+  await wait(6_000);
+  await until(() => sends() === 4);
+  assert.deepEqual(message().retryPlan, { made: 2, total: 3, nextAt: message().retryPlan!.nextAt });
+});
+
+test("a direct message that arrives twice, sent again for want of an ack, is kept once", async () => {
+  const radio = new ScriptedRadio();
+  radio.queue.push(dmFrame(BOB, "see you"), dmFrame(BOB, "see you"), dmFrame(BOB, "and then"));
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  await session.connect(radio);
+  assert.deepEqual(
+    session.getState().messages.map((m) => m.text),
+    ["see you", "and then"],
+  );
+  await session.disconnect();
 });
 
 test("a message from a sender not yet in the contacts is filed under its prefix, then moved", async () => {

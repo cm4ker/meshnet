@@ -11,6 +11,7 @@ import { askPermission, hasNoticeSettings, openNoticeSettings } from "../lib/not
 import { nativePlatform, shell } from "../lib/platform.js";
 import { relayAvailable, relayWanted, setRelayWanted, stopRelay, useRelay } from "../lib/relay.js";
 import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
+import { SEND_TRIES_MAX, setSendTries, triesPhrase, useSendTries } from "../lib/sendTries.js";
 import { session, storage, useSession } from "../lib/session.js";
 import { act, toast } from "../lib/toast.js";
 import { getActiveTheme, getPreference, listThemes, setPreference, subscribeTheme } from "../theme/store.js";
@@ -18,7 +19,7 @@ import { getSystemTextScale, getTextScale, getTextSizePreference, hasSystemTextS
 import { autoConnectWanted, setAutoConnect } from "../transports/index.js";
 import { Button } from "../ui/Button.js";
 import { Confirm } from "../ui/Dialog.js";
-import { ActionRow, Block, Group, InfoRow, LinkRow, SelectRow, SwitchRow } from "../ui/List.js";
+import { ActionRow, Block, Group, InfoRow, LinkRow, SelectRow, StepperRow, SwitchRow } from "../ui/List.js";
 import { Avatar, SenderName } from "./Avatar.js";
 import { CopyIcon } from "./Icons.js";
 import { ContactsPage, RemovedPage } from "./ContactsPages.js";
@@ -455,6 +456,7 @@ function MessagesPage() {
   const state = useSession();
   const lookalikes = useLookalikePrefs();
   const openAtUnread = useOpenAtUnread();
+  const sendTries = useSendTries();
   return (
     <>
       <Group>
@@ -473,6 +475,17 @@ function MessagesPage() {
           onChange={(v) => setLookalikePrefs({ on: v })}
         />
         {lookalikes.on ? <SwitchRow label="Also у and У" hint="The same as y and Y in most fonts, not in every one." checked={lookalikes.near} onChange={(v) => setLookalikePrefs({ near: v })} /> : null}
+      </Group>
+      <Group note="Chats and rooms. A message the other side has not acknowledged goes again on its own: the first try by the route, the rest flood. Channels keep their own Keep trying.">
+        <StepperRow
+          label="Send tries"
+          hint={sendTries === 1 ? "Sent once. With no acknowledgement, sending again is up to you." : `${triesPhrase(sendTries)}, then the message turns red.`}
+          value={sendTries}
+          min={1}
+          max={SEND_TRIES_MAX}
+          format={(n) => (n === 1 ? "Once" : String(n))}
+          onChange={setSendTries}
+        />
       </Group>
       <Group note={state.self ? "Chats and rooms. A route learned this long ago is dropped, and the next message floods to find a fresh one. A contact can set its own on its Route page." : "Kept per radio: connect to change it."}>
         <SelectRow

@@ -1,5 +1,5 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AdvType, isConversationType, parseConversation, type ContactRecord, type MessageRecord, type SessionState } from "@meshnet/meshcore";
+import { AdvType, isConversationType, isDirect, parseConversation, type ContactRecord, type MessageRecord, type SessionState } from "@meshnet/meshcore";
 import { GEO, MENTION } from "../lib/composer.js";
 import { messagesIn, shownAt, titleOf } from "../lib/conversations.js";
 import { nameOfHash, relaysOf } from "../lib/echoes.js";
@@ -10,6 +10,7 @@ import { heardAt, hopsLabel, kindLabel } from "../lib/nodes.js";
 import { openRoute } from "../lib/toolActions.js";
 import { usePress } from "../lib/press.js";
 import { routeWords } from "../lib/routes.js";
+import { triesPhrase } from "../lib/sendTries.js";
 import { sendersOf } from "../lib/senders.js";
 import { session, useSession } from "../lib/session.js";
 import { toast } from "../lib/toast.js";
@@ -341,15 +342,21 @@ const Message = memo(function Message({ message, lead, showSender, avatar, me, o
   const tech = techOf(message);
   const plan = out ? message.retryPlan : null;
   const looping = plan !== null && plan.made < plan.total;
-  // Nobody has been heard sending it on, or a loop is still trying: the whole bubble says so.
-  const bad = out && (message.status === "unheard" || looping);
+  const direct = isDirect(message);
+  // A direct message going again on its own: counted beside the time, the bubble left as it is.
+  const trying = direct && plan !== null && (looping || message.status === "sending" || message.status === "sent" || message.status === "queued");
+  // Its tries are spent or were stopped, and none was acknowledged.
+  const gaveUp = direct && plan !== null && !trying && message.status === "unconfirmed";
+  // Nobody has been heard sending it on, a loop on a channel is still trying, or no try
+  // was acknowledged: the whole bubble says so.
+  const bad = out && (message.status === "unheard" || (looping && !direct) || gaveUp);
   const retryable = out && (message.status === "unheard" || message.status === "unconfirmed" || message.status === "failed");
   const flood = retryable && session.retryFloods(message);
 
   const retry = async () => {
     setBusy(true);
     try {
-      await session.retry(message.id);
+      await session.sendAgain(message.id);
     } catch {
       // The row shows the status.
     } finally {
@@ -370,8 +377,9 @@ const Message = memo(function Message({ message, lead, showSender, avatar, me, o
       onReply ? { label: "Reply", icon: <ReplyIcon size={17} />, onSelect: onReply } : null,
       { label: "Copy the text", icon: <CopyIcon size={17} />, onSelect: () => void navigator.clipboard?.writeText(message.text).then(() => toast("Copied")) },
       retryable && !looping ? { label: flood ? "Send again by flood" : "Send again", icon: <AlertIcon size={17} />, air: true, onSelect: () => void retry() } : null,
-      (message.status === "unheard" || message.status === "unconfirmed") && !looping
-        ? { label: "Keep trying", hint: LOOP_HINT, icon: <RefreshIcon size={17} />, air: true, onSelect: () => void keepTrying() }
+      // A direct message has its tries from the settings; this is for one sent once.
+      (message.status === "unheard" || message.status === "unconfirmed") && !looping && !(direct && plan)
+        ? { label: "Keep trying", hint: direct ? triesPhrase(session.retryLadder.length) : LOOP_HINT, icon: <RefreshIcon size={17} />, air: true, onSelect: () => void keepTrying() }
         : null,
       looping ? { label: "Stop trying", icon: <StopIcon size={17} />, onSelect: () => session.stopTrying(message.id) } : null,
       message.status === "queued" ? { label: "Don't send", icon: <TrashIcon size={17} />, danger: true, onSelect: () => session.discardQueued(message.id) } : null,
@@ -426,11 +434,11 @@ const Message = memo(function Message({ message, lead, showSender, avatar, me, o
             {tech ? <span className="msg-tech">{tech} ·</span> : null}
             <span>{timeOfDay(shownAt(message))}</span>
             {/* A red bubble carries its state in the strip below; a tick beside it would say the opposite. */}
-            {out && !bad ? <Status message={message} /> : null}
+            {out && !bad ? <Status message={message} trying={trying} /> : null}
           </span>
           {bad ? <Unrelayed message={message} busy={busy} onRetry={() => void retry()} /> : null}
         </div>
-        {retryable && !bad ? (
+        {retryable && !bad && !trying ? (
           <button type="button" className={["msg-retry", message.status === "failed" ? "danger" : "warn"].join(" ")} disabled={busy} onClick={() => void retry()} title={message.error ?? undefined}>
             <AlertIcon size={12} /> {message.status === "failed" ? "Failed · retry" : flood ? "Retry by flood" : "Retry"}
           </button>
@@ -489,6 +497,9 @@ function Unrelayed({ message, busy, onRetry }: { message: MessageRecord; busy: b
   } else if (looping) {
     icon = <RefreshIcon size={12} />;
     label = message.status === "sending" ? `Trying ${plan.made}/${plan.total} · sending` : `Trying ${plan.made}/${plan.total} · next in ${countdown(plan.nextAt! - now)}`;
+  } else if (isDirect(message)) {
+    icon = <AlertIcon size={12} />;
+    label = `No answer to ${plural(plan?.made ?? 1, "try", "tries")} · Send again`;
   } else {
     icon = <AlertIcon size={12} />;
     label = "Not relayed · Send again";
@@ -499,7 +510,7 @@ function Unrelayed({ message, busy, onRetry }: { message: MessageRecord; busy: b
       type="button"
       className="msg-strip"
       disabled={busy && !looping}
-      title={looping ? "Stop trying" : "No repeater has been heard sending it on. Send it again"}
+      title={looping ? "Stop trying" : isDirect(message) ? "No try was acknowledged. Send it again" : "No repeater has been heard sending it on. Send it again"}
       // Its own target: a press here neither opens the message nor starts the long-press menu,
       // so letting go after a long press can never send by accident.
       onPointerDown={(e) => e.stopPropagation()}
@@ -517,7 +528,20 @@ function Unrelayed({ message, busy, onRetry }: { message: MessageRecord; busy: b
   );
 }
 
-function Status({ message }: { message: MessageRecord }) {
+function Status({ message, trying }: { message: MessageRecord; trying: boolean }) {
+  const plan = message.retryPlan;
+  if (trying && plan) {
+    const waiting = plan.nextAt === null && plan.made < plan.total;
+    return (
+      <span
+        className="tries"
+        title={waiting ? `Waiting for the radio to send it again: ${plan.made} of ${plan.total} tries made` : `Not acknowledged yet, so it goes again on its own: try ${plan.made} of ${plan.total}`}
+      >
+        {plan.made}/{plan.total}
+        {waiting ? <LinkOffIcon size={11} /> : <RefreshIcon size={11} className="spin" />}
+      </span>
+    );
+  }
   switch (message.status) {
     case "queued":
       return (

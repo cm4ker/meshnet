@@ -7,6 +7,7 @@ import { autoConnect, connectWith, disconnect, getLink } from "./lib/link.js";
 import { linkBook, startLinks } from "./lib/links.js";
 import { getPing } from "./lib/ping.js";
 import { isCapacitor, nativePlatform } from "./lib/platform.js";
+import { initSendTries } from "./lib/sendTries.js";
 import { session } from "./lib/session.js";
 import { connectors } from "./transports/index.js";
 import { initTheme } from "./theme/store.js";
@@ -20,6 +21,9 @@ Object.assign(window, { meshnet: { session, getLink, connectWith, disconnect, co
 
 // Who hears whom, from every packet the radio hands up, for finding a way through the mesh.
 startLinks();
+
+// How many times a direct message goes before it is given up on: the session needs it before the first send.
+initSendTries();
 
 // Before the first render, so the page never paints in one palette or one text size and resolves
 // into another.

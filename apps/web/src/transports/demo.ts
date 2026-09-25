@@ -664,7 +664,9 @@ class DemoRadio extends BaseTransport {
         const tag = this.acks++;
         const confirmed = new ByteWriter().u8(Push.SendConfirmed).u32(tag).u32(1400).toBytes();
         const flood = !p || this.routes.get(p) === 0xff;
-        if (flood) {
+        if (p?.name.startsWith("Kolya")) {
+          // Kolya is out camping, past the reach of the mesh: no try gets to him, and nothing comes back.
+        } else if (flood) {
           // The acknowledgement rides back on the route the flood took: the radio learns it first.
           this.later(1500 + Math.random() * 1500, () => {
             if (p) {

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { AirIcon, ChevronRightIcon } from "../components/Icons.js";
+import { AirIcon, ChevronRightIcon, MinusIcon, PlusIcon } from "../components/Icons.js";
 
 /**
  * Grouped rows, the way a phone's settings are laid out: a group is a
@@ -80,6 +80,26 @@ export function SelectRow<T extends string>({ label, hint, icon, value, options,
         ))}
       </select>
     </label>
+  );
+}
+
+/** A count, a step at a time: minus and plus at the right edge, the value between them. */
+export function StepperRow({ label, hint, icon, value, min, max, onChange, format, disabled }: RowBase & { value: number; min: number; max: number; onChange: (next: number) => void; format?: ((n: number) => string) | undefined; disabled?: boolean | undefined }) {
+  const name = typeof label === "string" ? label.toLowerCase() : "the value";
+  return (
+    <div className={["line", disabled ? "off" : ""].join(" ")}>
+      {icon ? <span className="line-icon">{icon}</span> : null}
+      <Text label={label} hint={hint} />
+      <span className="step-control">
+        <button type="button" aria-label={`Fewer ${name}`} disabled={disabled || value <= min} onClick={() => onChange(value - 1)}>
+          <MinusIcon size={14} />
+        </button>
+        <output aria-live="polite">{format ? format(value) : value}</output>
+        <button type="button" aria-label={`More ${name}`} disabled={disabled || value >= max} onClick={() => onChange(value + 1)}>
+          <PlusIcon size={14} />
+        </button>
+      </span>
+    </div>
   );
 }
 
