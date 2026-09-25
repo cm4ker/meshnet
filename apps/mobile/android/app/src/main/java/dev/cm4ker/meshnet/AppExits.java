@@ -25,8 +25,8 @@ final class AppExits {
 
     private AppExits() {}
 
-    /** The page's renderer is gone: killed for memory, or crashed. */
-    static void notePage(Context context, boolean crashed) {
+    /** The page went while the app stayed: its renderer killed or crashed, or the page let go for memory. */
+    static void notePage(Context context, String reason) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         JSONArray kept;
         try {
@@ -36,7 +36,7 @@ final class AppExits {
         }
         JSONArray next = new JSONArray();
         try {
-            next.put(stop(System.currentTimeMillis(), "page", crashed ? "crashed" : "killed for memory", null));
+            next.put(stop(System.currentTimeMillis(), "page", reason, null));
             for (int i = 0; i < kept.length() && next.length() < KEPT; i++) next.put(kept.get(i));
         } catch (JSONException impossible) {
             return;
@@ -53,7 +53,7 @@ final class AppExits {
                 ? new ArrayList<>()
                 : manager.getHistoricalProcessExitReasons(context.getPackageName(), 0, KEPT * 3);
             for (ApplicationExitInfo exit : exits) {
-                // The app itself; its page's renderers end on their own terms, and the ones that
+                // The app itself; its page's renderers end on their own terms, and the pages that
                 // went before their time are kept here (notePage).
                 if (!context.getPackageName().equals(exit.getProcessName())) continue;
                 try {

@@ -1,5 +1,7 @@
 package dev.cm4ker.meshnet;
 
+import android.app.ActivityManager;
+import android.content.ComponentCallbacks2;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -17,6 +19,21 @@ import com.getcapacitor.WebViewListener;
 public class MainActivity extends BridgeActivity {
     /** When the page was last brought back after its renderer went; a second loss soon after is not. */
     private static long pageRestored = 0;
+    /** How often a page out of sight looks at the phone's free memory. */
+    private static final long MEMORY_CHECK_MS = 30_000;
+
+    private boolean outOfSight = false;
+    private final Handler memoryChecks = new Handler(Looper.getMainLooper());
+    private final Runnable memoryCheck = new Runnable() {
+        @Override
+        public void run() {
+            if (memoryShort()) {
+                releasePage("memory short");
+            } else {
+                memoryChecks.postDelayed(this, MEMORY_CHECK_MS);
+            }
+        }
+    };
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -76,13 +93,68 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onStart() {
         super.onStart();
+        outOfSight = false;
+        memoryChecks.removeCallbacks(memoryCheck);
         MeshRelay.shared(this).setBackground(false);
     }
 
     @Override
     public void onStop() {
         super.onStop();
+        outOfSight = true;
         MeshRelay.shared(this).setBackground(true);
+        memoryChecks.postDelayed(memoryCheck, MEMORY_CHECK_MS);
+    }
+
+    @Override
+    public void onDestroy() {
+        memoryChecks.removeCallbacks(memoryCheck);
+        super.onDestroy();
+    }
+
+    /**
+     * Before Android 14 a process with a foreground service hears when the phone runs short, and
+     * the page is let go then; later ones tell it no more, and the checks above do instead.
+     */
+    @Override
+    @SuppressWarnings("deprecation") // The RUNNING_ levels are the ones a foreground service heard.
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (!outOfSight) return;
+        if (level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW
+            || level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL
+            || level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) {
+            releasePage("trim " + level);
+        }
+    }
+
+    /**
+     * Near where Android starts ending apps for memory: past half as much again as its own line.
+     * Out of sight, the page is only a place where the radio's messages wait to be read, while the
+     * radio core behind the link reads and announces them; it is let go before Android ends the
+     * whole app for the room it takes.
+     */
+    private boolean memoryShort() {
+        ActivityManager manager = getSystemService(ActivityManager.class);
+        if (manager == null) return false;
+        ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
+        manager.getMemoryInfo(memory);
+        return memory.lowMemory || memory.availMem < memory.threshold + memory.threshold / 2;
+    }
+
+    /** Lets the page go, WebView and renderer with it; the link stays. The app opened again makes a new one. */
+    private void releasePage(String why) {
+        if (isFinishing() || isDestroyed()) return;
+        Log.i("MeshRelay", "the page is let go out of sight: " + why);
+        AppExits.notePage(this, "let go for memory");
+        // Capacitor destroys its WebView once the window is detached, which an activity finished out
+        // of sight can put off; its renderer and memory would stay till then.
+        WebView view = getBridge() != null ? getBridge().getWebView() : null;
+        if (view != null) {
+            if (view.getParent() instanceof ViewGroup) ((ViewGroup) view.getParent()).removeView(view);
+            view.destroy();
+        }
+        finish();
     }
 
     /**
@@ -93,7 +165,7 @@ public class MainActivity extends BridgeActivity {
     private boolean pageGone(WebView webView, RenderProcessGoneDetail detail) {
         boolean crashed = detail != null && detail.didCrash();
         Log.w("MeshRelay", "the page's renderer is gone" + (crashed ? ", crashed" : ", killed"));
-        AppExits.notePage(this, crashed);
+        AppExits.notePage(this, crashed ? "crashed" : "killed for memory");
         long now = SystemClock.elapsedRealtime();
         // A page that loses its renderer again at once would only go round; let the app end as before.
         if (pageRestored != 0 && now - pageRestored < 10_000) return false;

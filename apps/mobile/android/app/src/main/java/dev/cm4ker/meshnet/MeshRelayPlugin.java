@@ -37,9 +37,11 @@ public class MeshRelayPlugin extends Plugin {
         return MeshRelay.shared(getContext());
     }
 
+    private MeshRelay.Listener listener;
+
     @Override
     public void load() {
-        relay().setListener(new MeshRelay.Listener() {
+        listener = new MeshRelay.Listener() {
             @Override
             public void changed(boolean linked, boolean sharing, boolean computer) {
                 notifyListeners("state", state(linked, sharing, computer));
@@ -51,7 +53,18 @@ public class MeshRelayPlugin extends Plugin {
                 event.put("data", Base64.encodeToString(frame, Base64.NO_WRAP));
                 notifyListeners("frame", event);
             }
-        });
+        };
+        relay().setListener(listener);
+    }
+
+    /**
+     * The page is gone (let go for memory, its renderer lost, the app swiped away) while the link
+     * may stay: the core keeps its messages in the inbox, and announces them, until a new page comes.
+     */
+    @Override
+    protected void handleOnDestroy() {
+        relay().detachPage();
+        relay().clearListener(listener);
     }
 
     private static JSObject state(boolean linked, boolean sharing, boolean computer) {

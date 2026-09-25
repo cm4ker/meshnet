@@ -157,6 +157,11 @@ final class MeshRelay {
         this.listener = listener;
     }
 
+    /** A page that is gone no longer hears; a newer page's listener stays. */
+    void clearListener(Listener gone) {
+        if (listener == gone) listener = null;
+    }
+
     /** Linked to a radio for the page. */
     boolean isOn() {
         return radioAddress != null;
