@@ -64,7 +64,7 @@ pub async fn desktop_check_update(
         .map_err(|e| e.to_string())?
         .check()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| with_causes(&e))?;
     Ok(update.map(|update| UpdateMetadata {
         current_version: update.current_version.clone(),
         version: update.version.clone(),
@@ -72,4 +72,17 @@ pub async fn desktop_check_update(
         raw_json: update.raw_json.clone(),
         rid: webview.resources_table().add(update),
     }))
+}
+
+/// reqwest's own message is only "error sending request for url (…)"; what
+/// actually went wrong (a refused proxy, a bad certificate) is in the causes.
+fn with_causes(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut cause = error.source();
+    while let Some(e) = cause {
+        text.push_str(": ");
+        text.push_str(&e.to_string());
+        cause = e.source();
+    }
+    text
 }

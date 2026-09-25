@@ -2491,6 +2491,7 @@ dependencies = [
  "env_logger",
  "keyring",
  "log",
+ "reqwest",
  "serde",
  "serde_json",
  "socket2",
