@@ -8,6 +8,9 @@
  *   radio (`@[name]`), or none.
  * - New nodes: only a person's radio, any node, or none.
  * - A chat may have a level of its own, which wins over the one for its kind.
+ * - Who draws them: the system, or the app itself, Telegram's way. The app
+ *   can only draw while it runs: a computer's app does in the tray, a phone's
+ *   and a tab's only while on screen, and the system draws the rest.
  *
  * The rules are pure, so they are testable without storage or a radio.
  */
@@ -19,6 +22,20 @@ import { readSetting, writeSetting } from "./storage.js";
 /** How much of a chat rings: a person's chat takes "all" or "off" only. */
 export type ChatLevel = "all" | "mentions" | "off";
 export type NodeLevel = "people" | "all" | "off";
+/** Who draws a notice: the system's notification centre, or the app's own card. */
+export type ShownBy = "system" | "app";
+/** Where on a computer's screen the app's own cards stack. */
+export type Corner = "br" | "bl" | "tr" | "tl";
+/** The app's signal (`public/sounds/signal_<id>.wav`, drawn by `scripts/sound-synth.mjs`), or none. */
+export type Signal = "chirp" | "roger" | "hop" | "sonar" | "none";
+
+export const SIGNALS: { id: Signal; label: string; hint: string }[] = [
+  { id: "chirp", label: "Chirp", hint: "A LoRa preamble, slowed down: two up, one down." },
+  { id: "roger", label: "Roger", hint: "R in Morse, di-dah-dit: received." },
+  { id: "hop", label: "Hop", hint: "Three hops up the mesh, the last one relayed." },
+  { id: "sonar", label: "Sonar", hint: "A ping, and an answer." },
+  { id: "none", label: "None", hint: "Notices arrive quietly." },
+];
 
 export interface NoticePrefs {
   direct: boolean;
@@ -26,9 +43,13 @@ export interface NoticePrefs {
   nodes: NodeLevel;
   /** Chats with a level of their own, by conversation. */
   chat: Record<string, ChatLevel>;
+  shownBy: ShownBy;
+  corner: Corner;
+  /** The sound of every notice, on every shell; the system still decides when to be quiet. */
+  signal: Signal;
 }
 
-export const DEFAULT_PREFS: NoticePrefs = { direct: true, chats: "all", nodes: "people", chat: {} };
+export const DEFAULT_PREFS: NoticePrefs = { direct: true, chats: "all", nodes: "people", chat: {}, shownBy: "system", corner: "br", signal: "chirp" };
 
 const KEY = "meshnet.notices";
 /** The two switches before there were levels; off stays off. */

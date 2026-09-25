@@ -141,6 +141,11 @@ number it has already seen, and that count only grows.
 - Bluetooth needs no capability on the App ID. The usage strings and the
   `bluetooth-central` background mode, which keeps a connection alive while
   another app is in front, are in `Info.plist`.
+- A message's notice shows who wrote it, with their picture in place of the
+  app's icon (a communication notice, `MeshWatch.show`). That needs the
+  Communication Notifications capability: `App.entitlements` asks for it, and
+  `ios.sh` switches it on for the App ID (`USERNOTIFICATIONS_COMMUNICATION`)
+  before it makes the profile, which must carry it to sign the archive.
 - `ITSAppUsesNonExemptEncryption` is false. The radio encrypts what goes on the
   air. The client only uses WebCrypto (the system's AES and SHA-256) to recognise
   its own channel messages when a repeater sends them back.

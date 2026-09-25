@@ -23,16 +23,46 @@
  * radio or a notification centre.
  */
 
-import type { MessageRecord, SessionState } from "@meshnet/meshcore";
+import { AdvType, type MessageRecord, type SessionState } from "@meshnet/meshcore";
 import { titleOf } from "./conversations.js";
 import { isDirect, mentionsMe } from "./noticePrefs.js";
+
+/** What a notice is about, which on Android is its channel: the reader sets each one's sound in the system. */
+export type NoticeKind = "direct" | "chats" | "nodes";
+
+/**
+ * Whose circle a notice shows, as `Avatar` draws it from a name: the person
+ * who wrote, the chat, or the node heard.
+ */
+export interface Face {
+  name: string;
+  /** The node's advert type; a person's radio when not given. */
+  type?: number;
+  /** A channel, drawn as "#". */
+  channel?: boolean;
+}
+
+/** One message of a conversation's notice: who wrote it, what, and when (ms). */
+export interface NoticeLine {
+  sender: string;
+  text: string;
+  at: number;
+}
 
 export interface Notice {
   title: string;
   body: string;
   tag: string;
   /** Which channel it goes on, where the system has channels. */
-  kind: "direct" | "chats";
+  kind: NoticeKind;
+  /** Whose circle it shows; none for the notice about several chats, which shows the app's. */
+  face?: Face;
+  /**
+   * The conversation, for a system that draws one as such (Android's
+   * conversations, iOS's communication notices): its name and circle, whether
+   * several people speak in it, and the unread messages shown, oldest first.
+   */
+  thread?: { title: string; group: boolean; face: Face; lines: NoticeLine[] };
 }
 
 /** At most this many conversations each have a notice of their own. */
@@ -80,15 +110,34 @@ export function conversationNotice(state: SessionState, conversation: string, ke
   const title = titleOf(state, conversation);
   const tag = conversationTag(conversation);
   const count = unread.length;
-  const kind = isDirect(state, conversation) ? "direct" : "chats";
-  if (count === 1) return { title: heading(state, last, title), body: last.text, tag, kind };
+  const direct = isDirect(state, conversation);
+  const kind = direct ? "direct" : "chats";
+  const face = chatFace(state, conversation, title);
+  // In a channel or a room each message is someone's; in a person's chat all are theirs.
+  const speaker = (m: MessageRecord): string => (!direct && m.sender ? m.sender : title);
+  const thread = {
+    title,
+    group: !direct,
+    face,
+    lines: unread.slice(-LINES).map((m) => ({ sender: speaker(m), text: m.text, at: m.receivedAt })),
+  };
+  if (count === 1) return { title: heading(state, last, title), body: last.text, tag, kind, face: direct ? face : { name: speaker(last) }, thread };
   const mentioned = unread.some((m) => mentionsMe(state, m));
   return {
     title: `${title} · ${count} new${mentioned ? ", you are mentioned" : ""}`,
     body: unread.slice(-LINES).map((m) => line(m, title)).join("\n"),
     tag,
     kind,
+    face,
+    thread,
   };
+}
+
+/** A chat's own circle: a channel's "#", a room's or a person's by their advert. */
+function chatFace(state: SessionState, conversation: string, title: string): Face {
+  if (conversation.startsWith("ch:")) return { name: title, channel: true };
+  const contact = conversation.startsWith("c:") ? state.contacts[conversation.slice(2)] : undefined;
+  return { name: title, type: contact?.type ?? AdvType.Chat };
 }
 
 /** What the notice for several conversations says: every unread one, busiest first. */

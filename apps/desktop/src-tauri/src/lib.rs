@@ -4,6 +4,7 @@
 //! screens — is the client's, and the same on every platform.
 
 mod announce;
+mod notices;
 mod secrets;
 mod tcp;
 mod tray;
@@ -34,7 +35,8 @@ pub fn run() {
         // Put back as the window is made, before `setup` sends it to the tray at login.
         // The plugin writes it down when the app quits; `tray` and `updates`
         // do so too where the app goes without saying.
-        .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(WINDOW_STATE).build())
+        // The notices window places itself in a corner each time; kept, it would come back where it last was.
+        .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(WINDOW_STATE).with_denylist(&[notices::LABEL]).build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![MINIMIZED]),
@@ -52,13 +54,20 @@ pub fn run() {
             }
             Ok(())
         })
-        .on_window_event(tray::on_window_event)
+        .on_window_event(|window, event| {
+            if window.label() == notices::LABEL {
+                notices::on_window_event(window, event);
+            } else {
+                tray::on_window_event(window, event);
+            }
+        })
         .plugin(tauri_plugin_blec::init())
         .plugin(tauri_plugin_serialplugin::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(tcp::Tcp::default());
+        .manage(tcp::Tcp::default())
+        .manage(notices::Notices::default());
 
     #[cfg(windows)]
     let builder = builder.manage(winble::WinBle::default()).invoke_handler(tauri::generate_handler![
@@ -75,6 +84,13 @@ pub fn run() {
         tcp::tcp_close,
         announce::announce,
         announce::withdraw,
+        notices::notice_card,
+        notices::notice_withdraw,
+        notices::notice_ready,
+        notices::notice_layout,
+        notices::notice_open,
+        notices::notice_act,
+        notices::chime,
         tray::tray_unread,
         secrets::secret_get,
         secrets::secret_set,
@@ -89,6 +105,13 @@ pub fn run() {
         tcp::tcp_close,
         announce::announce,
         announce::withdraw,
+        notices::notice_card,
+        notices::notice_withdraw,
+        notices::notice_ready,
+        notices::notice_layout,
+        notices::notice_open,
+        notices::notice_act,
+        notices::chime,
         tray::tray_unread,
         secrets::secret_get,
         secrets::secret_set,

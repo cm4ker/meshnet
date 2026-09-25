@@ -13,7 +13,6 @@ use tauri::AppHandle;
 
 /// The event the page listens for, carrying the tag of the notice that was
 /// clicked. The page remembers what the tag was about; the shell does not.
-#[cfg(windows)]
 const OPENED: &str = "notification-opened";
 
 /// The group every notice of this app is filed under in the notification centre.
@@ -23,9 +22,36 @@ const GROUP: &str = "meshnet";
 /// Draws one, in place of the one out with the same tag. A click on it, on
 /// Windows, brings the window forward and hands the page the tag; elsewhere
 /// the plugin has no click to report, and the notice is only a notice.
+///
+/// `avatar`, a PNG in base64, is who it is from (gh #25): Windows draws it
+/// cropped round beside the text. `signal` is the app's sound, which plays
+/// here (`notices::play`) while the toast itself stays silent, since a toast
+/// from an app without a package can only take the system's own sounds.
 #[tauri::command]
-pub fn announce(app: AppHandle, title: String, body: String, tag: Option<String>) -> Result<(), String> {
-    show(&app, &title, &body, tag)
+pub fn announce(app: AppHandle, title: String, body: String, tag: Option<String>, avatar: Option<String>, signal: Option<String>) -> Result<(), String> {
+    let picture = avatar.as_deref().and_then(|png| picture(&app, png));
+    let shown = show(&app, &title, &body, tag, picture.as_deref())?;
+    if shown && !crate::notices::quiet() {
+        crate::notices::play(signal.as_deref().unwrap_or("none"));
+    }
+    Ok(())
+}
+
+/// The avatar as a file the notification platform can read, named by its
+/// content so each circle is written once and found again.
+fn picture(app: &AppHandle, base64: &str) -> Option<std::path::PathBuf> {
+    use base64::Engine;
+    use tauri::Manager;
+
+    let bytes = base64::engine::general_purpose::STANDARD.decode(base64).ok()?;
+    let hash = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3));
+    let directory = app.path().app_local_data_dir().ok()?.join("avatars");
+    let path = directory.join(format!("{hash:016x}.png"));
+    if !path.exists() {
+        std::fs::create_dir_all(&directory).ok()?;
+        std::fs::write(&path, &bytes).ok()?;
+    }
+    Some(path)
 }
 
 /// Takes back the notice out with this tag, on Windows; the plugin elsewhere
@@ -35,23 +61,35 @@ pub fn withdraw(app: AppHandle, tag: String) -> Result<(), String> {
     remove(&app, &tag)
 }
 
+/// Whether Windows will show it: a toast to an app whose notices are
+/// turned off in Settings is dropped without a word, and then its sound
+/// should not play either.
 #[cfg(windows)]
-fn show(app: &AppHandle, title: &str, body: &str, tag: Option<String>) -> Result<(), String> {
+fn show(app: &AppHandle, title: &str, body: &str, tag: Option<String>, picture: Option<&std::path::Path>) -> Result<bool, String> {
     use windows::core::{IInspectable, HSTRING};
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::Foundation::TypedEventHandler;
-    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
+    use windows::UI::Notifications::{NotificationSetting, ToastNotification, ToastNotificationManager};
 
     let app_id = app.config().identifier.clone();
     register(app, &app_id, &app.package_info().name);
 
+    // The circle beside the text, where Windows otherwise draws nothing; a file URI with forward slashes.
+    let image = picture
+        .map(|path| {
+            let uri = format!("file:///{}", path.to_string_lossy().replace('\\', "/").replace(' ', "%20"));
+            format!(r#"<image placement="appLogoOverride" hint-crop="circle" src="{}"/>"#, escape(&uri))
+        })
+        .unwrap_or_default();
+
     let clicked = app.clone();
-    let draw = || -> windows::core::Result<()> {
+    let draw = || -> windows::core::Result<bool> {
         let xml = XmlDocument::new()?;
         xml.LoadXml(&HSTRING::from(format!(
-            r#"<toast><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text></binding></visual></toast>"#,
+            r#"<toast><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text>{}</binding></visual><audio silent="true"/></toast>"#,
             escape(title),
-            escape(body)
+            escape(body),
+            image
         )))?;
         let toast = ToastNotification::CreateToastNotification(&xml)?;
         if let Some(tag) = &tag {
@@ -66,7 +104,9 @@ fn show(app: &AppHandle, title: &str, body: &str, tag: Option<String>) -> Result
             opened(&clicked, tag.clone());
             Ok(())
         }))?;
-        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(&app_id))?.Show(&toast)
+        let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(&app_id))?;
+        notifier.Show(&toast)?;
+        Ok(notifier.Setting().map(|setting| setting == NotificationSetting::Enabled).unwrap_or(true))
     };
     draw().map_err(|error| error.to_string())
 }
@@ -99,7 +139,7 @@ fn escape(text: &str) -> String {
 /// macOS notifies on behalf of a bundle and the plugin names it; Linux names
 /// the sender in the notice. The plugin is right there as it is.
 #[cfg(not(windows))]
-fn show(app: &AppHandle, title: &str, body: &str, _tag: Option<String>) -> Result<(), String> {
+fn show(app: &AppHandle, title: &str, body: &str, _tag: Option<String>, _picture: Option<&std::path::Path>) -> Result<bool, String> {
     use tauri_plugin_notification::NotificationExt;
 
     app.notification()
@@ -107,6 +147,7 @@ fn show(app: &AppHandle, title: &str, body: &str, _tag: Option<String>) -> Resul
         .title(title)
         .body(body)
         .show()
+        .map(|_| false)
         .map_err(|error| error.to_string())
 }
 
@@ -115,8 +156,8 @@ fn remove(_app: &AppHandle, _tag: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(windows)]
-fn opened(app: &AppHandle, tag: Option<String>) {
+/// Brings the main window forward on what a notice was about: a toast's click, or a click on one of the app's own cards.
+pub(crate) fn opened(app: &AppHandle, tag: Option<String>) {
     use tauri::{Emitter, Manager};
 
     if let Some(window) = app.get_webview_window("main") {

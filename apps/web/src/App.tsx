@@ -3,12 +3,15 @@ import { AdvType, type ContactRecord } from "@meshnet/meshcore";
 import { ConnectView } from "./components/ConnectView.js";
 import { Workspace } from "./components/Workspace.js";
 import { UpdatesDialog } from "./components/Updates.js";
+import { NoticeBanner } from "./components/NoticeBanner.js";
 import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "./lib/geo.js";
 import { useLink } from "./lib/link.js";
 import { ALL_CHATS, createAnnouncer } from "./lib/announce.js";
 import { getNoticePrefs, messageWanted, nodeWanted } from "./lib/noticePrefs.js";
 import { noteUnread } from "./lib/firstUnread.js";
-import { askPermissionOnce, notify, onNotificationClick, pageOnScreen, tellWatch, withdraw } from "./lib/notify.js";
+import { askPermissionOnce, notify, onCardAction, onNotificationClick, pageOnScreen, tellWatch, withdraw } from "./lib/notify.js";
+import { quickReply } from "./lib/quickReply.js";
+import { toast } from "./lib/toast.js";
 import { session, useSelector } from "./lib/session.js";
 import { startTray } from "./lib/tray.js";
 import { startTidyRule } from "./lib/cleanUp.js";
@@ -68,7 +71,7 @@ export function App() {
     const announcer = createAnnouncer({
       state: () => session.getState(),
       wanted: (message) => messageWanted(getNoticePrefs(), session.getState(), message),
-      show: (notice) => void notify(notice.title, notice.body, notice.tag, notice.kind),
+      show: (notice) => void notify(notice),
       withdraw: (tag) => void withdraw(tag),
     });
     const stopReceived = session.onReceived((message) => announcer.received(message));
@@ -95,7 +98,7 @@ export function App() {
       session.onDiscovered((contact) => {
         if (!nodeWanted(getNoticePrefs(), contact.type)) return;
         const name = contact.name || contact.prefix;
-        void notify(`New ${KIND[contact.type] ?? "node"}: ${name}`, discoveredBody(contact), `n:${contact.key}`, "nodes");
+        void notify({ title: `New ${KIND[contact.type] ?? "node"}: ${name}`, body: discoveredBody(contact), tag: `n:${contact.key}`, kind: "nodes", face: { name, type: contact.type } });
       }),
     [],
   );
@@ -111,6 +114,17 @@ export function App() {
       else if (tag.startsWith("n:")) openProfile(tag.slice(2), true);
     });
   }, []);
+
+  // A reply typed into one of the desktop's own cards, or "Mark read" there.
+  useEffect(
+    () =>
+      onCardAction((act) => {
+        const conversation = act.tag.slice(2);
+        if (act.action === "read") session.markRead(conversation);
+        else quickReply(conversation, act.text).catch((error: Error) => toast(error.message, "error"));
+      }),
+    [],
+  );
 
   // The iPhone's native watch learns the switches at every start.
   useEffect(() => { void tellWatch(); }, []);
@@ -147,5 +161,5 @@ export function App() {
   // the session keeps the radio and its history while it connects again.
   const reconnecting = status === "closed" || (status === "connecting" && link.retrying);
   const showWorkspace = status === "ready" || (reconnecting && known && link.phase !== "idle");
-  return <>{showWorkspace ? <Workspace /> : <ConnectView />}<UpdatesDialog /></>;
+  return <>{showWorkspace ? <Workspace /> : <ConnectView />}<UpdatesDialog /><NoticeBanner /></>;
 }

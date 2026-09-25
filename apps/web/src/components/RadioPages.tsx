@@ -7,9 +7,10 @@ import { parseLatLon } from "../lib/geo.js";
 import { disconnect, pauseForUpdate, useLink } from "../lib/link.js";
 import { setLookalikePrefs, useLookalikePrefs } from "../lib/lookalikes.js";
 import { setOpenAtUnread, useOpenAtUnread } from "../lib/firstUnread.js";
-import type { RadioPage } from "../lib/nav.js";
-import { setNoticePrefs, useNoticePrefs, type NoticePrefs } from "../lib/noticePrefs.js";
+import { SIGNALS, setNoticePrefs, useNoticePrefs, type Corner, type NoticePrefs } from "../lib/noticePrefs.js";
 import { askPermission, hasNoticeSettings, openNoticeSettings } from "../lib/notify.js";
+import { previewSignal } from "../lib/chime.js";
+import { push, type RadioPage } from "../lib/nav.js";
 import { nativePlatform, shell } from "../lib/platform.js";
 import { relayAvailable, relayWanted, setRelayWanted, stopRelay, useRelay } from "../lib/relay.js";
 import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
@@ -35,6 +36,9 @@ import { PrivacyButton } from "./Privacy.js";
 
 type Self = NonNullable<SessionState["self"]>;
 
+/** Pages opened from another page rather than from the Radio list: the list keeps the parent picked. */
+export const RADIO_PARENTS: Partial<Record<RadioPage, RadioPage>> = { removed: "contacts", sound: "notifications" };
+
 export const RADIO_TITLES: Record<RadioPage, string> = {
   name: "Name and position",
   frequency: "Frequency and power",
@@ -44,6 +48,7 @@ export const RADIO_TITLES: Record<RadioPage, string> = {
   removed: "Removed",
   advanced: "Advanced",
   notifications: "Notifications",
+  sound: "Sound",
   messages: "Messages and routes",
   appearance: "Appearance",
   connection: "Connection",
@@ -193,6 +198,8 @@ function PageBody({ page }: { page: RadioPage }) {
       return self ? <AdvancedPage self={self} online={online} /> : <Offline />;
     case "notifications":
       return <NotificationsPage />;
+    case "sound":
+      return <SoundPage />;
     case "messages":
       return <MessagesPage />;
     case "appearance":
@@ -476,6 +483,24 @@ function NotificationsPage() {
     if (on && !(await allowed())) return;
     setNoticePrefs(patch);
   };
+  const desktop = shell() === "tauri";
+  const phone = shell() === "capacitor";
+  const windows = desktop && navigator.userAgent.includes("Windows");
+  const app = phone ? "Ommesh" : "Meshnet";
+  const own = prefs.shownBy === "app";
+  // Who draws them, and what that means here: a computer's app draws all of them, a phone's and a tab's only while on screen.
+  const shownHint = own
+    ? desktop
+      ? `${app} draws them in a corner of the screen, also while its window is in the tray. ${windows ? "Windows" : "The system"} keeps none of them.`
+      : phone
+        ? `While ${app} is open, a banner slides in at the top. With it closed, the phone shows them as before.`
+        : "While this tab is on screen, a banner slides in at the top. Hidden, the browser shows them as before."
+    : desktop
+      ? `${windows ? "Windows" : "The system"} draws them and keeps them in its notification centre.`
+      : phone
+        ? `The phone's own banners, also while ${app} is open.`
+        : "The browser's own notices.";
+  const signal = SIGNALS.find((s) => s.id === prefs.signal) ?? SIGNALS[0]!;
   return (
     <>
       <Group title="Messages">
@@ -497,14 +522,72 @@ function NotificationsPage() {
           onChange={(v) => void change({ nodes: v }, v !== "off")}
         />
       </Group>
-      {hasNoticeSettings() ? (
-        <Group note="A chat can have its own setting on its page. A tap on a notification opens the chat or the node.">
-          <LinkRow label="Sound and vibration" onClick={() => void openNoticeSettings().catch(() => toast("Could not open the system's settings", "error"))} />
-        </Group>
-      ) : (
-        <p className="group-note">A chat can have its own setting on its page. A tap on a notification opens the chat or the node.</p>
-      )}
+      <Group title="Pop-ups" note="A chat can have its own setting on its page. A tap on a notification opens the chat or the node.">
+        <SelectRow
+          label="Shown by"
+          hint={shownHint}
+          value={prefs.shownBy}
+          options={[{ value: "system", label: windows ? "Windows" : "System" }, { value: "app", label: app }]}
+          onChange={(v) => setNoticePrefs({ shownBy: v })}
+        />
+        {desktop && own ? <CornerRow value={prefs.corner} onChange={(corner) => setNoticePrefs({ corner })} /> : null}
+        <LinkRow label="Sound" value={signal.label} onClick={() => push({ kind: "radio", page: "sound" })} />
+        {hasNoticeSettings() ? (
+          <LinkRow
+            label={windows ? "Windows settings" : "System settings"}
+            hint={phone ? "Vibration, the lock screen, quiet hours." : "Banners, the lock screen, Do not disturb."}
+            onClick={() => void openNoticeSettings().catch(() => toast("Could not open the system's settings", "error"))}
+          />
+        ) : null}
+      </Group>
     </>
+  );
+}
+
+/** Where a computer's own cards stack: a small screen with its four corners to pick from. */
+function CornerRow({ value, onChange }: { value: Corner; onChange: (corner: Corner) => void }) {
+  const names: Record<Corner, string> = { tl: "Top left", tr: "Top right", bl: "Bottom left", br: "Bottom right" };
+  return (
+    <div className="line">
+      <span className="line-text">
+        <span>Corner</span>
+        <small>{names[value]} of the screen.</small>
+      </span>
+      <span className="corner-pick" role="radiogroup" aria-label="Corner">
+        {(Object.keys(names) as Corner[]).map((corner) => (
+          <button key={corner} type="button" role="radio" aria-checked={corner === value} aria-label={names[corner]} className={`corner-${corner}`} onClick={() => onChange(corner)} />
+        ))}
+      </span>
+    </div>
+  );
+}
+
+/** The app's signal, one to pick and hear. */
+function SoundPage() {
+  const prefs = useNoticePrefs();
+  const note =
+    shell() === "tauri"
+      ? "Plays with every notice, the app's own and the system's, except in a full-screen app, a presentation or Do not disturb."
+      : shell() === "capacitor"
+        ? nativePlatform() === "android"
+          ? "Plays with every notice. Silent mode and Do not disturb still keep it quiet. A new sound makes the notification channels anew, so a sound picked for one in Android's settings gives way to this one."
+          : "Plays with every notice. Silent mode and Do not disturb still keep it quiet."
+        : "Plays with the banner in this tab. The browser's own notices ring with the system's sound.";
+  return (
+    <Group note={note}>
+      {SIGNALS.map((s) => (
+        <ChoiceRow
+          key={s.id}
+          label={s.label}
+          hint={s.hint}
+          checked={prefs.signal === s.id}
+          onSelect={() => {
+            setNoticePrefs({ signal: s.id });
+            previewSignal(s.id);
+          }}
+        />
+      ))}
+    </Group>
   );
 }
 

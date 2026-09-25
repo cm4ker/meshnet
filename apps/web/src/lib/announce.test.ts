@@ -81,7 +81,9 @@ function initial(messages: MessageRecord[] = [], unread: Record<string, number> 
 let state: SessionState;
 let focused: string | null;
 let wanted: (m: MessageRecord) => boolean;
+/** What each notice says, as the tests below compare it; `full` keeps whose circle it shows and its thread. */
 let shown: Notice[];
+let full: Notice[];
 let withdrawn: string[];
 let announcer: ReturnType<typeof createAnnouncer>;
 
@@ -111,13 +113,18 @@ function markRead(conversation: string): void {
 
 function start(from: SessionState = initial()): void {
   state = from;
-  announcer = createAnnouncer({ state: () => state, wanted: (m) => wanted(m), show: (n) => shown.push(n), withdraw: (t) => withdrawn.push(t) });
+  announcer = createAnnouncer({ state: () => state, wanted: (m) => wanted(m), show: (n) => {
+    const { face: _face, thread: _thread, ...said } = n;
+    shown.push(said);
+    full.push(n);
+  }, withdraw: (t) => withdrawn.push(t) });
 }
 
 beforeEach(() => {
   focused = null;
   wanted = () => true;
   shown = [];
+  full = [];
   withdrawn = [];
   start();
 });
@@ -241,4 +248,36 @@ test("the notice for several chats counts only what rings", () => {
     message(`c:${EVE}`, "four"),
   ]);
   assert.deepEqual(shown.at(-1), { title: "4 new messages in 4 chats", body: "test 1, Friends 1, Bob 1, Eve 1", tag: ALL_CHATS, kind: "chats" });
+});
+
+test("a channel's message shows its writer's circle, and its thread names each writer", () => {
+  drain([message("ch:0", "hi all", "Alice")]);
+  const notice = full.at(-1);
+  assert.deepEqual(notice?.face, { name: "Alice" });
+  assert.deepEqual(notice?.thread?.face, { name: "Public", channel: true });
+  assert.equal(notice?.thread?.group, true);
+  assert.deepEqual(notice?.thread?.lines.map((l) => [l.sender, l.text]), [["Alice", "hi all"]]);
+});
+
+test("several messages in a channel show the channel's circle, the latest three in the thread", () => {
+  drain([message("ch:0", "one", "Alice"), message("ch:0", "two", "Bob"), message("ch:0", "three", "Carol"), message("ch:0", "four", "Alice")]);
+  const notice = full.at(-1);
+  assert.deepEqual(notice?.face, { name: "Public", channel: true });
+  assert.deepEqual(notice?.thread?.lines.map((l) => l.sender), ["Bob", "Carol", "Alice"]);
+});
+
+test("a person's message shows their circle by their advert, and the thread is theirs alone", () => {
+  drain([message(`c:${BOB}`, "ping")]);
+  const notice = full.at(-1);
+  assert.deepEqual(notice?.face, { name: "Bob", type: 1 });
+  assert.equal(notice?.thread?.group, false);
+  assert.deepEqual(notice?.thread?.lines.map((l) => l.sender), ["Bob"]);
+});
+
+test("the notice for several chats shows no one's circle", () => {
+  drain([message("ch:0", "a", "Alice"), message("ch:1", "b", "Bob"), message("ch:2", "c", "Bob"), message(`c:${BOB}`, "d")]);
+  const notice = full.at(-1);
+  assert.equal(notice?.tag, ALL_CHATS);
+  assert.equal(notice?.face, undefined);
+  assert.equal(notice?.thread, undefined);
 });

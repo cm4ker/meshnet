@@ -27,7 +27,7 @@ import { NodePageView } from "./node/NodePage.js";
 import { Palette } from "./Palette.js";
 import { Profile } from "./Profile.js";
 import { RadioHome } from "./RadioHome.js";
-import { RadioPageView } from "./RadioPages.js";
+import { RADIO_PARENTS, RadioPageView } from "./RadioPages.js";
 import { CleanUpHost } from "./CleanUp.js";
 import { ToolPanel } from "./tools/ToolPanel.js";
 import { UpdateButton } from "./Updates.js";
@@ -404,8 +404,10 @@ function Desktop() {
       />
     );
   } else {
-    list = <RadioHome selected={radioPage === "removed" ? "contacts" : radioPage} />;
-    main = <RadioPageView page={radioPage ?? "name"} chrome={radioPage === "removed" ? { onBack: back } : {}} />;
+    // A page opened from another page keeps its parent picked in the list, and goes back to it.
+    const parent = radioPage ? RADIO_PARENTS[radioPage] : undefined;
+    list = <RadioHome selected={parent ?? radioPage} />;
+    main = <RadioPageView page={radioPage ?? "name"} chrome={parent ? { onBack: back } : {}} />;
   }
 
   const panelChrome: Chrome = { onClose: closePanel, onBack: panelDepth > 1 ? back : undefined };

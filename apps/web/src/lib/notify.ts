@@ -1,14 +1,23 @@
 /**
- * System notifications, for a message outside the visible chat or a node
- * heard for the first time. Each shell draws them its own way:
+ * Notifications, for a message outside the visible chat or a node heard for
+ * the first time. Who draws one is the reader's choice (noticePrefs
+ * `shownBy`), Telegram's way:
  *
- * - a browser tab, with the Web Notification API;
- * - the desktop shell, natively (`announce.rs`), since WebView2 draws none;
- * - the phone app, with Capacitor's local notifications, since neither
- *   WKWebView nor Android's WebView has a `Notification` at all. On iOS the
- *   page's scripts are suspended soon after the app leaves the screen, so a
- *   native watch (`MeshWatch.swift`) announces what the radio pushes while
- *   the phone is locked; the page tells it which notices are wanted.
+ * - the system, as every app's notices are drawn, each shell its own way:
+ *   a browser tab with the Web Notification API; the desktop shell natively
+ *   (`announce.rs`), since WebView2 draws none; the phone app natively too
+ *   (`MeshWatch.swift`, `NoticesPlugin.java`), since neither WKWebView nor
+ *   Android's WebView has a `Notification`, and the system notice should say
+ *   who wrote, with their circle, which Capacitor's plugin cannot draw;
+ * - or the app itself: on a computer, cards in a corner of the screen from
+ *   the desktop shell's own window, the main one open or in the tray; on a
+ *   phone or in a tab a banner at the top, only while the app is on screen,
+ *   since nothing but the system draws over other apps. Hidden, it is the
+ *   system's again.
+ *
+ * On iOS the page's scripts are suspended soon after the app leaves the
+ * screen, so a native watch announces what the radio pushes while the phone
+ * is locked; the page tells it which notices are wanted.
  *
  * Each notice carries a tag saying what it is about, `c:<conversation>` or
  * `n:<contact key>`, and a click on it hands the tag back to open that. A
@@ -18,62 +27,43 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { anyMessageWanted, getNoticePrefs, subscribeNoticePrefs } from "./noticePrefs.js";
+import type { Face, Notice } from "./announce.js";
+import { dismissBanner, showBanner, withdrawBanner } from "./banner.js";
+import { chime, signalFile } from "./chime.js";
+import { withNotices, withWatch, type NativeNotice } from "./nativeNotices.js";
+import { avatarPng } from "./noticeAvatar.js";
+import { anyMessageWanted, getNoticePrefs, subscribeNoticePrefs, type NoticePrefs } from "./noticePrefs.js";
 import { nativePlatform, shell } from "./platform.js";
 
-/** What a notice is about, which on Android is its channel: the reader sets each one's sound in the system. */
-export type NoticeKind = "direct" | "chats" | "nodes";
-
-const CHANNELS: { id: NoticeKind; name: string; description: string }[] = [
-  { id: "direct", name: "Direct messages", description: "A message from a person to you." },
-  { id: "chats", name: "Channels and rooms", description: "Messages in channels and rooms, or only the ones that mention you." },
-  { id: "nodes", name: "New nodes", description: "A node heard for the first time." },
-];
+export type { NoticeKind } from "./announce.js";
 
 /**
- * The iPhone's native watch (`MeshWatch.swift`): it announces what the radio
- * pushes while the page is asleep in the background, as a stand-in that waits
- * a few seconds for the page to announce the same thing itself.
- */
-interface MeshWatchPlugin {
-  /** `people`: only a person's radio is a new node worth a notice. */
-  configure(options: { messages: boolean; nodes: boolean; people: boolean }): Promise<void>;
-  /** The page has announced this tag itself, so the watch withdraws its own notice for it. */
-  announced(options: { tag: string }): Promise<void>;
-  /** The radio the page is connected to, by the BLE plugin's device id; none without one. */
-  follow(options: { deviceId?: string }): Promise<void>;
-  /** Opens the system's notification settings for the app. */
-  openSettings(): Promise<void>;
-}
-
-let watch: MeshWatchPlugin | null = null;
-
-/** Runs `use` with the watch, on an iPhone only. */
-async function withWatch(use: (watch: MeshWatchPlugin) => Promise<void>): Promise<void> {
-  if (shell() !== "capacitor" || nativePlatform() !== "ios") return;
-  const { registerPlugin } = await import("@capacitor/core");
-  // A Capacitor plugin is a Proxy that manufactures methods for every
-  // property, including `then`. Never resolve a Promise with that proxy:
-  // Promise assimilation calls the nonexistent native `then` and hangs.
-  watch ??= registerPlugin<MeshWatchPlugin>("MeshWatch");
-  await use(watch);
-}
-
-/**
- * Hands the settings to the watch, which cannot read the page's storage. It
- * cannot tell one message from another either, only that one is waiting: it
- * announces them all while any message may ring.
+ * Hands the settings to the native side, which cannot read the page's
+ * storage: the iPhone's watch, which cannot tell one message from another
+ * either, only that one is waiting, so it announces them all while any
+ * message may ring; and Android's channels, whose sound is fixed when they
+ * are made.
  */
 export async function tellWatch(): Promise<void> {
   const prefs = getNoticePrefs();
+  const sound = signalFile(prefs.signal);
   try {
-    await withWatch((w) => w.configure({ messages: anyMessageWanted(prefs), nodes: prefs.nodes !== "off", people: prefs.nodes === "people" }));
+    await withWatch((w) => w.configure({ messages: anyMessageWanted(prefs), nodes: prefs.nodes !== "off", people: prefs.nodes === "people", sound }));
+    await withNotices((n) => n.channels({ sound }));
   } catch (error) {
-    console.warn("Could not configure iOS background notifications", error);
+    console.warn("Could not configure native notifications", error);
   }
 }
 
-subscribeNoticePrefs(() => void tellWatch());
+let told = "";
+subscribeNoticePrefs(() => {
+  // Only what the native side keeps: a corner moved on the desktop is not news to a phone.
+  const prefs = getNoticePrefs();
+  const now = JSON.stringify([anyMessageWanted(prefs), prefs.nodes, prefs.signal]);
+  if (now === told) return;
+  told = now;
+  void tellWatch();
+});
 
 let followed: string | null = null;
 
@@ -170,28 +160,10 @@ export function noticeId(tag: string): number {
 /** The browser's notices that are out, by tag, to be closed when withdrawn. */
 const shown = new Map<string, Notification>();
 
-let channels: Promise<void> | null = null;
-
-/** Android's channels, one per kind of notice, made once; making one that exists changes nothing. */
-function androidChannels(api: LocalNotificationsModule["LocalNotifications"]): Promise<void> {
-  channels ??= Promise.all(CHANNELS.map((c) => api.createChannel({ ...c, importance: 4, visibility: 0 })))
-    .then(() => undefined)
-    .catch((error) => {
-      channels = null;
-      console.warn("Could not create notification channels", error);
-    });
-  return channels;
-}
-
 /** Whether this shell can open the system's notification settings for the app. */
 export function hasNoticeSettings(): boolean {
   return shell() === "capacitor" || (shell() === "tauri" && navigator.userAgent.includes("Windows"));
 }
-
-interface NoticesPlugin {
-  openSettings(): Promise<void>;
-}
-let notices: NoticesPlugin | null = null;
 
 /** Sound, vibration and quiet hours are the system's: this opens its page for the app. */
 export async function openNoticeSettings(): Promise<void> {
@@ -199,34 +171,53 @@ export async function openNoticeSettings(): Promise<void> {
     await invoke("plugin:opener|open_url", { url: "ms-settings:notifications" });
     return;
   }
-  if (shell() !== "capacitor") return;
-  if (nativePlatform() === "ios") return withWatch((w) => w.openSettings());
-  const { registerPlugin } = await import("@capacitor/core");
-  notices ??= registerPlugin<NoticesPlugin>("Notices");
-  await notices.openSettings();
+  await withWatch((w) => w.openSettings());
+  await withNotices((n) => n.openSettings());
+}
+
+/** What the desktop's corner window draws for a notice. */
+export interface Card {
+  tag: string;
+  title: string;
+  body: string;
+  face: Face | null;
+  /** Whether it is about a conversation, so it can be answered and marked read from where it is. */
+  chat: boolean;
 }
 
 /** The caller checks preferences and whether what it announces is already on screen. */
-export async function notify(title: string, body: string, tag: string, kind: NoticeKind): Promise<void> {
-  switch (shell()) {
-    case "tauri":
-      await invoke("announce", { title, body, tag }).catch(() => undefined);
+export async function notify(notice: Notice): Promise<void> {
+  const prefs = getNoticePrefs();
+  if (prefs.shownBy === "app") {
+    if (shell() === "tauri") {
+      const card: Card = { tag: notice.tag, title: notice.title, body: notice.body, face: notice.face ?? null, chat: notice.tag.startsWith("c:") && notice.tag !== "c:" };
+      await invoke("notice_card", { card, corner: prefs.corner, signal: prefs.signal }).catch(() => undefined);
       return;
-    case "capacitor":
+    }
+    // Only while the app is on screen: a hidden app's notices are the system's to draw.
+    if (pageOnScreen()) {
+      showBanner(notice);
+      void chime(prefs.signal);
+      return;
+    }
+  }
+  await system(notice, prefs);
+}
+
+/** A notice the system draws. */
+async function system(notice: Notice, prefs: NoticePrefs): Promise<void> {
+  const { title, body, tag } = notice;
+  switch (shell()) {
+    case "tauri": {
+      const avatar = notice.face ? await avatarPng(notice.face) : null;
+      await invoke("announce", { title, body, tag, avatar, signal: prefs.signal }).catch(() => undefined);
+      return;
+    }
+    case "capacitor": {
+      const native = await nativeNotice(notice, prefs);
       try {
-        const { LocalNotifications: api } = await localNotifications();
-        const android = nativePlatform() === "android";
-        if (android) await androidChannels(api);
-        await api.schedule({ notifications: [{
-          id: noticeId(tag), title, body, extra: { tag },
-          ...(android ? { channelId: kind } : {}),
-          // Without a sound iOS delivers silently. A missing named sound
-          // uses the system default; Android already supplies its own.
-          ...(nativePlatform() === "ios" ? { sound: "default", foreground: true } : {}),
-          // The notice is shown now, not at a time. Left exact, the plugin opens Android's
-          // "Alarms & reminders" settings over the app for every notice until that is granted.
-          isExactNotification: false,
-        }] });
+        await withWatch((w) => w.post(native));
+        await withNotices((n) => n.post(native));
       } catch (error) {
         // Nothing shown, so the watch's stand-in, if any, is left to show.
         console.warn("Could not show notification", error);
@@ -235,35 +226,67 @@ export async function notify(title: string, body: string, tag: string, kind: Not
       // One notice per message: the watch's "New message" for the same news goes.
       await withWatch((w) => w.announced({ tag })).catch(() => undefined);
       return;
-    default:
+    }
+    default: {
       if (!("Notification" in window) || Notification.permission !== "granted") return;
+      const avatar = notice.face ? await avatarPng(notice.face, true) : null;
       try {
-        const notice = new Notification(title, { body, tag, icon: "./icon-192.png", badge: "./notification-badge.png" });
-        notice.onclick = () => {
+        const shownNotice = new Notification(title, { body, tag, icon: avatar ? `data:image/png;base64,${avatar}` : "./icon-192.png", badge: "./notification-badge.png" });
+        shownNotice.onclick = () => {
           window.focus();
           clicked?.(tag);
-          notice.close();
+          shownNotice.close();
         };
-        notice.onclose = () => {
-          if (shown.get(tag) === notice) shown.delete(tag);
+        shownNotice.onclose = () => {
+          if (shown.get(tag) === shownNotice) shown.delete(tag);
         };
-        shown.set(tag, notice);
+        shown.set(tag, shownNotice);
       } catch {
         // Some webviews throw on construction; there is nothing to do about it.
       }
+    }
   }
+}
+
+/** A notice as the phone's native side draws it: with circles for who wrote and where. */
+async function nativeNotice(notice: Notice, prefs: NoticePrefs): Promise<NativeNotice> {
+  const thread = notice.thread;
+  let native: NativeNotice["thread"] = null;
+  if (thread) {
+    const names = [...new Set(thread.lines.map((l) => l.sender))];
+    // A person's chat is theirs, circle and all; in a channel a writer who shares its name is still a person.
+    const faces = await Promise.all(names.map((name) => avatarPng(!thread.group && name === thread.title ? thread.face : { name })));
+    const people = Object.fromEntries(names.map((name, i) => [name, faces[i] ?? null]));
+    native = { title: thread.title, group: thread.group, avatar: await avatarPng(thread.face), lines: thread.lines, people };
+  }
+  return {
+    id: noticeId(notice.tag),
+    tag: notice.tag,
+    title: notice.title,
+    body: notice.body,
+    kind: notice.kind,
+    sound: signalFile(prefs.signal),
+    avatar: notice.face ? await avatarPng(notice.face) : null,
+    thread: native,
+  };
 }
 
 /** Takes back the notice out with this tag, if there is one: what it said has been read. */
 export async function withdraw(tag: string): Promise<void> {
+  withdrawBanner(tag);
   switch (shell()) {
     case "tauri":
       await invoke("withdraw", { tag }).catch(() => undefined);
+      await invoke("notice_withdraw", { tag }).catch(() => undefined);
       return;
     case "capacitor":
       try {
-        const { LocalNotifications: api } = await localNotifications();
-        await api.removeDeliveredNotificationsById({ ids: [noticeId(tag)] });
+        if (nativePlatform() === "android") {
+          await withNotices((n) => n.cancel({ id: noticeId(tag) }));
+        } else {
+          const { LocalNotifications: api } = await localNotifications();
+          await api.removeDeliveredNotificationsById({ ids: [noticeId(tag)] });
+        }
       } catch (error) {
         console.warn("Could not withdraw notification", error);
       }
@@ -278,7 +301,11 @@ let clicked: ((tag: string) => void) | null = null;
 
 /** What a click on a notice opens. Set once, by the app. */
 export function onNotificationClick(open: (tag: string) => void): void {
-  clicked = open;
+  // A banner tapped opens as a system notice clicked does.
+  clicked = (tag) => {
+    dismissBanner();
+    open(tag);
+  };
   switch (shell()) {
     case "tauri":
       void listen<{ tag: string | null }>("notification-opened", (event) => {
@@ -286,6 +313,7 @@ export function onNotificationClick(open: (tag: string) => void): void {
       }).catch(() => undefined);
       return;
     case "capacitor":
+      // The native notices are posted with the plugin's own extras, so a tap on one reaches this listener too.
       void localNotifications()
         .then(({ LocalNotifications: api }) =>
           api.addListener("localNotificationActionPerformed", (action) => {
@@ -299,4 +327,19 @@ export function onNotificationClick(open: (tag: string) => void): void {
       // A browser notice carries its own click handler, set in `notify`.
       return;
   }
+}
+
+/** A tap on the app's own banner: opens what it is about. */
+export function openNotice(tag: string): void {
+  clicked?.(tag);
+}
+
+/** What was done on one of the desktop's own cards, other than opening it (the shell does that). */
+export type CardAction = { action: "reply"; tag: string; text: string } | { action: "read"; tag: string };
+
+/** Hands the page what was done on a desktop card, until the returned function is called. */
+export function onCardAction(act: (action: CardAction) => void): () => void {
+  if (shell() !== "tauri") return () => undefined;
+  const listening = listen<CardAction>("notice-action", (event) => act(event.payload));
+  return () => void listening.then((unlisten) => unlisten()).catch(() => undefined);
 }

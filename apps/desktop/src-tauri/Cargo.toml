@@ -36,6 +36,8 @@ keyring = { version = "3", features = ["windows-native", "apple-native"] }
 # macOS and Linux; Windows is drawn directly, see `announce.rs`.
 tauri-plugin-notification = "2"
 serde_json = "1"
+# The sender's circle arrives from the page as base64 PNG (`announce.rs`).
+base64 = "0.22"
 # A radio on Wi-Fi is a plain `std::net` socket (`tcp.rs`); this only sets its
 # keepalive, which std does not expose. Already in the tree through tokio.
 socket2 = "0.6"
@@ -76,7 +78,17 @@ windows = { version = "0.61", features = [
 ] }
 # `IAsyncOperation` and `AsyncStatus` live here since windows 0.60.
 windows-future = "0.2"
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Registry"] }
+# The notices window shown without taking the focus, the app's signal played
+# from memory, and whether Windows is keeping quiet; see `notices.rs`.
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_Security",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 # A shipped binary is built once and run for months, so the slow settings are
 # the right ones here.

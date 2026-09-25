@@ -1,0 +1,84 @@
+/**
+ * The phone app's own notification plugins, registered once each: Capacitor
+ * warns and refuses when a plugin is registered twice, and both `notify.ts`
+ * and `chime.ts` reach them.
+ *
+ * A Capacitor plugin is a Proxy that manufactures a method for every property,
+ * `then` included. Never resolve a Promise with one: Promise assimilation
+ * calls the nonexistent native `then` and hangs. These are handed out
+ * through a callback for that reason.
+ */
+
+import { nativePlatform, shell } from "./platform.js";
+
+/** A conversation, for a system that draws notices as one. */
+export interface NativeThread {
+  title: string;
+  group: boolean;
+  /** The conversation's own circle, base64 PNG. */
+  avatar: string | null;
+  lines: { sender: string; text: string; at: number }[];
+  /** Each writer's circle by name, base64 PNG. */
+  people: Record<string, string | null>;
+}
+
+export interface NativeNotice {
+  id: number;
+  tag: string;
+  title: string;
+  body: string;
+  /** Android's channel group: direct, chats or nodes. */
+  kind: string;
+  /** `signal_<id>.wav`, or null for a quiet notice. */
+  sound: string | null;
+  /** Whose circle it shows, base64 PNG; none shows the app's icon. */
+  avatar: string | null;
+  thread: NativeThread | null;
+}
+
+/**
+ * The iPhone's native side (`MeshWatch.swift`): the watch that announces what
+ * the radio pushes while the page is asleep, and the page's own notices,
+ * drawn there so they can show who wrote.
+ */
+export interface MeshWatchPlugin {
+  /** `people`: only a person's radio is a new node worth a notice. `sound`: the file its notices ring with. */
+  configure(options: { messages: boolean; nodes: boolean; people: boolean; sound: string | null }): Promise<void>;
+  /** The page has announced this tag itself, so the watch withdraws its own notice for it. */
+  announced(options: { tag: string }): Promise<void>;
+  /** The radio the page is connected to, by the BLE plugin's device id; none without one. */
+  follow(options: { deviceId?: string }): Promise<void>;
+  /** Opens the system's notification settings for the app. */
+  openSettings(): Promise<void>;
+  post(options: NativeNotice): Promise<void>;
+  chime(options: { signal: string }): Promise<void>;
+}
+
+/** Android's (`NoticesPlugin.java`). */
+export interface NoticesPlugin {
+  openSettings(): Promise<void>;
+  post(options: NativeNotice): Promise<void>;
+  cancel(options: { id: number }): Promise<void>;
+  chime(options: { signal: string }): Promise<void>;
+  /** Makes the notification channels ring with this signal (null: quietly). */
+  channels(options: { sound: string | null }): Promise<void>;
+}
+
+let watch: MeshWatchPlugin | null = null;
+let notices: NoticesPlugin | null = null;
+
+/** Runs `use` with the iPhone's plugin, on an iPhone only. */
+export async function withWatch(use: (watch: MeshWatchPlugin) => Promise<void>): Promise<void> {
+  if (shell() !== "capacitor" || nativePlatform() !== "ios") return;
+  const { registerPlugin } = await import("@capacitor/core");
+  watch ??= registerPlugin<MeshWatchPlugin>("MeshWatch");
+  await use(watch);
+}
+
+/** Runs `use` with Android's plugin, on Android only. */
+export async function withNotices(use: (notices: NoticesPlugin) => Promise<void>): Promise<void> {
+  if (shell() !== "capacitor" || nativePlatform() !== "android") return;
+  const { registerPlugin } = await import("@capacitor/core");
+  notices ??= registerPlugin<NoticesPlugin>("Notices");
+  await use(notices);
+}

@@ -1,4 +1,5 @@
 import type { SVGProps } from "react";
+import { REPEATER_GLYPH, ROOM_GLYPH, SENSOR_GLYPH } from "../lib/glyphs.js";
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 
@@ -53,9 +54,9 @@ export const InfoIcon = icon('<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5
 export const PlusIcon = icon('<path d="M12 5v14M5 12h14"/>');
 export const TrashIcon = icon('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>');
 export const CopyIcon = icon('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>');
-export const RepeaterIcon = icon('<path d="M12 21V9"/><path d="M8 9h8l-1-5H9z"/><path d="M6 14a8 8 0 0 1 0-6M18 14a8 8 0 0 0 0-6"/>');
-export const RoomIcon = icon('<path d="M4 20V8l8-5 8 5v12z"/><path d="M10 20v-6h4v6"/>');
-export const SensorIcon = icon('<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>');
+export const RepeaterIcon = icon(REPEATER_GLYPH);
+export const RoomIcon = icon(ROOM_GLYPH);
+export const SensorIcon = icon(SENSOR_GLYPH);
 export const PersonIcon = icon('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>');
 export const SignalIcon = icon('<path d="M4 18v-3M9 18v-7M14 18V7M19 18V4"/>');
 export const LinkOffIcon = icon('<path d="M10 14l4-4"/><path d="M8.5 15.5l-2 2a3 3 0 0 1-4-4l2-2"/><path d="M15.5 8.5l2-2a3 3 0 0 1 4 4l-2 2"/><path d="M4 4l16 16"/>');
