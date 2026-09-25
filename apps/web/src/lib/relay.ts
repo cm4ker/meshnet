@@ -22,6 +22,14 @@ import type { PluginListenerHandle } from "@capacitor/core";
 import { nativePlatform, shell } from "./platform.js";
 import { readSetting, writeSetting } from "./storage.js";
 
+/** One time the app, or its page's renderer, stopped: when (ms), and why, as Android says. */
+export interface AppStop {
+  at: number;
+  what: "app" | "page";
+  reason: string;
+  detail: string | null;
+}
+
 interface RelayState {
   /** Shared with a computer. */
   on: boolean;
@@ -40,6 +48,8 @@ interface MeshRelayPlugin {
   configure(options: { json: string; sound: string | null }): Promise<void>;
   /** The page announced this tag itself. */
   announced(options: { tag: string }): Promise<void>;
+  /** Android: why the app or its page stopped lately, newest first. */
+  exits(): Promise<{ stops: AppStop[] }>;
   state(): Promise<RelayState>;
   attach(): Promise<void>;
   detach(): Promise<void>;
@@ -175,4 +185,10 @@ export async function configureCore(json: string, sound: string | null): Promise
 export async function coreAnnounced(tag: string): Promise<void> {
   if (!relayAvailable()) return;
   await withRelay((api) => api.announced({ tag }));
+}
+
+/** Android: why the app, or its page, stopped lately; none elsewhere. */
+export async function recentStops(): Promise<AppStop[]> {
+  if (!relayAvailable() || nativePlatform() !== "android") return [];
+  return withRelay((api) => api.exits().then((r) => r.stops ?? []));
 }

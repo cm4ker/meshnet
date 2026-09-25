@@ -20,7 +20,8 @@ import com.getcapacitor.annotation.PermissionCallback;
  * whenever one of them changes. While {@code attach()}ed, the page talks to the radio through
  * here: {@code send({ data })} (base64), answered once the frame has gone to the radio, and
  * {@code frame} events {@code { data }}. {@code configure({ json, sound })} hands the radio core
- * the page's notice settings and names, {@code announced({ tag })} what the page announced itself.
+ * the page's notice settings and names, {@code announced({ tag })} what the page announced itself,
+ * and {@code exits()} why the app or its page stopped lately.
  *
  * <p>Advertising to a computer takes Bluetooth's "nearby devices" permission for advertising on
  * Android 12 and later, asked the first time sharing is turned on.
@@ -178,6 +179,14 @@ public class MeshRelayPlugin extends Plugin {
             relay().configure(json, sound);
             call.resolve();
         });
+    }
+
+    /** Why the app or its page stopped lately ({@link AppExits}), for Radio › About. */
+    @PluginMethod
+    public void exits(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("stops", AppExits.recent(getContext()));
+        call.resolve(result);
     }
 
     @PluginMethod

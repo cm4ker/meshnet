@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { AdvertLocPolicy, TelemMode, type SessionState } from "@meshnet/meshcore";
 import { autostartEnabled, autostartLabel, hasAutostart, setAutostart } from "../lib/autostart.js";
-import { agoPhrase, battery as volts, bandwidth, batteryPercent, frequency } from "../lib/format.js";
+import { agoPhrase, battery as volts, bandwidth, batteryPercent, dayLabel, frequency, timeOfDay } from "../lib/format.js";
 import { BATTERY_TYPES, setBatteryType, useBatteryType } from "../lib/batteryType.js";
 import { parseLatLon } from "../lib/geo.js";
 import { disconnect, useLink } from "../lib/link.js";
@@ -12,7 +12,7 @@ import { askPermission, hasNoticeSettings, openNoticeSettings } from "../lib/not
 import { previewSignal } from "../lib/chime.js";
 import { push, type RadioPage } from "../lib/nav.js";
 import { nativePlatform, shell } from "../lib/platform.js";
-import { relayAvailable, relayWanted, setRelayWanted, setSharing, useRelay } from "../lib/relay.js";
+import { recentStops, relayAvailable, relayWanted, setRelayWanted, setSharing, useRelay, type AppStop } from "../lib/relay.js";
 import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
 import { SEND_TRIES_MAX, setSendTries, triesPhrase, useSendTries } from "../lib/sendTries.js";
 import { session, storage, useSelector, useSession } from "../lib/session.js";
@@ -730,11 +730,24 @@ function AppearancePage() {
 
 function AboutPage() {
   const info = useDesktopUpdateInfo();
+  const [stops, setStops] = useState<AppStop[]>([]);
+  useEffect(() => {
+    recentStops().then(setStops, () => setStops([]));
+  }, []);
   return <>
     <Group note="A companion for MeshCore radios. Messages stay on this device; the radio keeps only what has not been read yet.">
       <InfoRow label={shell() === "capacitor" ? "Ommesh" : "Meshnet"} icon={<img src="./icon.svg" alt="" width={24} height={24} />}>{info.version}</InfoRow>
       <InfoRow label="Running in">{shell() === "tauri" ? "the desktop shell" : shell() === "capacitor" ? "the phone shell" : "a browser"}</InfoRow>
     </Group>
+    {stops.length > 0 ? (
+      <Group title="Stopped lately" note="When and why Android stopped the app, or the page inside it, as Android says. Worth a screenshot when the app keeps closing.">
+        {stops.map((stop) => (
+          <InfoRow key={`${stop.at}-${stop.what}`} label={`${dayLabel(stop.at / 1000)} ${timeOfDay(stop.at / 1000)}`} hint={stop.detail ?? undefined}>
+            {stop.what === "page" ? `page ${stop.reason}` : stop.reason}
+          </InfoRow>
+        ))}
+      </Group>
+    ) : null}
     <UpdateButton />
     <PrivacyButton />
   </>;
