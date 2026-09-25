@@ -117,7 +117,22 @@ jobs:
         run: bash apps/mobile/android/tests/run.sh
       - run: pnpm install --frozen-lockfile
       - run: node scripts/release.mjs prepare
-      - run: pnpm --filter @meshnet/mobile android:apk
+      # A fixed debug key lets each APK install over the previous one. PRs from forks
+      # have no secrets and fall back to a throwaway key.
+      - name: Build APK
+        env:
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -n "$ANDROID_DEBUG_KEYSTORE_BASE64" ]; then
+            export ANDROID_DEBUG_KEYSTORE_PATH="$RUNNER_TEMP/debug.keystore"
+            echo "$ANDROID_DEBUG_KEYSTORE_BASE64" | base64 -d > "$ANDROID_DEBUG_KEYSTORE_PATH"
+          else
+            echo "::warning::No ANDROID_DEBUG_KEYSTORE_BASE64; this APK will not install over earlier ones."
+          fi
+          pnpm --filter @meshnet/mobile android:apk
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk | grep SHA-256
       - uses: actions/upload-artifact@v4
         with:
           name: meshnet-android

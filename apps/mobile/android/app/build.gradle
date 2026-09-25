@@ -16,6 +16,9 @@ def uploadStorePassword = signingValue('ANDROID_KEYSTORE_PASSWORD', 'storePasswo
 def uploadAlias = signingValue('ANDROID_KEY_ALIAS', 'keyAlias')
 def uploadKeyPassword = signingValue('ANDROID_KEY_PASSWORD', 'keyPassword')
 def hasUploadKey = uploadStore && uploadStorePassword && uploadAlias && uploadKeyPassword
+// CI signs every debug APK with one kept key, so a new build installs over the last one.
+// Without it each runner makes its own debug key and Android refuses the update.
+def debugStore = System.getenv('ANDROID_DEBUG_KEYSTORE_PATH')
 
 android {
     namespace = "dev.cm4ker.meshnet"
@@ -34,6 +37,11 @@ android {
         }
     }
     signingConfigs {
+        if (debugStore) {
+            debug {
+                storeFile file(debugStore)
+            }
+        }
         if (hasUploadKey) {
             release {
                 storeFile rootProject.file(uploadStore)
