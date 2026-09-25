@@ -11,6 +11,7 @@ google-play-service-account*.json
 
 # The Rust build directory for the desktop shell. Gigabytes of it.
 apps/desktop/src-tauri/target/
+crates/*/target/
 apps/desktop/src-tauri/tauri.release.json
 
 # Written by `tauri-build` from the capabilities on every build.

@@ -39,6 +39,8 @@ jobs:
         run: node scripts/release.mjs prepare
       - run: pnpm typecheck
       - run: pnpm test
+      - name: Radio core checks
+        run: cargo test --manifest-path crates/meshcore-core/Cargo.toml
       - run: pnpm --filter @meshnet/web build
       - uses: actions/upload-artifact@v4
         with:

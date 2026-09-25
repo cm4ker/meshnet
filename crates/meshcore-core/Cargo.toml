@@ -1,0 +1,8 @@
+[package]
+name = "meshcore-core"
+version = "0.1.0"
+edition = "2021"
+description = "The radio's side of Meshnet for every shell: one radio shared by several clients, and notices while the page sleeps"
+publish = false
+
+[dependencies]
