@@ -2349,29 +2349,6 @@ details.more .kv-grid {
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4) var(--space-4);
 }
-.quote {
-  margin: 0;
-  padding: var(--space-2) var(--space-3);
-  border-radius: 12px;
-  background: var(--bubble-in);
-  display: flex;
-  flex-direction: column;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: calc(14px * var(--text-scale));
-}
-.quote.out {
-  background: var(--bubble-out);
-}
-.quote-from {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-}
-.quote-from .quote {
-  flex: 1;
-  min-width: 0;
-}
 .message-body .msg-details {
   margin: 0;
   padding: 0;
@@ -5198,7 +5175,7 @@ button.hop {
 /* ---- bubbles of the other kind ---- */
 
 /* Onyx sets light bubbles on a black ground: inside them the text and its marks take the bubble palette. */
-:root[data-bubbles] :is(.bubble, .quote) {
+:root[data-bubbles] .bubble {
   --text: var(--bubble-text);
   --text-muted: var(--bubble-text-muted);
   --text-faint: var(--bubble-text-faint);
@@ -5206,11 +5183,11 @@ button.hop {
   --danger: var(--bubble-danger);
   --accent-subtle: color-mix(in oklab, var(--bubble-accent) 16%, transparent);
 }
-:root[data-bubbles="light"] :is(.bubble, .quote) {
+:root[data-bubbles="light"] .bubble {
   --name-l: 50%;
   --name-c: 0.14;
 }
-:root[data-bubbles="dark"] :is(.bubble, .quote) {
+:root[data-bubbles="dark"] .bubble {
   --name-l: 78%;
   --name-c: 0.1;
 }
