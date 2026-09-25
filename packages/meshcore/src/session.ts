@@ -1906,6 +1906,23 @@ export class MeshSession {
   }
 
   /**
+   * Forgets one of ours that failed, went unheard or unconfirmed, or is being
+   * tried in a loop, which stops with it. Only here: a copy that did reach
+   * someone stays with them.
+   */
+  discardFailed(id: string): void {
+    const message = this.state.messages.find((m) => m.id === id);
+    if (!message || message.direction !== "out") return;
+    if (message.status !== "failed" && message.status !== "unheard" && message.status !== "unconfirmed" && !message.retryPlan) return;
+    for (const timers of [this.ackTimers, this.silenceTimers]) {
+      const timer = timers.get(id);
+      if (timer) clearTimeout(timer);
+      timers.delete(id);
+    }
+    this.set({ messages: this.state.messages.filter((m) => m.id !== id) });
+  }
+
+  /**
    * Sends an unheard, unconfirmed or failed message again, one attempt up. A direct
    * message that went unacknowledged along a learned route floods this time:
    * the route is the likeliest thing to have broken.

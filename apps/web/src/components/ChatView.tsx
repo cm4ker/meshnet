@@ -260,6 +260,7 @@ const Message = memo(function Message({ message, showSender, me, onReply: replyT
         : null,
       looping ? { label: "Stop trying", icon: <StopIcon size={17} />, onSelect: () => session.stopTrying(message.id) } : null,
       message.status === "queued" ? { label: "Don't send", icon: <TrashIcon size={17} />, danger: true, onSelect: () => session.discardQueued(message.id) } : null,
+      retryable || looping ? { label: "Delete", icon: <TrashIcon size={17} />, danger: true, onSelect: () => session.discardFailed(message.id) } : null,
       { label: "How it travelled", icon: <NodesIcon size={17} />, onSelect: () => openMessage(message.conversation, message.id) },
     ];
     showMenu(

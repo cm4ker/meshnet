@@ -682,6 +682,24 @@ test("a channel message nobody sends on is unheard after the window, and an echo
   assert.equal(status(), "sent");
 });
 
+test("a message that did not get through can be deleted, and one still on its way cannot", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const radio = new ScriptedRadio();
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  const connecting = session.connect(radio);
+  await settle();
+  await connecting;
+  const lost = await session.sendText("ch:0", "nobody heard this");
+  t.mock.timers.tick(20_000);
+  const fresh = await session.sendText("ch:0", "just sent");
+  session.discardFailed(fresh.id);
+  session.discardFailed(lost.id);
+  assert.deepEqual(
+    session.getState().messages.map((m) => m.text),
+    ["just sent"],
+  );
+});
+
 test("an echo inside the window keeps a channel message sent", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const radio = new ScriptedRadio();
