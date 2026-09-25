@@ -46,6 +46,7 @@
 ### Connection
 - A dropped link is retried until the radio is back, with "Try now" in the offline bar.
 - The offline bar offers to pair when the radio wants a bond. The desktop asks for the PIN whenever an unpaired radio fails to connect.
+- On Android, a radio the phone has never met is paired from the app: the PIN prompt comes up by itself, and the app waits while it is typed. A PIN left untyped or wrong says so, and the app stops asking again on its own.
 
 ### Desktop
 - Closing the window keeps the app in the tray, with a dot for what is unread.
@@ -57,6 +58,8 @@
 - A node's answer no longer ends in the zeros that pad it to a cipher block.
 - A channel message sent again from another app is kept as the same message.
 - What the phone sent while the computer was away shows as sent.
+- On Android, connecting no longer hangs at "Connecting…" on a phone new to the radio, and a first connect gets through more often.
+- On Android, the message field no longer slides under the on-screen buttons when the keyboard is put away, nor floats above the keyboard on Android 14 and older. The status bar and buttons take the app's theme.
 
 ## 0.2.0 — 2026-09-23
 
