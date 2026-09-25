@@ -13,6 +13,7 @@ use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{App, AppHandle, Manager, Runtime, WebviewWindow, Window, WindowEvent};
+use tauri_plugin_window_state::AppHandleExt;
 
 const ID: &str = "main";
 const ICON: &[u8] = include_bytes!("../icons/32x32.png");
@@ -67,10 +68,13 @@ pub fn stow<R: Runtime>(window: &WebviewWindow<R>) {
 }
 
 /// The window's close button, while there is a tray: the window hides and the app goes on.
+/// Where it was is written down then, as the app may next end with the
+/// computer, with no quitting of its own to write it at.
 pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
     if let WindowEvent::CloseRequested { api, .. } = event {
         if available() && window.label() == ID {
             api.prevent_close();
+            let _ = window.app_handle().save_window_state(crate::WINDOW_STATE);
             let _ = window.hide();
         }
     }

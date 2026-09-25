@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tauri::{Manager, Webview};
 use tauri_plugin_updater::UpdaterExt;
+use tauri_plugin_window_state::AppHandleExt;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -44,6 +45,10 @@ pub async fn desktop_check_update(
         Channel::Stable => "https://github.com/cm4ker/meshnet/releases/latest/download/latest.json",
         Channel::Dev => "https://github.com/cm4ker/meshnet/releases/download/dev/latest.json",
     };
+    // The installer ends the process outright, with no quitting for the
+    // window state plugin to hear, so the window is written down first. The
+    // cleanup is what the plugin's own builder does here.
+    let app = webview.app_handle().clone();
     let update = webview
         .updater_builder()
         .endpoints(vec![endpoint
@@ -51,6 +56,10 @@ pub async fn desktop_check_update(
             .map_err(|e| format!("Invalid update URL: {e}"))?])
         .map_err(|e| e.to_string())?
         .timeout(Duration::from_secs(15))
+        .on_before_exit(move || {
+            let _ = app.save_window_state(crate::WINDOW_STATE);
+            app.cleanup_before_exit();
+        })
         .build()
         .map_err(|e| e.to_string())?
         .check()

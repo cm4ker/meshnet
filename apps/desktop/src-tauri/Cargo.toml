@@ -45,6 +45,8 @@ tauri-plugin-updater = "2"
 tauri-plugin-autostart = "2"
 # One app at a time: a second start brings the first one's window back.
 tauri-plugin-single-instance = "2"
+# The window opens where it was left and at the size it was, maximised or not.
+tauri-plugin-window-state = "2"
 
 # On Windows the BLE link is the platform's own GATT API, not btleplug: the
 # firmware's UART characteristics demand an encrypted link, and btleplug's

@@ -12,9 +12,15 @@ mod updates;
 mod winble;
 
 use tauri::Manager;
+use tauri_plugin_window_state::StateFlags;
 
 /// What the system passes when it starts the app at login: the window opens minimised.
 const MINIMIZED: &str = "--minimized";
+
+/// What of the window is kept between runs: where it was, its size, and
+/// whether it was maximised. Whether it was shown is the tray's business.
+pub(crate) const WINDOW_STATE: StateFlags =
+    StateFlags::POSITION.union(StateFlags::SIZE).union(StateFlags::MAXIMIZED);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -25,6 +31,10 @@ pub fn run() {
         // again, from the Start menu say, brings that window back rather
         // than a second app fighting the first for the radio. Registered first, as the plugin asks.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::bring_back(app)))
+        // Put back as the window is made, before `setup` sends it to the tray at login.
+        // The plugin writes it down when the app quits; `tray` and `updates`
+        // do so too where the app goes without saying.
+        .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(WINDOW_STATE).build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![MINIMIZED]),
