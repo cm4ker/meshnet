@@ -1,18 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { isFavourite, parseConversation } from "@meshnet/meshcore";
+import { CHAT_ORDERS, changed, chatGroups, getChatOrder, setChatOrder, useChatOrder } from "../lib/chatOrder.js";
 import { ago } from "../lib/format.js";
 import { summarize, type ConversationSummary } from "../lib/conversations.js";
 import { useDraft } from "../lib/drafts.js";
 import { openConversation, setStack } from "../lib/nav.js";
 import { useNoticePrefs } from "../lib/noticePrefs.js";
-import { usePress } from "../lib/press.js";
+import { usePress, type MenuAt } from "../lib/press.js";
 import { session, useSession } from "../lib/session.js";
 import { toast } from "../lib/toast.js";
 import { IconButton } from "../ui/Button.js";
 import { Confirm } from "../ui/Dialog.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
-import { BellOffIcon, CheckIcon, HashIcon, PersonIcon, PlusIcon, SearchIcon, StarFilledIcon, TrashIcon } from "./Icons.js";
+import { BellOffIcon, CheckIcon, ChevronDownIcon, HashIcon, PersonIcon, PlusIcon, SearchIcon, SortIcon, StarFilledIcon, TrashIcon } from "./Icons.js";
 import { NewChat } from "./NewChat.js";
 
 /** Asks the chat list to open its New chat sheet, from a shortcut or the palette. */
@@ -24,6 +25,7 @@ export function ChatList({ selected }: { selected: string | null }) {
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [deleting, setDeleting] = useState<ConversationSummary | null>(null);
+  const order = useChatOrder();
 
   useEffect(() => {
     const open = () => setAdding(true);
@@ -33,6 +35,8 @@ export function ChatList({ selected }: { selected: string | null }) {
 
   const q = query.trim().toLowerCase();
   const shown = q ? rows.filter((r) => r.title.toLowerCase().includes(q) || (r.preview ?? "").toLowerCase().includes(q)) : rows;
+  const groups = chatGroups(shown, order);
+  const unread = rows.filter((r) => r.unread > 0).length;
 
   return (
     <div className="list-pane">
@@ -48,14 +52,30 @@ export function ChatList({ selected }: { selected: string | null }) {
       </label>
       {rows.length === 0 ? (
         <div className="empty muted">No channels, and nobody has written yet.</div>
-      ) : shown.length === 0 ? (
-        <div className="empty muted">Nothing matches.</div>
       ) : (
-        <ul className="list" role="list">
-          {shown.map((row) => (
-            <ChatRow key={row.id} row={row} radio={state.self?.key ?? ""} selected={selected === row.id} onDelete={() => setDeleting(row)} />
-          ))}
-        </ul>
+        <div className="list">
+          <div className="list-summary muted">
+            <span className="grow">
+              {rows.length} {rows.length === 1 ? "chat" : "chats"}
+              {unread ? ` · ${unread} unread` : ""}
+            </span>
+            <SortButton />
+          </div>
+          {shown.length === 0 ? (
+            <div className="empty muted">Nothing matches.</div>
+          ) : (
+            groups.map((g) => (
+              <Fragment key={g.title}>
+                <div className="list-group">{g.title}</div>
+                <ul className="list-rows" role="list">
+                  {g.rows.map((row) => (
+                    <ChatRow key={row.id} row={row} radio={state.self?.key ?? ""} selected={selected === row.id} onDelete={() => setDeleting(row)} />
+                  ))}
+                </ul>
+              </Fragment>
+            ))
+          )}
+        </div>
       )}
       <NewChat open={adding} onClose={() => setAdding(false)} />
       <Confirm
@@ -75,6 +95,53 @@ export function ChatList({ selected }: { selected: string | null }) {
         }}
       />
     </div>
+  );
+}
+
+/** The list's order, named, and the menu that changes it. */
+function SortButton() {
+  const prefs = useChatOrder();
+  const label = CHAT_ORDERS.find((o) => o.id === prefs.order)!;
+  return (
+    <button
+      type="button"
+      className={["sort-btn", changed(prefs) ? "changed" : ""].join(" ")}
+      aria-label={`Sort chats, now by ${label.label.toLowerCase()}`}
+      onClick={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        openSortMenu({ x: r.left, y: r.bottom + 4 });
+      }}
+    >
+      <SortIcon size={14} />
+      {label.short}
+      <ChevronDownIcon size={12} />
+    </button>
+  );
+}
+
+/** Opened again after the switch flips, so the menu shows it flipped. */
+function openSortMenu(at: MenuAt): void {
+  const { order, channelsFirst } = getChatOrder();
+  showMenu(
+    [
+      ...CHAT_ORDERS.map((o) => ({
+        label: o.label,
+        checked: o.id === order,
+        onSelect: () => setChatOrder({ order: o.id }),
+      })),
+      {
+        label: "Channels on top",
+        hint: channelsFirst ? "Channels, then direct chats, each in the order above" : "One list, in the order above",
+        toggle: true,
+        checked: channelsFirst,
+        group: true,
+        onSelect: () => {
+          setChatOrder({ channelsFirst: !channelsFirst });
+          openSortMenu(at);
+        },
+      },
+    ],
+    { title: "Sort chats", at },
   );
 }
 
