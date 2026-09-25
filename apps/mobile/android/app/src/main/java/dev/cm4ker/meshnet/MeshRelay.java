@@ -122,10 +122,41 @@ final class MeshRelay {
     /** Frames for the radio; Android takes one GATT operation at a time. */
     private final ArrayDeque<byte[]> radioWrites = new ArrayDeque<>();
     private boolean radioWriting = false;
+    /**
+     * Whether this client's own MTU request is out. A client that joins a link the plugin already
+     * made hears the link's MTU at once, before it has asked; taken for the answer, discovery and
+     * the subscription went out while the request was still pending, and Android drops a second
+     * operation on a busy link without a word ("already has a pending command"). The client then
+     * waited for a callback that never came, and the radio was never read.
+     */
+    private volatile boolean mtuAsked = false;
     /** Discovery goes on after this if the MTU exchange never answers. */
     private final Runnable mtuTimeout = () -> {
+        mtuAsked = false;
         if (radio != null && radioRx == null) radio.discoverServices();
     };
+    /** Times the radio's client was made anew because its subscription never answered. */
+    private int remakes = 0;
+    private static final int REMAKES = 3;
+    /**
+     * A subscription with no answer leaves the client busy for good: Android turns away every
+     * later operation on it. The client is made anew instead.
+     */
+    private final Runnable subscribeTimeout = new Runnable() {
+        @Override
+        public void run() {
+            if (radio == null || radioSubscribed) return;
+            // A PIN being typed holds the subscription up; it answers once the pairing is done.
+            if (radio.getDevice().getBondState() == BluetoothDevice.BOND_BONDING) {
+                main.postDelayed(this, SUBSCRIBE_MS);
+                return;
+            }
+            remakeRadio();
+        }
+    };
+    private static final long SUBSCRIBE_MS = 6000;
+    /** Whether the radio's TX notifies here, so the core has been told the radio is up. */
+    private boolean radioSubscribed = false;
     /** Discoveries that came back without the UART service; tried again a few times, a second apart. */
     private int discoveries = 0;
     private final Runnable rediscover = () -> {
@@ -288,6 +319,7 @@ final class MeshRelay {
      * with a computer if {@code share}.
      */
     void start(String address, String name, boolean share) {
+        remakes = 0;
         if (!address.equals(radioAddress)) {
             releaseRadio();
             radioAddress = address;
@@ -657,22 +689,28 @@ final class MeshRelay {
             Log.w(TAG, radioAddress + " is not a Bluetooth address");
             return;
         }
-        radioRx = null;
-        radioWrites.clear();
-        radioWriting = false;
+        forgetLink();
         // Joins the link the plugin already has; with autoConnect, waits for a radio out of range.
         radio = device.connectGatt(context, true, radioCallback, BluetoothDevice.TRANSPORT_LE);
     }
 
     private void releaseRadio() {
         run(core.radioDown());
-        radioRx = null;
-        radioWrites.clear();
-        radioWriting = false;
+        forgetLink();
         if (radio == null) return;
         radio.disconnect();
         radio.close();
         radio = null;
+    }
+
+    private void remakeRadio() {
+        if (++remakes > REMAKES) {
+            Log.w(TAG, "the radio's TX never subscribed; given up");
+            return;
+        }
+        Log.w(TAG, "the radio's TX did not answer; its client is made anew");
+        releaseRadio();
+        attachRadio();
     }
 
     /** Only called while the radio is up: the core holds commands until then. */
@@ -724,6 +762,8 @@ final class MeshRelay {
             radioReady(gatt);
             return;
         }
+        main.removeCallbacks(subscribeTimeout);
+        main.postDelayed(subscribeTimeout, SUBSCRIBE_MS);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             gatt.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
         } else {
@@ -735,8 +775,24 @@ final class MeshRelay {
     /** The radio is up once its TX notifies here: then the waiting commands go. */
     private void radioReady(BluetoothGatt gatt) {
         if (gatt != radio || radioRx == null) return;
+        main.removeCallbacks(subscribeTimeout);
+        radioSubscribed = true;
+        remakes = 0;
         run(core.radioUp());
         changed();
+    }
+
+    /** What one link to the radio knew, forgotten when it goes. */
+    private void forgetLink() {
+        main.removeCallbacks(mtuTimeout);
+        main.removeCallbacks(rediscover);
+        main.removeCallbacks(subscribeTimeout);
+        mtuAsked = false;
+        discoveries = 0;
+        radioSubscribed = false;
+        radioRx = null;
+        radioWrites.clear();
+        radioWriting = false;
     }
 
     private final BluetoothGattCallback radioCallback = new BluetoothGattCallback() {
@@ -746,17 +802,15 @@ final class MeshRelay {
                 if (gatt != radio) return;
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     // The plugin asked for the same on this link; asked again for a link this made itself.
+                    mtuAsked = true;
                     if (gatt.requestMtu(512)) {
                         main.postDelayed(mtuTimeout, 2000);
                     } else {
+                        mtuAsked = false;
                         gatt.discoverServices();
                     }
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                    main.removeCallbacks(rediscover);
-                    discoveries = 0;
-                    radioRx = null;
-                    radioWrites.clear();
-                    radioWriting = false;
+                    forgetLink();
                     run(core.radioDown());
                     changed();
                     // An autoConnect client reconnects by itself when the radio is back.
@@ -766,8 +820,11 @@ final class MeshRelay {
 
         @Override
         public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
+            // Heard before the request went out: the link's MTU told to a client that has just joined it.
+            if (!mtuAsked) return;
             main.post(() -> {
-                if (gatt != radio || radioRx != null) return;
+                if (gatt != radio || radioRx != null || !mtuAsked) return;
+                mtuAsked = false;
                 main.removeCallbacks(mtuTimeout);
                 gatt.discoverServices();
             });
@@ -871,9 +928,7 @@ final class MeshRelay {
         dropComputer();
         if (radio != null) radio.close();
         radio = null;
-        radioRx = null;
-        radioWrites.clear();
-        radioWriting = false;
+        forgetLink();
         run(core.radioDown());
         changed();
     }

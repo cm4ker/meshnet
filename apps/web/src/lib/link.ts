@@ -208,9 +208,10 @@ async function retry(gen: number): Promise<void> {
   } catch (error) {
     if (gen !== generation) return;
     const message = errorText(error);
-    if (canPair(link.connector, link.device, error)) {
-      // A radio that wants a bond will not stop wanting it: ask for the PIN instead of trying again.
-      set({ phase: "failed", error: message, retrying: false, attempt: 0, pair: true });
+    if (needsPairing(error)) {
+      // A radio that wants a bond will not stop wanting it: ask for the PIN, or say why, instead of
+      // trying again (on a phone, each try would put the system's PIN prompt up once more).
+      set({ phase: "failed", error: message, retrying: false, attempt: 0, pair: canPair(link.connector, link.device, error) });
       return;
     }
     set({ error: message });

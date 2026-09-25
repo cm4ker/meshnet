@@ -5,7 +5,7 @@
  */
 
 import { BaseTransport, BLE } from "@meshnet/meshcore";
-import type { Connector, FoundDevice } from "./types.js";
+import { NeedsPairingError, type Connector, type FoundDevice } from "./types.js";
 import { nativePlatform } from "../lib/platform.js";
 import { openRelay, type RelayLink } from "../lib/relay.js";
 import { readSetting, writeSetting } from "../lib/storage.js";
@@ -93,6 +93,27 @@ class CapacitorBleTransport extends BaseTransport {
 
 const SCAN_MS = 10_000;
 
+/** Longer than Android's own wait for a PIN, so its answer, not this, ends a pairing. */
+const PAIR_MS = 40_000;
+
+/**
+ * On Android a radio met for the first time is paired before anything is
+ * written to it, and the PIN may take as long as it takes to type. Left to
+ * the first write, the pairing raced the radio's answer time: the connect
+ * gave up while the PIN was still being typed and took the pairing down with
+ * it. iOS pairs on the first write and holds the write until it is done.
+ */
+async function pairFirst(client: BleModule["BleClient"], device: FoundDevice): Promise<void> {
+  if (nativePlatform() !== "android") return;
+  if (await client.isBonded(device.id).catch(() => true)) return;
+  try {
+    await client.createBond(device.id, { timeout: PAIR_MS });
+  } catch {
+    await client.disconnect(device.id).catch(() => undefined);
+    throw new NeedsPairingError(t("connect.error.phonePairing", { name: device.name }));
+  }
+}
+
 /** Radios connected to before, by the id the phone gave them, so they can be reached without a scan. */
 const KNOWN_KEY = "meshnet.ble.known";
 
@@ -164,6 +185,7 @@ export const capacitorBleConnector: Connector = {
     await client.getDevices([device.id]).catch(() => []);
     let transport: CapacitorBleTransport | null = null;
     await client.connect(device.id, () => transport?.onDropped());
+    await pairFirst(client, device);
     transport = new CapacitorBleTransport(client, device.id, device.name);
     try {
       await client.startNotifications(device.id, BLE.service, BLE.tx, (value) => transport?.receive(value));

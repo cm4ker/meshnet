@@ -66,6 +66,7 @@
   "error.noGatt": "this device has no GATT server",
   "error.noStreams": "the port opened without streams",
   "error.notPaired": "{name} is not paired with this computer, or no longer trusts the pairing.",
+  "error.phonePairing": "{name} was not paired: the PIN was not entered, or was not the radio's (123456 unless changed).",
   "error.bleWantsPairing": "{error}. The radio wants a paired link: pair it in Windows Settings → Bluetooth with its PIN (123456 unless changed), or remove and pair again if it was re-flashed.",
   "error.connectionClosed": "connection closed",
   "error.portClosed": "port closed",
