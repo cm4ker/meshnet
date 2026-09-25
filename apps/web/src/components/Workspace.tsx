@@ -364,8 +364,10 @@ function Desktop() {
     if (target) setStack("chats", [chat, target]);
   };
 
+  // A tool on the map takes the panel while it is open, over a profile; a screen opened from the tool, a profile, covers it until it closes.
+  const toolPanel = nav.section === "mesh" && !full && tool && nav.stacks.mesh.length === 0 ? tool : null;
   // A tool on the map puts itself away first, back to where it was opened from.
-  useDesktopKeys({ openPalette: () => setPalette(true), togglePanel, escape: full ? back : nav.section === "mesh" && tool ? closeTool : panel ? closePanel : null });
+  useDesktopKeys({ openPalette: () => setPalette(true), togglePanel, escape: full ? back : toolPanel ? closeTool : panel ? closePanel : null });
 
   let list: ReactNode;
   let main: ReactNode;
@@ -406,8 +408,6 @@ function Desktop() {
   const panelChrome: Chrome = { onClose: closePanel, onBack: panelDepth > 1 ? back : undefined };
   const groupPanel = nav.section === "mesh" && !panel && !full && group ? <GroupPanel keys={group} onClose={() => setGroup(null)} /> : null;
   useBackLayer(groupPanel !== null, () => setGroup(null));
-  // A tool on the map takes the panel while it is open, over a profile.
-  const toolPanel = nav.section === "mesh" && !full && tool ? tool : null;
   useBackLayer(toolPanel !== null, closeTool);
 
   return (

@@ -119,6 +119,8 @@ export interface MapProps {
   onHold?: ((lat: number, lon: number) => void) | undefined;
   /** A point of a route dragged onto a node: its key, or "self" for this radio. */
   onHandleDrop?: ((handle: MapHandle, onto: string) => void) | undefined;
+  /** Points to bring into view together, once for each `id`: a repeater and its neighbours. */
+  fit?: { id: string; points: [number, number][] } | null | undefined;
 }
 
 /** How near a node, in pixels, a dragged point lets go onto it. */
@@ -138,7 +140,7 @@ function groupingWanted(): boolean {
 /** Where the map was left, so coming back to it, from a profile or another section, finds it there. */
 let lastView: { center: L.LatLng; zoom: number } | null = null;
 
-export default function MapView({ selected, onSelect, onGroup, filter, coverBottom = 0, coverTop = 0, zoomButtons = false, overlay = EMPTY_OVERLAY, onLeg, onHold, onHandleDrop }: MapProps) {
+export default function MapView({ selected, onSelect, onGroup, filter, coverBottom = 0, coverTop = 0, zoomButtons = false, overlay = EMPTY_OVERLAY, onLeg, onHold, onHandleDrop, fit = null }: MapProps) {
   const state = useSession();
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
@@ -289,9 +291,10 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
         [line.from.lat, line.from.lon],
         [line.to.lat, line.to.lon],
       ];
+      const mark = line.mark ? ` ${line.mark}` : "";
       // Thin lines drawn beside a route go without its halo.
-      if (line.tone !== "back" && line.tone !== "was") L.polyline(points, { className: "map-leg-under", interactive: false }).addTo(layer);
-      L.polyline(points, { className: `map-leg ${line.tone}`, interactive: false }).addTo(layer);
+      if (line.tone !== "back" && line.tone !== "was") L.polyline(points, { className: `map-leg-under${mark}`, interactive: false }).addTo(layer);
+      L.polyline(points, { className: `map-leg ${line.tone}${mark}`, interactive: false }).addTo(layer);
       if (line.tappable) {
         // A wide line nobody sees, so a finger finds a thin one.
         L.polyline(points, { weight: 24, opacity: 0, bubblingMouseEvents: false })
@@ -426,6 +429,24 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
     // Only a new pick moves the map; its neighbours changing, or the sheet moving, do not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickedKey]);
+
+  // A set of points asked to be seen together: after a pick's own move, so it has the last word.
+  const fitId = fit?.id ?? null;
+  const fitPoints = useRef(fit?.points ?? []);
+  fitPoints.current = fit?.points ?? [];
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !fitId) return;
+    const frame = requestAnimationFrame(() => {
+      const points = fitPoints.current;
+      if (m.getSize().y === 0 || points.length === 0) return;
+      m.invalidateSize();
+      if (points.length === 1) centerOn(points[0]!, Math.max(m.getZoom(), 13));
+      else m.fitBounds(L.latLngBounds(points), { ...padding(), maxZoom: 15 });
+    });
+    return () => cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitId]);
 
   // The first time there is something to show, show all of it.
   useEffect(() => {

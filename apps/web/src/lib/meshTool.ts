@@ -1,13 +1,14 @@
 /**
  * What the map is being used for besides picking a node: a line of sight
  * between two points, the route to a contact, the way between two
- * repeaters, or the answers to "who hears me". One at a time; the sheet on a phone and the panel on a desktop show
+ * repeaters, the answers to "who hears me", or the repeaters one repeater
+ * hears. One at a time; the sheet on a phone and the panel on a desktop show
  * it, and the map draws it. It lives only while the app runs, like the map's
  * own view.
  */
 
 import { useSyncExternalStore } from "react";
-import type { Section } from "./nav.js";
+import type { Screen, Section } from "./nav.js";
 
 /** One end of a line of sight: a node, this radio, or a spot on the map. */
 export interface LosEnd {
@@ -27,11 +28,12 @@ export type MeshTool =
       back: string | null;
       /** How the leg sounded when last pinged, out and back, dB; back is null when the trace came home another way. */
       heard?: [number, number | null] | null;
-      /** The route, or the way between two repeaters, it was opened from, to go back to. */
-      prev?: RouteTool | SpanTool | null;
+      /** The route, the way between two repeaters, or the link between neighbours it was opened from, to go back to. */
+      prev?: RouteTool | SpanTool | NeighboursTool | null;
     }
   | RouteTool
   | SpanTool
+  | NeighboursTool
   | { kind: "hears" };
 
 /**
@@ -57,6 +59,21 @@ export interface SpanTool {
   from: string;
   to: string | null;
   prev: RouteTool | null;
+}
+
+/**
+ * The repeaters `key` hears direct, each drawn from it on the map. `link` is
+ * the neighbour whose link is open in the sheet. `returnTo` is where it was
+ * opened from, a section with its screens as they stood, put back when it
+ * closes; `prev` is another repeater's neighbours, with the link it was
+ * opened from, to go back to instead.
+ */
+export interface NeighboursTool {
+  kind: "neighbours";
+  key: string;
+  link: string | null;
+  returnTo: { section: Section; stack: Screen[]; focus: string | null } | null;
+  prev: NeighboursTool | null;
 }
 
 let tool: MeshTool | null = null;

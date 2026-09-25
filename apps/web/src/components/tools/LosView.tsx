@@ -29,6 +29,11 @@ function remember(end: LosEnd, height: number): void {
   writeSetting(HEIGHTS_KEY, { ...readSetting<Record<string, number>>(HEIGHTS_KEY, {}), [end.key]: height });
 }
 
+/** The height an end's antenna is taken at: the one last set for it, or a guess by what it is. */
+export function antennaHeight(end: LosEnd, contacts: Parameters<typeof defaultHeight>[1]): number {
+  return remembered(end) ?? defaultHeight(end, contacts);
+}
+
 function step(height: number, by: number): number {
   const i = HEIGHTS.findIndex((h) => h >= height);
   const at = i < 0 ? HEIGHTS.length - 1 : i;

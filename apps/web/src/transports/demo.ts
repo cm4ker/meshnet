@@ -9,7 +9,7 @@
  * turns out to be gone.
  */
 
-import { BaseTransport, ByteWriter, Cmd, fromHex, fromUtf8, groupTextPayload, heardGroupTextPayload, Push, ReqType, Resp, TxtType, type Transport } from "@meshnet/meshcore";
+import { BaseTransport, ByteWriter, Cmd, fromHex, fromUtf8, groupTextPayload, heardGroupTextPayload, Push, ReqType, Resp, toHex, TxtType, type Transport } from "@meshnet/meshcore";
 import type { Connector } from "./types.js";
 
 const SELF = fromHex("a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf");
@@ -252,21 +252,45 @@ function through(snr: number): boolean {
   return Math.random() < 1 / (1 + Math.exp(-(snr + 7.5) / 1.1));
 }
 
-/** Repeaters the demo repeater hears direct: prefix, seconds ago, SNR in dB. */
-const NEIGHBOURS: [string, number, number][] = [
-  ["0a1b2c3d4e5f", 240, 7.25],
-  ["e07b55a1c2d3", 120, 9],
-  ["40c1d8e3a902", 660, 3.5],
-  ["b2d9e4f5a6b7", 2880, 1.25],
-  ["7fa013c4d5e6", 1560, -2.75],
-  ["5e21b0112233", 3840, -8.5],
-  ["18c6aa445566", 7860, -5.5],
-  ["c07d44778899", 11220, -12.25],
-  ["62e9f0aabbcc", 12720, 0.5],
-  ["0d4c7bddeeff", 18300, -14],
-  ["9aa3e1102030", 20400, 4.75],
-  ["f1b208405060", 28800, -10.25],
-];
+/**
+ * The repeaters a demo repeater hears direct: prefix, seconds ago, SNR in
+ * dB. Hill hears most of the town, one it lost days ago, and two it cannot
+ * name; Tower and Ridge hear Hill back, so a link shows both ways; the
+ * town's repeaters hear whom `LINKS` says.
+ */
+function neighboursOf(p: Person): [string, number, number][] {
+  const named = (name: string) => PEOPLE.find((x) => x.name === name);
+  const town = (hash: number) => named(TOWN.find(([first]) => first === hash)?.[1] ?? "");
+  const list = (rows: [Person | undefined, number, number][]) => rows.flatMap(([x, secs, snr]): [string, number, number][] => (x ? [[toHex(x.key.subarray(0, 6)), secs, snr]] : []));
+  if (p.name === "Hill Repeater") {
+    return [
+      ...list([
+        [named("Tower Repeater"), 240, 7.25],
+        [named("Ridge Repeater"), 120, 9],
+        [town(0x1a), 660, 3.5],
+        [town(0x21), 2880, 1.25],
+        [town(0x8d), 1560, -2.75],
+        [town(0x7a), 3840, -8.5],
+        [town(0x58), 7860, -5.5],
+        [town(0x62), 3 * 86400, -12.25],
+        [town(0xf1), 12720, 0.5],
+        [town(0x37), 20400, 4.75],
+        [town(0x45), 28800, -10.25],
+      ]),
+      ["0d4c7bddeeff", 18300, -14],
+      ["9aa3e1102030", 5400, 2.25],
+    ];
+  }
+  if (p.name === "Tower Repeater") return list([[named("Hill Repeater"), 1200, -1.5], [named("Ridge Repeater"), 900, 2], [town(0x8d), 300, 5.5]]);
+  if (p.name === "Ridge Repeater") return list([[named("Hill Repeater"), 200, 6], [named("Tower Repeater"), 800, 1.5]]);
+  const own = [...TOWN_HASHES].find((h) => town(h) === p);
+  if (own === undefined) return [];
+  return list(
+    Object.entries(LINKS)
+      .filter(([pair]) => pair.endsWith(`>${townKey(own)}`) && !pair.startsWith("me>"))
+      .map(([pair, snr], i): [Person | undefined, number, number] => [town(parseInt(pair.split(">")[0]!, 16)), 300 + i * 211, snr]),
+  );
+}
 
 class DemoRadio extends BaseTransport {
   readonly kind = "ble" as const;
@@ -479,7 +503,7 @@ class DemoRadio extends BaseTransport {
     if (command === "advert.zerohop") return "OK - zerohop advert sent";
     if (command === "clear stats") return "OK";
     if (command === "reboot") return null;
-    if (command === "neighbors") return NEIGHBOURS.slice(0, 5).map(([prefix, secs, snr]) => `${prefix.slice(0, 8)}:${secs}:${snr * 4}`).join("\n");
+    if (command === "neighbors") return neighboursOf(p).slice(0, 5).map(([prefix, secs, snr]) => `${prefix.slice(0, 8)}:${secs}:${snr * 4}`).join("\n");
     if (command === "powersaving") return prefs["powersaving"]!;
     if (command === "powersaving on" || command === "powersaving off") {
       prefs["powersaving"] = command.slice(12);
@@ -506,9 +530,10 @@ class DemoRadio extends BaseTransport {
         const count = req[2] ?? 10;
         const offset = (req[3] ?? 0) | ((req[4] ?? 0) << 8);
         const order = req[5] ?? 0;
-        const sorted = [...NEIGHBOURS].sort((a, b) => (order === 0 ? a[1] - b[1] : order === 1 ? b[1] - a[1] : order === 2 ? b[2] - a[2] : a[2] - b[2]));
+        const all = neighboursOf(p);
+        const sorted = [...all].sort((a, b) => (order === 0 ? a[1] - b[1] : order === 1 ? b[1] - a[1] : order === 2 ? b[2] - a[2] : a[2] - b[2]));
         const page = sorted.slice(offset, offset + Math.min(count, 11));
-        w.u16(NEIGHBOURS.length).u16(page.length);
+        w.u16(all.length).u16(page.length);
         for (const [prefix, secs, snr] of page) w.bytes(fromHex(prefix)).u32(secs).i8(Math.round(snr * 4));
         return w.toBytes();
       }

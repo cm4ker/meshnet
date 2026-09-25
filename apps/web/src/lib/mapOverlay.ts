@@ -1,7 +1,7 @@
 /**
  * What the map draws over the nodes: the route to the node picked, coloured
  * by what a ping measured along it; a route being changed; a line of sight;
- * the repeaters that answered "who hears me". Worked out here from the state,
+ * the repeaters that answered "who hears me"; a repeater's neighbours. Worked out here from the state,
  * so the map only draws lines and hands their taps and drags back.
  */
 
@@ -12,7 +12,8 @@ import { legId } from "./legVerdicts.js";
 import type { Discovery } from "./discovery.js";
 import type { Hears } from "./hears.js";
 import { quality } from "./los.js";
-import type { LosEnd, MeshTool } from "./meshTool.js";
+import type { LosEnd, MeshTool, NeighboursTool } from "./meshTool.js";
+import { neighbourRows } from "./neighbours.js";
 import { legSnr, measuredLegs, type Ping } from "./ping.js";
 
 /** `found` is the way a discovery found there, `back` the way its answer came, `was` the route it replaced. */
@@ -26,6 +27,8 @@ export interface OverlayLine {
   tappable: boolean;
   /** A word at its middle, for a leg the terrain closes. */
   label?: string | undefined;
+  /** How it stands among the rest: heard long ago, behind the one picked, the one picked. */
+  mark?: "stale" | "dim" | "on" | "stale dim" | undefined;
 }
 
 /**
@@ -291,4 +294,28 @@ export function hearsOverlay(hears: Hears, state: SessionState): MapOverlay {
     if (end) lines.push({ from: me, to: end, tone: quality(reply.heardUs), tappable: true });
   }
   return { lines, pins: [], numbers: {}, handles: [], pulse: null };
+}
+
+/**
+ * A line from a repeater to each neighbour on the map, coloured by how well
+ * the repeater hears it, faint for one heard long ago. With a link open, the
+ * rest step back and it goes over them, marching while it is checked.
+ */
+export function neighboursOverlay(tool: NeighboursTool, state: SessionState, checking: boolean, now = Date.now()): MapOverlay {
+  const hub = state.contacts[tool.key];
+  const from = hub ? contactEnd(hub) : null;
+  if (!from) return EMPTY_OVERLAY;
+  const lines: OverlayLine[] = [];
+  let open: OverlayLine | null = null;
+  for (const n of neighbourRows(state, tool.key, now)) {
+    const to = n.contact && n.placed ? contactEnd(n.contact) : null;
+    if (!to) continue;
+    if (tool.link === n.contact!.key) {
+      open = { from, to, tone: checking ? "flight" : quality(n.snr), tappable: true, mark: "on" };
+      continue;
+    }
+    const dim = tool.link !== null;
+    lines.push({ from, to, tone: quality(n.snr), tappable: true, mark: n.stale ? (dim ? "stale dim" : "stale") : dim ? "dim" : undefined });
+  }
+  return { ...EMPTY_OVERLAY, lines: open ? [...lines, open] : lines };
 }

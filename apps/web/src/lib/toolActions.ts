@@ -8,8 +8,10 @@
 import { AdvType, contactRoute, type SessionState } from "@meshnet/meshcore";
 import { askWhoHears } from "./hears.js";
 import { relayOf, selfEnd, type MapHandle } from "./mapOverlay.js";
-import { getMeshTool, setMeshTool, type LosEnd, type RouteTool } from "./meshTool.js";
-import { focusOnMap, getNav, goSection, showOnMap } from "./nav.js";
+import { getMeshTool, setMeshTool, type LosEnd, type NeighboursTool, type RouteTool } from "./meshTool.js";
+import { fetchAllNeighbours } from "./neighbourFetch.js";
+import { neighbourRows } from "./neighbours.js";
+import { focusOnMap, getNav, goSection, setStack, showOnMap } from "./nav.js";
 import { clearPing, getPing, spanKey, stopPing } from "./ping.js";
 import { session } from "./session.js";
 import { toast } from "./toast.js";
@@ -47,7 +49,7 @@ export function tapInSpan(key: string | null, state: SessionState): boolean {
 /** The line of sight between two ends, over the map; `back` is the node whose card to return to, or the route it was opened from. */
 export function openLineOfSight(from: LosEnd, to: LosEnd, back: string | null, heard: [number, number | null] | null = null): void {
   const current = getMeshTool();
-  const prev = current?.kind === "route" || current?.kind === "span" ? current : current?.kind === "los" ? (current.prev ?? null) : null;
+  const prev = current?.kind === "route" || current?.kind === "span" || current?.kind === "neighbours" ? current : current?.kind === "los" ? (current.prev ?? null) : null;
   if (back) showOnMap(back);
   else focusOnMap(null);
   setMeshTool({ kind: "los", from, to, back, heard, prev });
@@ -132,6 +134,57 @@ export function cancelRouteEdit(): void {
   setMeshTool({ ...tool, draft: null });
 }
 
+/**
+ * The repeaters `key` hears direct, on the map, from its neighbours page:
+ * the section and screens it was opened from are kept to go back to. The
+ * rest of the list is asked for at once.
+ */
+export function openNeighbours(key: string): void {
+  const nav = getNav();
+  const returnTo = { section: nav.section, stack: nav.stacks[nav.section], focus: nav.meshFocus };
+  showOnMap(key);
+  setMeshTool({ kind: "neighbours", key, link: null, returnTo, prev: null });
+  void fetchAllNeighbours(key);
+}
+
+/** Another repeater's neighbours, from its link in the sheet; Back returns to that link. */
+export function openNeighboursOf(key: string): void {
+  const tool = getMeshTool();
+  if (tool?.kind !== "neighbours") return openNeighbours(key);
+  if (tool.link) stopPing(spanKey(tool.key, tool.link));
+  showOnMap(key);
+  setMeshTool({ kind: "neighbours", key, link: null, returnTo: null, prev: tool });
+  void fetchAllNeighbours(key);
+}
+
+/** The link to one neighbour opened in the sheet, or put away with null. */
+export function openNeighbourLink(link: string | null): void {
+  const tool = getMeshTool();
+  if (tool?.kind !== "neighbours" || tool.link === link) return;
+  if (tool.link) stopPing(spanKey(tool.key, tool.link));
+  setMeshTool({ ...tool, link });
+}
+
+/** A tap on the map while a repeater's neighbours are shown opens the link to the one tapped, or puts the open one away; says whether the tap was taken. */
+export function tapInNeighbours(key: string | null, state: SessionState): boolean {
+  const tool = getMeshTool();
+  if (tool?.kind !== "neighbours") return false;
+  const neighbour = key !== null && key !== tool.key && neighbourRows(state, tool.key, Date.now()).some((n) => n.contact?.key === key);
+  if (neighbour) openNeighbourLink(key);
+  else if (tool.link) openNeighbourLink(null);
+  return true;
+}
+
+/** Back where the neighbours were first opened from: its screens as they stood, or the repeater on the map. */
+function leaveNeighbours(tool: NeighboursTool): void {
+  let root = tool;
+  while (root.prev) root = root.prev;
+  if (tool.link) stopPing(spanKey(tool.key, tool.link));
+  setMeshTool(null);
+  if (root.returnTo) setStack(root.returnTo.section, root.returnTo.stack, { meshFocus: root.returnTo.focus });
+  else showOnMap(root.key);
+}
+
 export function whoHearsMe(): void {
   focusOnMap(null);
   setMeshTool({ kind: "hears" });
@@ -141,12 +194,23 @@ export function whoHearsMe(): void {
 /**
  * Puts the tool away, one step: a line of sight back to the route it was
  * opened from, or to the node's card; a route back to where it was opened,
- * and a check along a change that was not saved goes with it.
+ * and a check along a change that was not saved goes with it; a link
+ * between neighbours back to the list, and the list back to the link it was
+ * opened from, or to the screens it was opened from.
  */
 export function closeTool(): void {
   const tool = getMeshTool();
   if (tool?.kind === "los" && tool.prev) {
+    if (tool.prev.kind === "neighbours") showOnMap(tool.prev.key);
     setMeshTool(tool.prev);
+    return;
+  }
+  if (tool?.kind === "neighbours") {
+    if (tool.link) openNeighbourLink(null);
+    else if (tool.prev) {
+      showOnMap(tool.prev.key);
+      setMeshTool(tool.prev);
+    } else leaveNeighbours(tool);
     return;
   }
   if (tool?.kind === "span") {
@@ -173,6 +237,8 @@ export function closeTool(): void {
 /** Puts every tool away at once, as a close button does. */
 export function closeAllTools(): void {
   const tool = getMeshTool();
+  const under = tool?.kind === "los" ? tool.prev : tool;
+  if (under?.kind === "neighbours") return leaveNeighbours(under);
   if (tool?.kind === "los" && tool.prev) {
     setMeshTool(tool.prev);
     closeTool();

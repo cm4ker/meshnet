@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { NeighbourOrder, NoReplyError, type ContactRecord } from "@meshnet/meshcore";
 import { ago } from "../../lib/format.js";
+import { quality } from "../../lib/los.js";
 import { session, useSession } from "../../lib/session.js";
+import { openNeighbours } from "../../lib/toolActions.js";
 import { Button } from "../../ui/Button.js";
 import { Avatar } from "../Avatar.js";
-import { DownIcon, RefreshIcon } from "../Icons.js";
+import { DownIcon, MapIcon, RefreshIcon } from "../Icons.js";
 
 const ORDERS: { order: number; label: string }[] = [
   { order: NeighbourOrder.Newest, label: "Newest" },
@@ -67,6 +69,10 @@ export function Neighbours({ contact }: { contact: ContactRecord }) {
             <RefreshIcon size={13} />
             {list ? "Refresh" : "Ask the repeater"}
           </Button>
+          <Button size="sm" disabled={!online && !list?.neighbours.length} onClick={() => openNeighbours(key)}>
+            <MapIcon size={13} />
+            On map
+          </Button>
         </span>
       </div>
 
@@ -105,7 +111,7 @@ export function Neighbours({ contact }: { contact: ContactRecord }) {
                         <td>
                           <span className="snr" title={`${r.snr.toFixed(2)} dB`}>
                             <span className="snr-track">
-                              <i style={{ width: `${pct(r.snr)}%` }} />
+                              <i className={quality(r.snr)} style={{ width: `${pct(r.snr)}%` }} />
                               <span className="snr-zero" style={{ left: `${pct(0)}%` }} />
                             </span>
                             <span className="snr-value">

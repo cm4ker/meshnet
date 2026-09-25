@@ -13,7 +13,7 @@ import { useHears } from "../lib/hears.js";
 import { legId, useLegVerdicts } from "../lib/legVerdicts.js";
 import type { LinkRadio } from "../lib/los.js";
 import { useDiscovery } from "../lib/discovery.js";
-import { contactEnd, defaultHeight, discoveryOverlay, EMPTY_OVERLAY, editOverlay, hearsOverlay, losOverlay, relayOf, routeOverlay, selfEnd, spanOverlay, type MapHandle, type MapOverlay } from "../lib/mapOverlay.js";
+import { contactEnd, defaultHeight, discoveryOverlay, EMPTY_OVERLAY, editOverlay, hearsOverlay, losOverlay, neighboursOverlay, relayOf, routeOverlay, selfEnd, spanOverlay, type MapHandle, type MapOverlay } from "../lib/mapOverlay.js";
 import { useMeshTool, type LosEnd } from "../lib/meshTool.js";
 import { focusOnMap, openConversation, openProfile, useNav } from "../lib/nav.js";
 import { heardAt as heard, kindLabel } from "../lib/nodes.js";
@@ -26,7 +26,8 @@ import { openCleanUp } from "../lib/cleanUp.js";
 import { isYours, memoryTight, memoryUse } from "../lib/tidy.js";
 import { session, useSelector, useSession } from "../lib/session.js";
 import { act } from "../lib/toast.js";
-import { closeTool, dropOnRoute, lineOfSightTo, openLineOfSight, tapInRoute, tapInSpan, whoHearsMe } from "../lib/toolActions.js";
+import { isComplete, neighbourRows } from "../lib/neighbours.js";
+import { closeTool, dropOnRoute, lineOfSightTo, openLineOfSight, openNeighbourLink, tapInNeighbours, tapInRoute, tapInSpan, whoHearsMe } from "../lib/toolActions.js";
 import { getTextScale, subscribeTextSize } from "../theme/textSize.js";
 import { IconButton } from "../ui/Button.js";
 import { AirMark, Group } from "../ui/List.js";
@@ -384,6 +385,8 @@ function useMeshOverlay(selected: string | null, state: SessionState): MapOverla
   const tool = useMeshTool();
   const focus = tool?.kind === "route" ? tool.key : tool?.kind === "span" ? tool.from : selected;
   const ping = usePing(tool?.kind === "span" ? (tool.to ? spanKey(tool.from, tool.to) : null) : focus);
+  // A link between neighbours being checked marches.
+  const linkPing = usePing(tool?.kind === "neighbours" && tool.link ? spanKey(tool.key, tool.link) : null);
   const discovery = useDiscovery(focus);
   const hears = useHears();
   const self = state.self;
@@ -412,6 +415,8 @@ function useMeshOverlay(selected: string | null, state: SessionState): MapOverla
           ? hearsOverlay(hears, state)
           : tool?.kind === "span"
             ? spanOverlay(tool.from, tool.to, state, ping)
+          : tool?.kind === "neighbours"
+            ? neighboursOverlay(tool, state, linkPing?.running ?? false)
           : focus
             ? discovery && (discovery.running || discovery.found) && discovery.at >= (ping?.at ?? 0)
               ? discoveryOverlay(focus, state, discovery)
@@ -435,12 +440,18 @@ export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zo
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const test = useCallback(matcher(state, saved, kind, query), [state.logins, state.statusHistory, saved, kind, query]);
   const pick = (key: string | null) => {
-    if (tapInRoute(key, state) || tapInSpan(key, state)) return;
+    if (tapInRoute(key, state) || tapInSpan(key, state) || tapInNeighbours(key, state)) return;
     // A tap on the empty map puts a line of sight away, as it puts away a picked node.
     if (key === null && tool && tool.kind !== "route") closeTool();
     onSelect(key);
   };
   const leg = (from: LosEnd, to: LosEnd) => {
+    // A line from a repeater to a neighbour opens the link between them.
+    if (tool?.kind === "neighbours") {
+      const other = from.key === tool.key ? to.key : from.key;
+      if (other) openNeighbourLink(other);
+      return;
+    }
     // The legs of a pinged route carry what the ping measured on them.
     const back = tool?.kind === "los" ? tool.back : selected;
     let heard: [number, number | null] | null = null;
@@ -457,9 +468,21 @@ export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zo
     const key = tool?.kind === "route" ? tool.key : selected;
     if (key) dropOnRoute(key, handle, onto);
   };
+  // A repeater's neighbours are brought into view together: once when they open, and again when the rest of the list is in.
+  const hub = tool?.kind === "neighbours" ? tool.key : null;
+  const whole = hub ? isComplete(state.neighbours[hub]) : false;
+  const fitPoints = useMemo(() => {
+    if (!hub) return [];
+    const c = state.contacts[hub];
+    const points: [number, number][] = c && hasPosition(c.lat, c.lon) ? [[c.lat, c.lon]] : [];
+    for (const n of neighbourRows(state, hub, Date.now())) if (n.placed) points.push([n.contact!.lat, n.contact!.lon]);
+    return points;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hub, whole, hub ? state.neighbours[hub] : null]);
+  const fit = hub ? { id: `${hub}:${whole ? "all" : "part"}`, points: fitPoints } : null;
   return (
     <Suspense fallback={<div className="empty muted">Loading the map…</div>}>
-      <MapView selected={selected} onSelect={pick} onGroup={onGroup} filter={test} coverTop={coverTop} coverBottom={coverBottom} zoomButtons={zoomButtons} overlay={overlay} onLeg={leg} onHold={lineOfSightTo} onHandleDrop={drop} />
+      <MapView selected={selected} onSelect={pick} onGroup={onGroup} filter={test} coverTop={coverTop} coverBottom={coverBottom} zoomButtons={zoomButtons} overlay={overlay} onLeg={leg} onHold={lineOfSightTo} onHandleDrop={drop} fit={fit} />
     </Suspense>
   );
 }
@@ -584,11 +607,13 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
     setPicked(focus);
     if (focus && detent !== "half") setDetent("half");
   }
-  // A tool opens over the map at its own height, like a card.
-  const [shownTool, setShownTool] = useState(tool?.kind ?? null);
-  if (shownTool !== (tool?.kind ?? null)) {
-    setShownTool(tool?.kind ?? null);
-    if (tool && detent !== "half") setDetent("half");
+  // A tool opens over the map at its own height, like a card; so does a link between neighbours.
+  const toolId = tool ? (tool.kind === "neighbours" ? `neighbours:${tool.key}:${tool.link ?? ""}` : tool.kind) : null;
+  const [shownTool, setShownTool] = useState(toolId);
+  if (shownTool !== toolId) {
+    const opened = !!tool && (shownTool?.split(":")[0] !== tool.kind || (tool.kind === "neighbours" && tool.link !== null));
+    setShownTool(toolId);
+    if (opened && detent !== "half") setDetent("half");
   }
 
   useLayoutEffect(() => {
@@ -634,7 +659,7 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
     resize.observe(card);
     measure();
     return () => resize.disconnect();
-  }, [listed, focus, group, tool?.kind]);
+  }, [listed, focus, group, toolId]);
 
   const full = Math.max(0, space.height - space.top - 8);
   const middle = Math.max(0, Math.min(full - 48, Math.max(240, Math.round(space.height * 0.46))));
