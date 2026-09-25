@@ -14,13 +14,17 @@ const WINDOWS: { secs: number; label: Key }[] = [
   { secs: 7 * 86_400, label: "node.history.week" },
 ];
 
-/** A scale that fits the usual range of each kind of reading; a value outside it widens it. */
-const SCALES: Record<string, { lo: number; hi: number; unit: Key; digits: number }> = {
+/**
+ * A scale that fits the usual range of each kind of reading, in the unit shown; a value outside
+ * it widens it. `per` turns the node's unit into the one shown: amperes and watts read as mA and mW.
+ */
+const SCALES: Record<string, { lo: number; hi: number; unit: Key; digits: number; per?: number }> = {
   temperature: { lo: -20, hi: 40, unit: "node.unit.celsius", digits: 1 },
   humidity: { lo: 0, hi: 100, unit: "node.unit.percent", digits: 0 },
   barometer: { lo: 950, hi: 1050, unit: "node.unit.hectopascal", digits: 1 },
   voltage: { lo: 3, hi: 4.3, unit: "node.unit.volt", digits: 2 },
-  current: { lo: 0, hi: 1, unit: "node.unit.ampere", digits: 3 },
+  current: { lo: 0, hi: 1000, unit: "node.unit.milliampere", digits: 0, per: 1000 },
+  power: { lo: 0, hi: 5000, unit: "node.unit.milliwatt", digits: 0, per: 1000 },
   luminosity: { lo: 0, hi: 1000, unit: "node.unit.lux", digits: 0 },
   percentage: { lo: 0, hi: 100, unit: "node.unit.percent", digits: 0 },
 };
@@ -117,9 +121,13 @@ export function History({ contact }: { contact: ContactRecord }) {
   );
 }
 
-function RangeRow({ summary }: { summary: SeriesSummary }) {
-  const kind = lppTypeName(summary.lppType);
+function RangeRow({ summary: raw }: { summary: SeriesSummary }) {
+  const kind = lppTypeName(raw.lppType);
   const known = SCALES[kind];
+  const per = known?.per ?? 1;
+  // Rounded off the float dust of the multiplication (0.029 A is 29.000000000000004 mA).
+  const shown = (v: number) => Number((v * per).toFixed(6));
+  const summary = { ...raw, min: shown(raw.min), max: shown(raw.max), avg: shown(raw.avg) };
   const scale = known ?? { lo: summary.min, hi: summary.max, digits: 2 };
   const unit = known ? t(known.unit) : "";
   let lo = Math.min(scale.lo, summary.min);

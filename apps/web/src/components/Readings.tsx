@@ -57,9 +57,10 @@ function value(r: LppReading): string {
     case "barometer":
       return t("radio.readings.hpa", { value: r.hpa.toFixed(1) });
     case "current":
-      return t("radio.readings.amps", { value: r.amps.toFixed(3) });
+      return t("radio.readings.milliamps", { value: Math.round(r.amps * 1000) });
     case "power":
-      return t("radio.readings.watts", { value: r.watts });
+      // Sent in whole watts (LPP_POWER), so a milliwatt figure is only ever a thousand of them.
+      return t("radio.readings.milliwatts", { value: r.watts * 1000 });
     case "energy":
       return t("radio.readings.kwh", { value: r.kwh.toFixed(3) });
     case "luminosity":
