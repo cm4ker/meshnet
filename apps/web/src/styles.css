@@ -43,6 +43,9 @@
 
   --avatar-l: 62%;
   --avatar-c: 0.11;
+  /* A sender's name in their avatar's hue: dark enough to read on the light bubble. */
+  --name-l: 50%;
+  --name-c: 0.14;
 
   --accent-subtle: color-mix(in oklab, var(--accent) 18%, var(--bg));
   --danger-subtle: color-mix(in oklab, var(--danger) 14%, var(--bg));
@@ -57,6 +60,12 @@
   --safe-bottom: max(0px, calc(env(safe-area-inset-bottom, 0px) - var(--keyboard, 0px)));
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* On the dark bubble the name goes light. */
+:root[data-appearance="dark"] {
+  --name-l: 78%;
+  --name-c: 0.1;
 }
 
 * {
@@ -1961,6 +1970,18 @@ details.more .kv-grid {
   margin: 1px 0;
   transition: transform 0.2s ease;
 }
+/* In a channel or a room, a new voice starts a little lower. */
+.msg.lead {
+  margin-top: var(--space-2);
+}
+/* The column for the sender's avatar, kept empty above the last of a run so the bubbles line up. */
+.msg-avatar {
+  flex: none;
+  display: flex;
+  align-self: flex-end;
+  width: 28px;
+  margin-right: 6px;
+}
 /* Pulled right on a touch screen, a message in a channel or a room shows that letting go answers it. */
 .msg-reply-cue {
   position: absolute;
@@ -2059,7 +2080,7 @@ details.more .kv-grid {
   display: block;
   font-size: var(--text-xs);
   font-weight: 600;
-  color: var(--accent);
+  color: oklch(var(--name-l) var(--name-c) var(--hue));
   margin-bottom: 1px;
 }
 .msg-meta {
@@ -2145,6 +2166,15 @@ details.more .kv-grid {
 }
 .quote.out {
   background: var(--bubble-out);
+}
+.quote-from {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.quote-from .quote {
+  flex: 1;
+  min-width: 0;
 }
 .message-body .msg-details {
   margin: 0;

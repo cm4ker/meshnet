@@ -18,6 +18,7 @@ import { autoConnectWanted, setAutoConnect } from "../transports/index.js";
 import { Button } from "../ui/Button.js";
 import { Confirm } from "../ui/Dialog.js";
 import { ActionRow, Block, Group, InfoRow, LinkRow, SelectRow, SwitchRow } from "../ui/List.js";
+import { Avatar, SenderName } from "./Avatar.js";
 import { CopyIcon } from "./Icons.js";
 import { ContactsPage, RemovedPage } from "./ContactsPages.js";
 import { LogView } from "./LogView.js";
@@ -515,9 +516,12 @@ function AppearancePage() {
         {/* What a chat looks like at this size, drawn by the chat's own rules. */}
         <Block className="text-sample">
           <div className="msg in">
+            <span className="msg-avatar">
+              <Avatar name="Ridge" size={28} />
+            </span>
             <div className="msg-col">
               <div className="bubble">
-                <span className="msg-sender">Ridge</span>
+                <SenderName name="Ridge" />
                 <span className="msg-text">Anyone hearing me from the valley?</span>
                 <span className="msg-meta">
                   <span>18:04</span>

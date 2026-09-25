@@ -1,6 +1,7 @@
 import { AdvType, parseConversation } from "@meshnet/meshcore";
 import { titleOf } from "../lib/conversations.js";
 import { useSession } from "../lib/session.js";
+import { Avatar, SenderName } from "./Avatar.js";
 import { MessageDetails } from "./MessageDetails.js";
 import { Gone, ScreenHead, type Chrome } from "./ScreenHead.js";
 
@@ -15,12 +16,23 @@ export function MessageView({ conversation, id, chrome, bare = false }: { conver
   const target = parseConversation(conversation);
   const many = target.kind === "channel" || (target.kind === "contact" && state.contacts[target.key]?.type === AdvType.Room);
   const peer = message.direction === "in" && many ? (message.sender ?? "?") : titleOf(state, conversation);
+  const quote = (
+    <blockquote className={["quote", message.direction].join(" ")}>
+      {message.sender && message.direction === "in" ? <SenderName name={message.sender} /> : null}
+      {message.text}
+    </blockquote>
+  );
   const body = (
     <>
-      <blockquote className={["quote", message.direction].join(" ")}>
-        {message.sender && message.direction === "in" ? <span className="msg-sender">{message.sender}</span> : null}
-        {message.text}
-      </blockquote>
+      {/* From one of many voices: the avatar beside it, as in the chat. */}
+      {many && message.direction === "in" && message.sender ? (
+        <div className="quote-from">
+          <Avatar name={message.sender} size={28} />
+          {quote}
+        </div>
+      ) : (
+        quote
+      )}
       <MessageDetails message={message} peer={peer} />
     </>
   );

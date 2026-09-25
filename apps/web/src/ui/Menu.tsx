@@ -69,8 +69,9 @@ export function MenuHost() {
   return (
     <Sheet open={menu !== null} onClose={closeMenu} title={menu?.title}>
       <div className="group-body">
-        {menu?.items.map((item) => (
-          <button key={item.label} type="button" className={["line", "line-action", item.danger ? "danger" : ""].join(" ")} disabled={item.disabled} onClick={() => pick(item)}>
+        {menu?.items.map((item, i) => (
+          // By place: two nodes of one name make two items of one label.
+          <button key={i} type="button" className={["line", "line-action", item.danger ? "danger" : ""].join(" ")} disabled={item.disabled} onClick={() => pick(item)}>
             {item.icon ? <span className="line-icon">{item.icon}</span> : null}
             <span className="line-text">
               <span>{item.label}</span>
@@ -122,8 +123,8 @@ function Popover({ menu }: { menu: MenuState }) {
 
   return createPortal(
     <div ref={box} className="popover" role="menu" style={pos}>
-      {menu.items.map((item) => (
-        <button key={item.label} type="button" role="menuitem" className={item.danger ? "danger" : ""} disabled={item.disabled} onClick={() => pick(item)}>
+      {menu.items.map((item, i) => (
+        <button key={i} type="button" role="menuitem" className={item.danger ? "danger" : ""} disabled={item.disabled} onClick={() => pick(item)}>
           {item.icon ? <span className="popover-icon">{item.icon}</span> : null}
           <span>{item.label}</span>
           {item.air ? <AirMark /> : null}

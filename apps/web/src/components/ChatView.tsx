@@ -1,18 +1,20 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AdvType, isConversationType, parseConversation, type MessageRecord, type SessionState } from "@meshnet/meshcore";
+import { AdvType, isConversationType, parseConversation, type ContactRecord, type MessageRecord, type SessionState } from "@meshnet/meshcore";
 import { GEO, MENTION } from "../lib/composer.js";
 import { messagesIn, shownAt, titleOf } from "../lib/conversations.js";
 import { nameOfHash, relaysOf } from "../lib/echoes.js";
-import { dayLabel, timeOfDay } from "../lib/format.js";
+import { agoPhrase, dayLabel, timeOfDay } from "../lib/format.js";
 import { openChannel, openMessage, openProfile } from "../lib/nav.js";
+import { heardAt, hopsLabel, kindLabel } from "../lib/nodes.js";
 import { openRoute } from "../lib/toolActions.js";
 import { usePress } from "../lib/press.js";
 import { routeWords } from "../lib/routes.js";
+import { sendersOf } from "../lib/senders.js";
 import { session, useSession } from "../lib/session.js";
 import { toast } from "../lib/toast.js";
 import { IconButton } from "../ui/Button.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
-import { Avatar } from "./Avatar.js";
+import { Avatar, SenderName } from "./Avatar.js";
 import { Composer, type Reply } from "./Composer.js";
 import { NotOnRadio } from "./ContactsPages.js";
 import {
@@ -51,6 +53,26 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
   const answer = useCallback((message: MessageRecord) => {
     if (message.sender) setReply({ name: message.sender, text: message.text });
   }, []);
+  // Who wrote it: the profile, when the radio knows one node by that name; else a choice.
+  const who = useCallback(
+    (message: MessageRecord) => {
+      const name = message.sender ?? "?";
+      const found = sendersOf(message, session.getState().contacts);
+      if (found.length === 1) {
+        openProfile(found[0]!.key);
+        return;
+      }
+      if (found.length > 1) {
+        showMenu(
+          found.map((c) => ({ label: c.name, hint: nodeLine(c), icon: <Avatar name={c.name} type={c.type} size={28} />, onSelect: () => openProfile(c.key) })),
+          { title: `${found.length} nodes named ${name}` },
+        );
+        return;
+      }
+      showMenu([{ label: "Reply", icon: <ReplyIcon size={17} />, onSelect: () => answer(message) }], { title: `${name} · no advert heard yet` });
+    },
+    [answer],
+  );
 
   // Pinned to the bottom, as a chat is, unless the reader has scrolled up to read.
   const stuck = useRef(true);
@@ -122,16 +144,22 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
           {messages.length === 0 ? <div className="empty muted">{target.kind === "channel" ? "Write first: everyone on the channel hears it." : "Nothing here yet."}</div> : null}
           {messages.map((m, i) => {
             const prev = messages[i - 1];
+            const next = messages[i + 1];
             const newDay = !prev || dayLabel(shownAt(prev)) !== dayLabel(shownAt(m));
-            const sameSender = prev && !newDay && prev.direction === m.direction && prev.sender === m.sender && shownAt(m) - shownAt(prev) < 300;
+            const first = !prev || !sameRun(prev, m);
+            const last = !next || !sameRun(m, next);
+            const voice = many && m.direction === "in";
             return (
               <div key={m.id}>
                 {newDay ? <div className="day">{dayLabel(shownAt(m))}</div> : null}
                 <Message
                   message={m}
-                  showSender={many && m.direction === "in" && !sameSender}
+                  lead={many && first && !newDay}
+                  showSender={voice && first}
+                  avatar={voice ? (last && m.sender ? "show" : "gap") : null}
                   me={me}
-                  onReply={many && m.direction === "in" && m.sender ? answer : undefined}
+                  onReply={voice && m.sender ? answer : undefined}
+                  onWho={voice ? who : undefined}
                   contacts={m.direction === "out" ? state.contacts : undefined}
                 />
               </div>
@@ -205,11 +233,27 @@ function techOf(message: MessageRecord): string {
   return message.flood ? "flood" : "";
 }
 
+/** Whether `b` goes on from `a` without a break: the same side and sender, the same day, within five minutes. */
+function sameRun(a: MessageRecord, b: MessageRecord): boolean {
+  return a.direction === b.direction && a.sender === b.sender && dayLabel(shownAt(a)) === dayLabel(shownAt(b)) && shownAt(b) - shownAt(a) < 300;
+}
+
+/** A node among several of one name, told apart by what it is and when it was last heard. */
+function nodeLine(contact: ContactRecord): string {
+  const at = heardAt(contact);
+  return [kindLabel(contact.type), at ? `heard ${agoPhrase(at)}` : "never heard", hopsLabel(contact)].join(" · ");
+}
+
 interface MessageProps {
   message: MessageRecord;
+  /** The first of a run in a channel or a room: a little room above it sets the voices apart. */
+  lead: boolean;
   showSender: boolean;
+  /** In a channel or a room, a message heard: the sender's avatar by the last of a run, an empty column by the rest. */
+  avatar: "show" | "gap" | null;
   me: string | null;
   onReply: ((message: MessageRecord) => void) | undefined;
+  onWho: ((message: MessageRecord) => void) | undefined;
   /** For a message of ours only: the relays that echoed it are named from them. */
   contacts: SessionState["contacts"] | undefined;
 }
@@ -218,7 +262,7 @@ interface MessageProps {
  * One bubble. Memoised: a message arriving, or an echo of one, changes one record, and the
  * other bubbles of a long conversation have nothing new to draw.
  */
-const Message = memo(function Message({ message, showSender, me, onReply: replyTo, contacts }: MessageProps) {
+const Message = memo(function Message({ message, lead, showSender, avatar, me, onReply: replyTo, onWho, contacts }: MessageProps) {
   const out = message.direction === "out";
   const [busy, setBusy] = useState(false);
   const onReply = replyTo ? () => replyTo(message) : undefined;
@@ -272,10 +316,19 @@ const Message = memo(function Message({ message, showSender, me, onReply: replyT
   const relayTitle = relays.length && contacts ? `Relayed by ${relays.length}: ${relays.map((r) => nameOfHash(r.hash, contacts) ?? r.hash).join(", ")}` : undefined;
 
   return (
-    <div className={["msg", out ? "out" : "in"].join(" ")} data-reply={onReply ? message.id : undefined}>
+    <div className={["msg", out ? "out" : "in", lead ? "lead" : ""].join(" ")} data-reply={onReply ? message.id : undefined}>
       <span className="msg-reply-cue" aria-hidden="true">
         <ReplyIcon size={16} />
       </span>
+      {avatar ? (
+        <span className="msg-avatar">
+          {avatar === "show" && message.sender ? (
+            <button type="button" className="chat-who" aria-label={`Who is ${message.sender}`} onClick={() => onWho?.(message)}>
+              <Avatar name={message.sender} size={28} />
+            </button>
+          ) : null}
+        </span>
+      ) : null}
       <div className="msg-col">
         {/* A div, not a button: its text stays selectable for copying with a mouse. */}
         <div
@@ -296,7 +349,7 @@ const Message = memo(function Message({ message, showSender, me, onReply: replyT
           title={relayTitle}
           {...press}
         >
-          {showSender && message.sender ? <span className="msg-sender">{message.sender}</span> : null}
+          {showSender && message.sender ? <SenderName name={message.sender} /> : null}
           <span className="msg-text">{richText(message.text, me)}</span>
           <span className="msg-meta">
             {tech ? <span className="msg-tech">{tech} ·</span> : null}

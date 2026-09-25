@@ -27,3 +27,12 @@ export function Avatar({ name, type = AdvType.Chat, size = 32, channel = false, 
     </span>
   );
 }
+
+/** A sender's name over their message, in the hue of their avatar, so the two read as one. */
+export function SenderName({ name }: { name: string }) {
+  return (
+    <span className="msg-sender" style={{ "--hue": hue(name) } as React.CSSProperties}>
+      {name}
+    </span>
+  );
+}
