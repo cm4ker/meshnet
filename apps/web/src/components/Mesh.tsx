@@ -438,7 +438,14 @@ export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zo
   const overlay = useMeshOverlay(selected, state);
   // The map redraws markers when the filter function changes, so it changes only with what it filters by.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const test = useCallback(matcher(state, saved, kind, query), [state.logins, state.statusHistory, saved, kind, query]);
+  const matches = useCallback(matcher(state, saved, kind, query), [state.logins, state.statusHistory, saved, kind, query]);
+  // A repeater's neighbours shown: only it and those it hears are drawn.
+  const linked = tool?.kind === "neighbours" ? [tool.key, ...neighbourRows(state, tool.key, Date.now()).flatMap((n) => (n.contact ? [n.contact.key] : []))].join(",") : null;
+  const test = useMemo(() => {
+    if (linked === null) return matches;
+    const keys = new Set(linked.split(","));
+    return (c: ContactRecord) => keys.has(c.key);
+  }, [linked, matches]);
   const pick = (key: string | null) => {
     if (tapInRoute(key, state) || tapInSpan(key, state) || tapInNeighbours(key, state)) return;
     // A tap on the empty map puts a line of sight away, as it puts away a picked node.
