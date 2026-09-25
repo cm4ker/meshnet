@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useBackLayer, useSectionsBack } from "../lib/back.js";
 import { chatsInOrder, getChatOrder } from "../lib/chatOrder.js";
 import { summarize, totalUnread } from "../lib/conversations.js";
+import { useBatteryType } from "../lib/batteryType.js";
 import { batteryPercent } from "../lib/format.js";
 import { pairLink, reconnectNow, useLink } from "../lib/link.js";
 import { useWide } from "../lib/layout.js";
@@ -347,6 +348,7 @@ function layout(nav: Nav) {
 function Desktop() {
   const nav = useNav();
   const state = useSession();
+  const cell = useBatteryType(state.self?.key);
   const badges = useBadges();
   const [palette, setPalette] = useState(false);
   const [group, setGroup] = useState<string[] | null>(null);
@@ -429,7 +431,7 @@ function Desktop() {
         <button type="button" className="rail-radio" title={state.link ? `${state.self?.name ?? "Radio"} · ${state.link.label}` : "The radio"} onClick={() => setStack("radio", [{ kind: "radio", page: "connection" }])}>
           {state.link ? <LinkIcon kind={state.link.kind} size={16} /> : <RadioIcon size={16} />}
           <span className={["dot", badges.offline ? "off" : "on"].join(" ")} aria-hidden="true" />
-          <span className="tab-label">{state.battery ? `${batteryPercent(state.battery.mv)}%` : "—"}</span>
+          <span className="tab-label">{state.battery ? `${batteryPercent(state.battery.mv, cell)}%` : "—"}</span>
         </button>
       </nav>
       <aside className="pane">{list}</aside>

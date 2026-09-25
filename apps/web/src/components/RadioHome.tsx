@@ -1,4 +1,5 @@
 import { useRef, useSyncExternalStore } from "react";
+import { batteryTypeLabel, useBatteryType } from "../lib/batteryType.js";
 import { battery, batteryPercent, plural } from "../lib/format.js";
 import { disconnect, useLink } from "../lib/link.js";
 import { useLookalikePrefs } from "../lib/lookalikes.js";
@@ -16,7 +17,7 @@ import { Button, IconButton } from "../ui/Button.js";
 import { Group, LinkRow } from "../ui/List.js";
 import { showMenu } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
-import { AirIcon, BellIcon, InfoIcon, LinkIcon, LocationIcon, LogIcon, PaletteIcon, PowerIcon, RadioIcon, RefreshIcon, ShieldIcon, SlidersIcon, TextIcon, UsersIcon, WavesIcon } from "./Icons.js";
+import { AirIcon, BatteryIcon, BellIcon, InfoIcon, LinkIcon, LocationIcon, LogIcon, PaletteIcon, PowerIcon, RadioIcon, RefreshIcon, ShieldIcon, SlidersIcon, TextIcon, UsersIcon, WavesIcon } from "./Icons.js";
 import { presetName, RADIO_TITLES } from "./RadioPages.js";
 
 
@@ -43,6 +44,7 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
   const theme = useSyncExternalStore(subscribeTheme, getPreference);
   const self = state.self;
   const online = state.status === "ready";
+  const cell = useBatteryType(self?.key);
   const row = (page: RadioPage, icon: React.ReactNode, value?: string) => (
     <LinkRow key={page} icon={icon} label={RADIO_TITLES[page]} value={value} tone={page === "power" ? "danger" : undefined} selected={selected === page} onClick={() => openRadioPage(page)} />
   );
@@ -87,10 +89,10 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
                 {!online ? (link.phase === "connecting" ? "Offline · reconnecting" : "Offline") : reading ? `${STEP_LABELS[reading.step]} · ${reading.index + 1} of ${STEP_COUNT}` : state.link ? state.link.label : "online"}
               </span>
             </span>
-            <button type="button" className="radio-battery" disabled={!online} title="Read the battery again" onClick={() => void act(() => session.refreshBattery())}>
+            <button type="button" className="radio-battery" disabled={!self} title="Battery" onClick={() => openRadioPage("battery")}>
               {state.battery ? (
                 <>
-                  <b>{batteryPercent(state.battery.mv)}%</b>
+                  <b>{batteryPercent(state.battery.mv, cell)}%</b>
                   <small>{battery(state.battery.mv)}</small>
                 </>
               ) : (
@@ -112,6 +114,7 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
         <Group title="This radio">
           {row("name", <LocationIcon size={17} />, self?.name)}
           {row("frequency", <RadioIcon size={17} />, self ? `${presetName(self)} · ${self.txPower} dBm` : undefined)}
+          {row("battery", <BatteryIcon size={17} />, batteryTypeLabel(cell))}
           {row("contacts", <UsersIcon size={17} />, contactsValue)}
           {row("privacy", <ShieldIcon size={17} />)}
           {row("advanced", <SlidersIcon size={17} />)}

@@ -1,7 +1,8 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { AdvertLocPolicy, TelemMode, type SessionState } from "@meshnet/meshcore";
 import { autostartEnabled, autostartLabel, hasAutostart, setAutostart } from "../lib/autostart.js";
-import { bandwidth, frequency } from "../lib/format.js";
+import { agoPhrase, battery as volts, bandwidth, batteryPercent, frequency } from "../lib/format.js";
+import { BATTERY_TYPES, setBatteryType, useBatteryType } from "../lib/batteryType.js";
 import { disconnect, pauseForUpdate, useLink } from "../lib/link.js";
 import { setLookalikePrefs, useLookalikePrefs } from "../lib/lookalikes.js";
 import { setOpenAtUnread, useOpenAtUnread } from "../lib/firstUnread.js";
@@ -12,14 +13,14 @@ import { nativePlatform, shell } from "../lib/platform.js";
 import { relayAvailable, relayWanted, setRelayWanted, stopRelay, useRelay } from "../lib/relay.js";
 import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
 import { SEND_TRIES_MAX, setSendTries, triesPhrase, useSendTries } from "../lib/sendTries.js";
-import { session, storage, useSession } from "../lib/session.js";
+import { session, storage, useSelector, useSession } from "../lib/session.js";
 import { act, toast } from "../lib/toast.js";
 import { getActiveTheme, getPreference, listThemes, setPreference, subscribeTheme } from "../theme/store.js";
 import { getSystemTextScale, getTextScale, getTextSizePreference, hasSystemTextSize, setTextSizePreference, subscribeTextSize, TEXT_STEPS } from "../theme/textSize.js";
 import { autoConnectWanted, setAutoConnect } from "../transports/index.js";
 import { Button } from "../ui/Button.js";
 import { Confirm } from "../ui/Dialog.js";
-import { ActionRow, Block, Group, InfoRow, LinkRow, SelectRow, StepperRow, SwitchRow } from "../ui/List.js";
+import { ActionRow, Block, ChoiceRow, Group, InfoRow, LinkRow, SelectRow, StepperRow, SwitchRow } from "../ui/List.js";
 import { Avatar, SenderName } from "./Avatar.js";
 import { CopyIcon } from "./Icons.js";
 import { ContactsPage, RemovedPage } from "./ContactsPages.js";
@@ -36,6 +37,7 @@ type Self = NonNullable<SessionState["self"]>;
 export const RADIO_TITLES: Record<RadioPage, string> = {
   name: "Name and position",
   frequency: "Frequency and power",
+  battery: "Battery",
   privacy: "Privacy and telemetry",
   contacts: "Contacts",
   removed: "Removed",
@@ -159,6 +161,8 @@ function PageBody({ page }: { page: RadioPage }) {
       return self ? <NamePage self={self} online={online} /> : <Offline />;
     case "frequency":
       return self ? <FrequencyPage self={self} online={online} /> : <Offline />;
+    case "battery":
+      return self ? <BatteryPage radioKey={self.key} online={online} /> : <Offline />;
     case "privacy":
       return self ? (
         <>
@@ -339,6 +343,40 @@ function FrequencyPage({ self, online }: { self: Self; online: boolean }) {
         onCancel={() => setAsking(false)}
         onConfirm={apply}
       />
+    </>
+  );
+}
+
+/**
+ * The radio's charge, and what its cell is made of (#26): the radio reports
+ * only volts, so the type is what makes them a percent. Each type shows the
+ * percent it would give now, so the one that looks right is plain to see.
+ */
+function BatteryPage({ radioKey, online }: { radioKey: string; online: boolean }) {
+  const reading = useSelector((state) => state.battery);
+  const type = useBatteryType(radioKey);
+  // The choice is judged by the reading, so it is taken afresh.
+  useEffect(() => {
+    if (online) void session.refreshBattery();
+  }, [online]);
+  return (
+    <>
+      <Group>
+        <Block className="battery-now">
+          <span className="battery-now-text">
+            <b>{reading ? `${batteryPercent(reading.mv, type)}%` : "—"}</b>
+            <small>{reading ? `${volts(reading.mv)} · read ${agoPhrase(reading.at)}` : "Not read yet"}</small>
+          </span>
+          <Button size="sm" disabled={!online} onClick={() => void session.refreshBattery()}>
+            Read again
+          </Button>
+        </Block>
+      </Group>
+      <Group title="Type" note="The radio reports only volts. The type turns them into a percent, here in the app.">
+        {BATTERY_TYPES.map((t) => (
+          <ChoiceRow key={t.value} label={t.label} hint={t.hint} value={reading ? `${batteryPercent(reading.mv, t.value)}%` : undefined} checked={type === t.value} onSelect={() => setBatteryType(radioKey, t.value)} />
+        ))}
+      </Group>
     </>
   );
 }

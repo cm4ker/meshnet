@@ -85,10 +85,31 @@ export function battery(mv: number): string {
   return `${(mv / 1000).toFixed(2)} V`;
 }
 
-/** A LiPo's charge from its voltage; rough, and honest about it. */
-export function batteryPercent(mv: number): number {
-  const clamped = Math.max(3300, Math.min(4200, mv));
-  return Math.round(((clamped - 3300) / 900) * 100);
+/** What a cell is made of. The radio reports only its voltage. */
+export type BatteryType = "liion" | "lifepo4";
+
+/**
+ * A cell's resting voltage, mV, at 100%, 90% … 0%. Charge is not linear in
+ * voltage: LiFePO4 sits near 3.3 V for most of its charge, so a straight line
+ * from empty to full reads a full one as nearly empty.
+ */
+const BATTERY_CURVES: Record<BatteryType, readonly number[]> = {
+  liion: [4190, 4050, 3990, 3890, 3800, 3720, 3650, 3580, 3530, 3420, 3100],
+  lifepo4: [3400, 3350, 3320, 3290, 3270, 3260, 3250, 3230, 3200, 3120, 3000],
+};
+
+/** A cell's charge from its voltage, straight between the curve's points; rough, and honest about it. */
+export function batteryPercent(mv: number, type: BatteryType = "liion"): number {
+  const curve = BATTERY_CURVES[type];
+  const step = 100 / (curve.length - 1);
+  if (mv >= curve[0]!) return 100;
+  for (let i = 1; i < curve.length; i++) {
+    const low = curve[i]!;
+    if (mv < low) continue;
+    const high = curve[i - 1]!;
+    return Math.round(100 - i * step + ((mv - low) / (high - low)) * step);
+  }
+  return 0;
 }
 
 export function plural(n: number, one: string, many = `${one}s`): string {

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { AirIcon, ChevronRightIcon, MinusIcon, PlusIcon } from "../components/Icons.js";
+import { AirIcon, CheckIcon, ChevronRightIcon, MinusIcon, PlusIcon } from "../components/Icons.js";
 
 /**
  * Grouped rows, the way a phone's settings are laid out: a group is a
@@ -100,6 +100,18 @@ export function StepperRow({ label, hint, icon, value, min, max, onChange, forma
         </button>
       </span>
     </div>
+  );
+}
+
+/** One of a few choices, all in view; the picked one carries a check. */
+export function ChoiceRow({ label, hint, icon, value, checked, onSelect, disabled }: RowBase & { value?: ReactNode; checked: boolean; onSelect: () => void; disabled?: boolean | undefined }) {
+  return (
+    <button type="button" role="radio" aria-checked={checked} className="line line-choice" onClick={onSelect} disabled={disabled}>
+      {icon ? <span className="line-icon">{icon}</span> : null}
+      <Text label={label} hint={hint} />
+      {value !== undefined ? <span className="line-value">{value}</span> : null}
+      <CheckIcon size={16} className="line-check" />
+    </button>
   );
 }
 
