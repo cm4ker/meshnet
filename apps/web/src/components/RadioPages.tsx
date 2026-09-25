@@ -13,7 +13,7 @@ import { relayAvailable, relayWanted, setRelayWanted, stopRelay, useRelay } from
 import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
 import { session, storage, useSession } from "../lib/session.js";
 import { act, toast } from "../lib/toast.js";
-import { getPreference, listThemes, setPreference, subscribeTheme } from "../theme/store.js";
+import { getActiveTheme, getPreference, listThemes, setPreference, subscribeTheme } from "../theme/store.js";
 import { getSystemTextScale, getTextScale, getTextSizePreference, hasSystemTextSize, setTextSizePreference, subscribeTextSize, TEXT_STEPS } from "../theme/textSize.js";
 import { autoConnectWanted, setAutoConnect } from "../transports/index.js";
 import { Button } from "../ui/Button.js";
@@ -489,6 +489,8 @@ function MessagesPage() {
 
 function AppearancePage() {
   const preference = useSyncExternalStore(subscribeTheme, getPreference);
+  const active = useSyncExternalStore(subscribeTheme, getActiveTheme);
+  const following = preference === "system";
   const textSize = useSyncExternalStore(subscribeTextSize, getTextSizePreference);
   const scale = useSyncExternalStore(subscribeTextSize, getTextScale);
   const system = useSyncExternalStore(subscribeTextSize, getSystemTextScale);
@@ -497,8 +499,27 @@ function AppearancePage() {
   const percent = (s: number) => `${Math.round(s * 100)}%`;
   return (
     <>
-      <Group>
-        <SelectRow label="Theme" value={preference} options={[{ value: "system", label: "Follow the system" }, ...listThemes().map((t) => ({ value: t.id, label: t.name }))]} onChange={(v) => setPreference(v)} />
+      <Group title="Theme">
+        {/* Turned off, the theme drawn now stays, so the screen does not change under the finger. */}
+        <SwitchRow label="Follow the system" hint="One Light or One Dark, as the system is set" checked={following} onChange={(v) => setPreference(v ? "system" : active.id)} />
+        <Block className={["theme-tiles", following ? "following" : ""].join(" ")}>
+          {listThemes().map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className="theme-tile"
+              aria-pressed={!following && active.id === t.id}
+              onClick={() => setPreference(t.id)}
+              style={{ "--swatch-bg": t.tokens.bg, "--swatch-in": t.tokens.bubbleIn, "--swatch-out": t.tokens.bubbleOut } as React.CSSProperties}
+            >
+              <span className="theme-swatch" aria-hidden="true">
+                <i />
+                <i />
+              </span>
+              {t.name}
+            </button>
+          ))}
+        </Block>
       </Group>
       <Group title="Text size">
         {hasSystemTextSize() ? (

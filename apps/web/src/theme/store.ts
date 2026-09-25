@@ -1,4 +1,6 @@
-import { cssVariable, defaultDark, defaultLight, findTheme, themes, type Theme, type ThemeToken } from "./themes.js";
+import { bubbleVariable, cssVariable, defaultDark, defaultLight, findTheme, themes, type BubbleToken, type Theme, type ThemeToken } from "./themes.js";
+
+const BUBBLE_TOKENS: BubbleToken[] = ["text", "textMuted", "textFaint", "accent", "danger"];
 
 const KEY = "meshnet.theme";
 /** The chosen theme's ground, for the boot screen `index.html` paints before this runs. */
@@ -59,9 +61,20 @@ function apply(): void {
   for (const token of Object.keys(theme.tokens) as ThemeToken[]) {
     root.style.setProperty(cssVariable(token), theme.tokens[token]);
   }
+  for (const token of BUBBLE_TOKENS) {
+    if (theme.bubble) root.style.setProperty(bubbleVariable(token), theme.bubble[token]);
+    else root.style.removeProperty(bubbleVariable(token));
+  }
   root.style.colorScheme = theme.appearance;
   root.dataset["appearance"] = theme.appearance;
+  setData(root, "bubbles", theme.bubble?.appearance);
+  setData(root, "look", theme.look);
   for (const listener of listeners) listener();
+}
+
+function setData(root: HTMLElement, key: string, value: string | undefined): void {
+  if (value) root.dataset[key] = value;
+  else delete root.dataset[key];
 }
 
 /** Before the first render, so the page never paints in one palette and resolves into another. */
