@@ -418,12 +418,19 @@ export function readNeighbours(bytes: Uint8Array, prefixLength = PUB_KEY_PREFIX_
   return { total, neighbours };
 }
 
-/** The body of a `GetAccessList` answer: seven bytes a client. */
+/**
+ * The body of a `GetAccessList` answer: seven bytes a client. The answer
+ * comes decrypted in whole 16-byte blocks, so zeros may trail the list; the
+ * node never sends a client with no permissions, so one marks the end.
+ */
 export function readAccessList(bytes: Uint8Array): AccessEntry[] {
   const r = new ByteReader(bytes);
   const entries: AccessEntry[] = [];
   while (r.remaining >= PUB_KEY_PREFIX_SIZE + 1) {
-    entries.push({ prefix: r.take(PUB_KEY_PREFIX_SIZE), permissions: r.u8() });
+    const prefix = r.take(PUB_KEY_PREFIX_SIZE);
+    const permissions = r.u8();
+    if (permissions === 0) break;
+    entries.push({ prefix, permissions });
   }
   return entries;
 }
@@ -451,6 +458,7 @@ export function readAvgMinMax(bytes: Uint8Array): { time: number; series: Series
   while (r.remaining >= 2) {
     const channel = r.u8();
     const lppType = r.u8();
+    if (channel === 0 && lppType === 0) break; // the zeros padding the answer to a whole cipher block
     const size = seriesSize(lppType);
     if (r.remaining < size * 3) break;
     const scale = seriesScale(lppType);

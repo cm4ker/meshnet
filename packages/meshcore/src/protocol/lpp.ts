@@ -73,6 +73,8 @@ export function decodeLpp(bytes: Uint8Array): LppReading[] {
   while (r.remaining >= 2) {
     const channel = r.u8();
     const type = r.u8();
+    // An answer comes decrypted in whole 16-byte blocks; the node numbers channels from 1, so zeros are the padding.
+    if (channel === 0 && type === 0) break;
     try {
       switch (type) {
         case 0x00:

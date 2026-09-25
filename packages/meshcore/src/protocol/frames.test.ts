@@ -225,6 +225,8 @@ test("a telemetry push decodes the LPP it carries", () => {
     .bytes(KEY.subarray(0, 6))
     // channel 1, voltage 4.12 V; channel 1, temperature 23.5 C
     .bytes(new Uint8Array([1, 0x74, 0x01, 0x9c, 1, 0x67, 0x00, 0xeb]))
+    // the zeros that pad the 4-byte tag and these 8 bytes to one cipher block
+    .bytes(new Uint8Array(4))
     .toBytes();
   const frame = decodeFrame(bytes);
   if (frame.kind !== "telemetryResponse") throw new Error(frame.kind);

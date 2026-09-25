@@ -54,6 +54,15 @@ test("an access list is seven bytes a client", () => {
   );
 });
 
+test("the zeros that pad an access list to a whole cipher block are not clients", () => {
+  // Two clients: 4 tag bytes + 14 → 32 decrypted, 28 after the tag, the last 14 zeros.
+  const entries = readAccessList(fromHex("6b4b1d41645603" + "819211e4cf0703" + "00".repeat(14)));
+  assert.deepEqual(
+    entries.map((e) => toHex(e.prefix)),
+    ["6b4b1d416456", "819211e4cf07"],
+  );
+});
+
 test("owner info splits on the first two newlines only", () => {
   assert.deepEqual(readOwnerInfo(utf8("v1.17.1\nRoof North\nNorth group\nask on #test")), {
     firmware: "v1.17.1",
@@ -77,6 +86,8 @@ test("a sensor's series summaries use its own widths and scales, big-endian", ()
     .bytes(fromHex("0187"))
     .bytes(fromHex("0195"))
     .bytes(fromHex("018d"))
+    // The zeros that pad the 4-byte tag and these 20 bytes to whole cipher blocks.
+    .bytes(new Uint8Array(8))
     .toBytes();
   const { time, series } = readAvgMinMax(body);
   assert.equal(time, 1_700_000_000);
