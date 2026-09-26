@@ -1791,7 +1791,8 @@ button.line:disabled,
   background: var(--bg);
   box-shadow: none;
 }
-.text-sample .bubble {
+.text-sample .bubble,
+.text-sample .jumbo {
   cursor: default;
 }
 .air-mark {

@@ -6,6 +6,7 @@ import { parseLatLon } from "../lib/geo.js";
 import { disconnect, useLink } from "../lib/link.js";
 import { setLookalikePrefs, useLookalikePrefs } from "../lib/lookalikes.js";
 import { setOpenAtUnread, useOpenAtUnread } from "../lib/firstUnread.js";
+import { setJumboEmoji, useJumboEmoji } from "../lib/jumboEmoji.js";
 import { SIGNALS, setNoticePrefs, useNoticePrefs, type Corner, type NoticePrefs } from "../lib/noticePrefs.js";
 import { askPermission, hasNoticeSettings, openNoticeSettings } from "../lib/notify.js";
 import { previewSignal } from "../lib/chime.js";
@@ -669,6 +670,7 @@ function AppearancePage() {
   const textSize = useSyncExternalStore(subscribeTextSize, getTextSizePreference);
   const scale = useSyncExternalStore(subscribeTextSize, getTextScale);
   const system = useSyncExternalStore(subscribeTextSize, getSystemTextScale);
+  const largeEmoji = useJumboEmoji();
   // The step nearest the size drawn now; the system's own size may fall between two.
   const step = TEXT_STEPS.reduce((best, s, i) => (Math.abs(s - scale) < Math.abs((TEXT_STEPS[best] ?? 1) - scale) ? i : best), 0);
   const percent = (s: number) => `${Math.round(s * 100)}%`;
@@ -746,7 +748,22 @@ function AppearancePage() {
               </div>
             </div>
           </div>
+          <div className="msg in">
+            <span className="msg-avatar">
+              <Avatar name="Ridge" size={28} />
+            </span>
+            <div className="msg-col">
+              <div className={largeEmoji ? "jumbo jumbo-1" : "bubble"}>
+                <SenderName name="Ridge" />
+                <span className="msg-text">👍</span>
+                <span className="msg-meta">
+                  <span>18:05</span>
+                </span>
+              </div>
+            </div>
+          </div>
         </Block>
+        <SwitchRow label={t("radio.appearance.largeEmoji")} hint={t("radio.appearance.largeEmojiHint")} checked={largeEmoji} onChange={setJumboEmoji} />
       </Group>
     </>
   );

@@ -154,6 +154,8 @@
   "appearance.phoneTextSize": "The phone's text size, {percent}",
   "appearance.sampleIn": "Anyone hearing me from the valley?",
   "appearance.sampleOut": "Loud and clear, two hops.",
+  "appearance.largeEmoji": "Large emoji",
+  "appearance.largeEmojiHint": "A message of only emoji, up to three, is drawn large, without a bubble.",
   "themes.amber": "Amber",
   "themes.apricot": "Apricot",
   "themes.berry": "Berry",

@@ -154,6 +154,8 @@
   "appearance.phoneTextSize": "Размер текста телефона, {percent}",
   "appearance.sampleIn": "Кто-нибудь слышит меня из долины?",
   "appearance.sampleOut": "Слышу отлично, два хопа.",
+  "appearance.largeEmoji": "Крупные эмодзи",
+  "appearance.largeEmojiHint": "Сообщение из одних эмодзи, до трёх, крупно и без пузыря.",
   "themes.amber": "Янтарь",
   "themes.apricot": "Абрикос",
   "themes.berry": "Ягода",

@@ -5,6 +5,7 @@ import { messagesIn, shownAt, titleOf } from "../lib/conversations.js";
 import { nameOfHash, relaysOf } from "../lib/echoes.js";
 import { getOpenAtUnread, takeUnread } from "../lib/firstUnread.js";
 import { agoPhrase, dayLabel, emojiOnly, timeOfDay } from "../lib/format.js";
+import { useJumboEmoji } from "../lib/jumboEmoji.js";
 import { openChannel, openMessage, openProfile } from "../lib/nav.js";
 import { heardAt, hopsLabel, kindLabel } from "../lib/nodes.js";
 import { openRoute } from "../lib/toolActions.js";
@@ -354,6 +355,7 @@ interface MessageProps {
 const Message = memo(function Message({ message, lead, showSender, avatar, me, onReply: replyTo, onWho, contacts }: MessageProps) {
   const out = message.direction === "out";
   const [busy, setBusy] = useState(false);
+  const large = useJumboEmoji();
   const onReply = replyTo ? () => replyTo(message) : undefined;
   const relays = out && contacts ? relaysOf(message.echoes, contacts) : [];
   const tech = techOf(message);
@@ -369,8 +371,9 @@ const Message = memo(function Message({ message, lead, showSender, avatar, me, o
   const bad = out && (message.status === "unheard" || (looping && !direct) || gaveUp);
   const retryable = out && (message.status === "unheard" || message.status === "unconfirmed" || message.status === "failed");
   const flood = retryable && session.retryFloods(message);
-  // One to three emoji and nothing else: large, with no bubble (#41). A red one keeps its bubble for the strip.
-  const jumbo = bad ? 0 : emojiOnly(message.text);
+  // One to three emoji and nothing else: large, with no bubble (#41), unless turned off in Appearance.
+  // A red one keeps its bubble for the strip.
+  const jumbo = bad || !large ? 0 : emojiOnly(message.text);
 
   const retry = async () => {
     setBusy(true);
