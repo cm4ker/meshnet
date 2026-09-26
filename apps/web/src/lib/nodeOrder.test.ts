@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ContactFlag, type ContactRecord, type SessionState } from "@meshnet/meshcore";
-import { nodeComparator, nodeGroups, orderInForce } from "./nodeOrder.js";
+import { nodeComparator, orderInForce, pinnedFirst } from "./nodeOrder.js";
 
 const NOW = 1_700_000_000_000;
 const MIN = 60_000;
@@ -69,25 +69,12 @@ const starred = contact(6, "Lena", 3, { flags: ContactFlag.Favourite });
 const roof = contact(7, "Roof", 4);
 const yours = (c: ContactRecord) => c.key === roof.key;
 
-test("pinned: yours, then favourites, then the rest", () => {
-  const rows = [zhenya, starred, roof, olga];
-  const groups = nodeGroups(rows, yours, true, "heard");
-  assert.deepEqual(
-    groups.map((g) => [g.title, names(g.rows)]),
-    [
-      ["Yours", ["Roof"]],
-      ["Favourites", ["Lena"]],
-      ["Heard recently", ["Zhenya", "Olga"]],
-    ],
-  );
+test("pinned: yours, then favourites, then the rest, each in the order given", () => {
+  assert.deepEqual(names(pinnedFirst([zhenya, starred, roof, olga], yours, true)), ["Roof", "Lena", "Zhenya", "Olga"]);
+  assert.deepEqual(names(pinnedFirst([olga, zhenya], yours, true)), ["Olga", "Zhenya"]);
 });
 
-test("the rest is Others in any order but last heard, and untitled alone", () => {
-  assert.equal(nodeGroups([starred, olga], yours, true, "name").at(-1)!.title, "Others");
-  assert.deepEqual(nodeGroups([olga, zhenya], yours, true, "heard"), [{ title: "", rows: [olga, zhenya] }]);
-});
-
-test("unpinned: one list in the order given", () => {
+test("unpinned: the list in the order given", () => {
   const rows = [zhenya, starred, roof, olga];
-  assert.deepEqual(nodeGroups(rows, yours, false, "heard"), [{ title: "", rows }]);
+  assert.deepEqual(pinnedFirst(rows, yours, false), rows);
 });

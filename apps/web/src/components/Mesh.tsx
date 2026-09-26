@@ -4,7 +4,7 @@
  * down to see the map; on a desktop it is the column beside the map.
  */
 
-import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AdvertLocPolicy, AdvType, isFavourite, type ContactRecord, type SessionState } from "@meshnet/meshcore";
 import { t, type Key } from "../i18n/index.js";
 import { useBackLayer } from "../lib/back.js";
@@ -19,7 +19,7 @@ import { contactEnd, defaultHeight, discoveryOverlay, EMPTY_OVERLAY, editOverlay
 import { useMeshTool, type LosEnd } from "../lib/meshTool.js";
 import { focusOnMap, openProfile, takeListLowered, useNav } from "../lib/nav.js";
 import { heardAt as heard, kindLabel } from "../lib/nodes.js";
-import { DEFAULT_NODE_ORDER, NODE_ORDERS, nodeComparator, nodeGroups, orderInForce, placed, setNodeOrder, useNodeOrder } from "../lib/nodeOrder.js";
+import { DEFAULT_NODE_ORDER, NODE_ORDERS, nodeComparator, orderInForce, pinnedFirst, placed, setNodeOrder, useNodeOrder } from "../lib/nodeOrder.js";
 import type { MenuAt } from "../lib/press.js";
 import { usePing, measuredLegs, spanKey } from "../lib/ping.js";
 import { routeWords } from "../lib/routes.js";
@@ -233,12 +233,11 @@ function FilterSheetHost() {
 /** What is changed from the usual, under the search, each taken off by its cross. */
 function ActiveFilters({ self }: { self: SessionState["self"] }) {
   const { kind } = useFilter();
-  const { order, pinned } = useNodeOrder();
+  const { order } = useNodeOrder();
   const shown = orderInForce(order, self);
   const chips: { id: string; label: string; clear: () => void }[] = [];
   if (kind !== "all") chips.push({ id: "kind", label: t(KINDS.find((k) => k.id === kind)!.label), clear: () => setFilter({ kind: "all" }) });
   if (shown !== DEFAULT_NODE_ORDER.order) chips.push({ id: "order", label: t(NODE_ORDERS.find((o) => o.id === shown)!.label), clear: () => setNodeOrder({ order: DEFAULT_NODE_ORDER.order }) });
-  if (pinned !== DEFAULT_NODE_ORDER.pinned) chips.push({ id: "pinned", label: t("mesh.filter.pinnedChip"), clear: () => setNodeOrder({ pinned: DEFAULT_NODE_ORDER.pinned }) });
   if (chips.length === 0) return null;
   return (
     <div className="chips" role="group" aria-label={t("mesh.filter.active")}>
@@ -271,34 +270,12 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
   const all = Object.values(state.contacts);
   const rows = all.filter(only ? (c) => only.includes(c.key) : matcher(state, saved, kind, query)).sort(nodeComparator(order, state.self));
   const mine = (c: ContactRecord) => isYours(state, saved, c);
-  const groups = nodeGroups(rows, mine, pinned, orderInForce(order, state.self));
+  const list = pinnedFirst(rows, mine, pinned);
   // Rows are memoised, so they get a stable opener and the minute their "5 min" is counted from.
   const openRef = useRef(onOpen);
   openRef.current = onOpen;
   const open = useCallback((key: string) => openRef.current(key), []);
   const minute = Math.floor(Date.now() / 60_000);
-
-  const group = (title: string, list: ContactRecord[]) => (
-    <Fragment key={title}>
-      <div className="list-group">{title}</div>
-      <ul className="list-rows" role="list">
-        {list.map((c) => (
-          <NodeRow
-            key={c.key}
-            contact={c}
-            selected={selected === c.key}
-            yours={mine(c)}
-            onOpen={open}
-            login={state.logins[c.key]}
-            last={state.statusHistory[c.key]?.at(-1)}
-            cell={cells[c.key]}
-            self={state.self}
-            minute={minute}
-          />
-        ))}
-      </ul>
-    </Fragment>
-  );
 
   return (
     <>
@@ -317,7 +294,22 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
         ) : (
           <>
             {only ? null : <MemoryStrip state={state} />}
-            {groups.map((g) => group(g.title, g.rows))}
+            <ul className="list-rows" role="list">
+              {list.map((c) => (
+                <NodeRow
+                  key={c.key}
+                  contact={c}
+                  selected={selected === c.key}
+                  yours={mine(c)}
+                  onOpen={open}
+                  login={state.logins[c.key]}
+                  last={state.statusHistory[c.key]?.at(-1)}
+                  cell={cells[c.key]}
+                  self={state.self}
+                  minute={minute}
+                />
+              ))}
+            </ul>
           </>
         )}
       </div>

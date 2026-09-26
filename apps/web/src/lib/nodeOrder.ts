@@ -1,14 +1,13 @@
 import { useSyncExternalStore } from "react";
 import { contactHops, isFavourite, type ContactRecord, type SessionState } from "@meshnet/meshcore";
-import { t, type Key } from "../i18n/index.js";
+import type { Key } from "../i18n/index.js";
 import { distanceKm, hasPosition } from "./geo.js";
 import { heardAt } from "./nodes.js";
 import { readSetting, writeSetting } from "./storage.js";
 
 /**
- * How the Mesh list is ordered, and whether yours and the starred keep their
- * own groups above the rest or fall in with everyone else. Kept on this
- * device, like the theme.
+ * How the Mesh list is ordered, and whether yours and the starred come first
+ * or fall in with everyone else. Kept on this device, like the theme.
  */
 
 export type NodeOrder = "heard" | "name" | "near" | "relays";
@@ -23,7 +22,7 @@ export const NODE_ORDERS: readonly { id: NodeOrder; label: Key }[] = [
 
 export interface NodeOrderPrefs {
   order: NodeOrder;
-  /** Yours and favourites in groups of their own, above the rest. */
+  /** Yours and favourites above the rest. */
   pinned: boolean;
 }
 
@@ -105,25 +104,13 @@ export function nodeComparator(order: NodeOrder, self: SessionState["self"]): (a
   }
 }
 
-export interface NodeGroup {
-  title: string;
-  rows: ContactRecord[];
-}
-
 /**
- * The list's groups: yours, the starred and the rest, each in the order; or,
- * with nothing pinned, one list. The rest is named for the order only when
- * something sits above it.
+ * With yours and favourites pinned: yours first, then the starred, then the
+ * rest, each still in the order and with no headings between them. Unpinned,
+ * the rows as they are.
  */
-export function nodeGroups(rows: ContactRecord[], yours: (c: ContactRecord) => boolean, pinned: boolean, order: NodeOrder): NodeGroup[] {
-  if (!pinned) return [{ title: "", rows }];
-  const mine = rows.filter(yours);
-  const starred = rows.filter((c) => !yours(c) && isFavourite(c));
-  const rest = rows.filter((c) => !yours(c) && !isFavourite(c));
-  const restTitle = mine.length || starred.length ? t(order === "heard" ? "mesh.list.heardRecently" : "mesh.list.others") : "";
-  return [
-    { title: t("mesh.list.yours"), rows: mine },
-    { title: t("mesh.list.favourites"), rows: starred },
-    { title: restTitle, rows: rest },
-  ].filter((g) => g.rows.length > 0);
+export function pinnedFirst(rows: ContactRecord[], yours: (c: ContactRecord) => boolean, pinned: boolean): ContactRecord[] {
+  if (!pinned) return rows;
+  const rank = (c: ContactRecord) => (yours(c) ? 0 : isFavourite(c) ? 1 : 2);
+  return [...rows].sort((a, b) => rank(a) - rank(b));
 }
