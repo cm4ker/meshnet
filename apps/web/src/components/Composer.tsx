@@ -13,6 +13,7 @@ import { AdvType, MAX_TEXT_LEN, parseConversation } from "@meshnet/meshcore";
 import { costOf, blockEdges, hasCyrillic, headerBytes, mentionOf, mentionQuery, pathBytes, quoteOf, segments, splitParts, translit } from "../lib/composer.js";
 import { messagesIn } from "../lib/conversations.js";
 import { getDraft, setDraft } from "../lib/drafts.js";
+import { raiseKeyboard } from "../lib/keyboard.js";
 import { utf8Length } from "../lib/format.js";
 import { packLookalikes, useLookalikePrefs } from "../lib/lookalikes.js";
 import { touchFirst } from "../lib/platform.js";
@@ -119,12 +120,18 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
     if (el.value.slice(0, was) !== line) replace(0, was, line);
     el.focus({ preventScroll: true });
     el.setSelectionRange(el.value.length, el.value.length);
+    raiseKeyboard();
   }, [reply]);
 
-  /** The reply let go: its quote goes with it, unless it has been written over. */
-  const dropReply = () => {
+  /**
+   * The reply let go: its quote goes with it, unless it has been written over. Let go from the
+   * keyboard (Esc), it goes as an edit Undo can take back. Its close button leaves the field's
+   * focus alone: on Android the field keeps the focus after Back has put the keyboard away, and
+   * an edit there brought the keyboard straight back up.
+   */
+  const dropReply = (typing = false) => {
     const el = field.current;
-    if (head && el && document.activeElement === el) {
+    if (head && el && typing) {
       // The caret stays where it was in what was written.
       const [from, to] = [el.selectionStart, el.selectionEnd].map((at) => Math.max(0, at - head.length));
       replace(0, head.length, "");
@@ -222,7 +229,7 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
     }
     if (e.key === "Escape" && reply) {
       e.preventDefault();
-      dropReply();
+      dropReply(true);
       return;
     }
     // A sent message cannot be edited on a mesh; the last one comes back to be corrected and sent again.
@@ -303,7 +310,7 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
               <b>{reply.name}</b>
             </span>
             <span className="compose-cost">{t("chats.composer.plusBytes", { bytes: utf8Length(mention) })}</span>
-            <button type="button" className="compose-bar-close" aria-label={t("chats.composer.cancelReply")} onMouseDown={(e) => e.preventDefault()} onClick={dropReply}>
+            <button type="button" className="compose-bar-close" aria-label={t("chats.composer.cancelReply")} onMouseDown={(e) => e.preventDefault()} onClick={() => dropReply()}>
               <CloseIcon size={14} />
             </button>
           </div>

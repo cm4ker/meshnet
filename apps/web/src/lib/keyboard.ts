@@ -1,3 +1,5 @@
+import { isCapacitor, nativePlatform } from "./platform.js";
+
 /**
  * On iOS the page follows the keyboard itself.
  *
@@ -61,6 +63,27 @@ export function watchKeyboard(): void {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") up(false);
   });
+}
+
+// Kept as it is, never handed to a promise: a plugin answers every name, `then` too, so a promise
+// resolved with it calls the native side for "then" and never settles.
+let keyboard: { show: () => Promise<void> } | null = null;
+
+/**
+ * Brings Android's keyboard up for the field that has just taken the focus.
+ * The web view raises it itself for a focus that follows a tap, but not always
+ * for one that follows a swipe: after the page had been loaded again from the
+ * native side, a reply swiped as the first touch got the caret and no
+ * keyboard. Elsewhere the focus is enough, and iOS has no such call.
+ */
+export function raiseKeyboard(): void {
+  if (!isCapacitor() || nativePlatform() !== "android" || !typing()) return;
+  void import("@capacitor/core")
+    .then(({ registerPlugin }) => {
+      keyboard ??= registerPlugin<{ show: () => Promise<void> }>("Keyboard");
+      return keyboard.show();
+    })
+    .catch(() => undefined);
 }
 
 /** Whether one of the page's own fields has the focus, so that the keyboard up is the page's. */
