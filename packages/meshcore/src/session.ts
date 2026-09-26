@@ -322,6 +322,12 @@ export interface SessionState {
   statuses: Record<string, NodeStatus>;
   /** A week of status answers per node, oldest first. */
   statusHistory: Record<string, StatusSample[]>;
+  /**
+   * A week of battery voltages per node from anything but a status answer: the voltage on a
+   * telemetry's channel 1, keyed like `telemetry`, and this radio's own battery as "self".
+   * One sample per ten minutes at most, oldest first.
+   */
+  batteryHistory: Record<string, BatterySample[]>;
   neighbours: Record<string, NeighbourList>;
   accessLists: Record<string, { entries: AccessRecord[]; at: number }>;
   ownerInfo: Record<string, OwnerInfo>;
@@ -350,6 +356,8 @@ export interface PersistedState {
   /** Absent in history saved before remote nodes were managed. */
   logins?: Record<string, NodeLogin>;
   statusHistory?: Record<string, StatusSample[]>;
+  /** Absent in history saved before battery readings were kept outside a status. */
+  batteryHistory?: Record<string, BatterySample[]>;
   /** Absent in history saved before routes could be pinned or timed out. */
   routing?: RoutingSettings;
 }
@@ -403,6 +411,20 @@ export interface DiscoverReply {
   /** How well this radio heard its answer, dB. */
   heardThem: number;
   rssi: number;
+  /** Local clock, ms. */
+  at: number;
+}
+
+/** One battery reading kept for a node's week. */
+export interface BatterySample {
+  at: number;
+  mv: number;
+}
+
+/** What the radio says about itself: its battery and how long it has been up. */
+export interface CoreStats {
+  batteryMv: number;
+  uptimeSecs: number;
   /** Local clock, ms. */
   at: number;
 }
@@ -611,8 +633,8 @@ function guessPathSince(lastMod: number, now: number): number {
 
 /** The part of the state that is kept per radio. */
 function historyOf(state: SessionState): PersistedState {
-  const { contacts, contactsCursor, removed, channels, messages, unread, logins, statusHistory, routing } = state;
-  return { contacts, contactsCursor, removed, channels, messages, unread, logins, statusHistory, routing };
+  const { contacts, contactsCursor, removed, channels, messages, unread, logins, statusHistory, batteryHistory, routing } = state;
+  return { contacts, contactsCursor, removed, channels, messages, unread, logins, statusHistory, batteryHistory, routing };
 }
 
 /** How long a removed contact is kept to be put back. */
@@ -687,6 +709,7 @@ const EMPTY: SessionState = {
   telemetry: {},
   statuses: {},
   statusHistory: {},
+  batteryHistory: {},
   neighbours: {},
   accessLists: {},
   ownerInfo: {},
@@ -746,8 +769,12 @@ const IN_ECHO_WINDOW_MS = 60 * 1000;
 const DM_MATCH_MS = 15 * 1000;
 
 /** How far back status answers are kept, and at most how many a node. */
+/** The telemetry channel a node reports itself on: its battery, its board, its GPS (TELEM_CHANNEL_SELF). */
+const TELEMETRY_SELF_CHANNEL = 1;
 const HISTORY_MS = 7 * 24 * 3600 * 1000;
 const HISTORY_LIMIT = 600;
+/** Readings closer together than this keep one sample, the latest value at the first one's time. */
+const BATTERY_SPACING_MS = 10 * 60 * 1000;
 
 /** The last this many console lines a node are kept. */
 const CONSOLE_LIMIT = 200;
@@ -897,6 +924,7 @@ export class MeshSession {
       "unread" in patch ||
       "logins" in patch ||
       "statusHistory" in patch ||
+      "batteryHistory" in patch ||
       "routing" in patch
     ) {
       this.scheduleSave();
@@ -1048,6 +1076,7 @@ export class MeshSession {
         unread: persisted?.unread ?? {},
         logins: persisted?.logins ?? {},
         statusHistory: persisted?.statusHistory ?? {},
+        batteryHistory: persisted?.batteryHistory ?? {},
         routing: persisted?.routing ?? EMPTY.routing,
       });
       this.log("link", `connected to ${self.name} (${device.firmwareVersion})`);
@@ -1126,7 +1155,7 @@ export class MeshSession {
       messages: () => this.syncMessages(),
       battery: async () => {
         const { batteryMv } = await client.getBattAndStorage();
-        this.set({ battery: { mv: batteryMv, at: this.now() } });
+        this.set({ battery: { mv: batteryMv, at: this.now() }, ...this.noteBattery("self", batteryMv) });
       },
     };
     for (const [index, step] of RESYNC_STEPS.entries()) {
@@ -2438,7 +2467,7 @@ export class MeshSession {
   async refreshBattery(): Promise<void> {
     try {
       const { batteryMv } = await this.need().getBattAndStorage();
-      this.set({ battery: { mv: batteryMv, at: this.now() } });
+      this.set({ battery: { mv: batteryMv, at: this.now() }, ...this.noteBattery("self", batteryMv) });
     } catch (error) {
       this.log("error", `battery: ${(error as Error).message}`);
     }
@@ -2576,6 +2605,13 @@ export class MeshSession {
     }
     this.log("discover", `${replies.size} repeater(s) answered`);
     return [...replies.values()];
+  }
+
+  /** The radio's own uptime and battery. Asked of the radio, not of the air. */
+  async coreStats(): Promise<CoreStats> {
+    const frame = await this.need().getStats(StatsType.Core);
+    if (frame.kind !== "statsCore") throw new Error(`core stats: the radio answered ${frame.kind}`);
+    return { batteryMv: frame.batteryMv, uptimeSecs: frame.uptimeSecs, at: this.now() };
   }
 
   /** The radio's own receiver: its noise floor, and how long it has been on the air. Asked of the radio, not of the air. */
@@ -2815,6 +2851,7 @@ export class MeshSession {
     this.set({
       logins: without(this.state.logins),
       statusHistory: without(this.state.statusHistory),
+      batteryHistory: without(this.state.batteryHistory),
       statuses: without(this.state.statuses),
       neighbours: without(this.state.neighbours),
       accessLists: without(this.state.accessLists),
@@ -2993,6 +3030,15 @@ export class MeshSession {
     this.publishRemote();
   }
 
+  /** A battery reading into its node's week: one sample per ten minutes, carrying the latest value. */
+  private noteBattery(key: string, mv: number): Partial<SessionState> {
+    const at = this.now();
+    const kept = (this.state.batteryHistory[key] ?? []).filter((s) => at - s.at < HISTORY_MS);
+    const last = kept.at(-1);
+    const history = last && at - last.at < BATTERY_SPACING_MS ? [...kept.slice(0, -1), { at: last.at, mv }] : [...kept, { at, mv }];
+    return { batteryHistory: { ...this.state.batteryHistory, [key]: history.slice(-HISTORY_LIMIT) } };
+  }
+
   private noteStatus(key: string, contact: ContactRecord | null, raw: Uint8Array): void {
     // The tail differs between a repeater and a room, and only the contact says which answered.
     const stats = contact ? readNodeStats(raw, contact.type === AdvType.Room ? "room" : "repeater") : null;
@@ -3130,7 +3176,11 @@ export class MeshSession {
         const prefix = toHex(frame.prefix);
         const contact = this.contactByPrefix(prefix);
         const key = this.state.self?.prefix === prefix ? "self" : (contact?.key ?? prefix);
-        this.set({ telemetry: { ...this.state.telemetry, [key]: { readings: frame.readings, at: this.now() } } });
+        const battery = frame.readings.find((r) => r.channel === TELEMETRY_SELF_CHANNEL && r.type === "voltage");
+        this.set({
+          telemetry: { ...this.state.telemetry, [key]: { readings: frame.readings, at: this.now() } },
+          ...(battery?.type === "voltage" ? this.noteBattery(key, Math.round(battery.volts * 1000)) : {}),
+        });
         this.log("telemetry", `${key === "self" ? "this radio" : (contact?.name ?? prefix)}: ${frame.readings.length} reading(s)`);
         if (key !== "self") this.remoteEvent({ kind: "telemetry", prefix, readings: frame.readings });
         return;

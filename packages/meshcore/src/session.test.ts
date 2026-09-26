@@ -1206,6 +1206,28 @@ test("remote requests wait their turn: the second goes out only after the first 
   assert.equal(session.getState().remote.active, null);
 });
 
+test("a telemetry answer's battery joins the node's week, once per ten minutes", async () => {
+  let now = 1_700_000_000_000;
+  const radio = new ScriptedRadio();
+  radio.contacts = [contactFrame(BOB, "Bob", 12)];
+  const session = new MeshSession({ now: () => now });
+  await session.connect(radio);
+  const answer = (centivolts: number) =>
+    new ByteWriter().u8(Push.TelemetryResponse).u8(0).bytes(BOB.subarray(0, 6)).bytes(new Uint8Array([1, 0x74, centivolts >> 8, centivolts & 0xff, 1, 0x67, 0x01, 0x18])).toBytes();
+  radio.push(answer(415));
+  await tick();
+  now += 5 * 60 * 1000;
+  radio.push(answer(412));
+  await tick();
+  now += 20 * 60 * 1000;
+  radio.push(answer(402));
+  await tick();
+  assert.deepEqual(session.getState().batteryHistory[bobKey()], [
+    { at: 1_700_000_000_000, mv: 4120 },
+    { at: 1_700_001_500_000, mv: 4020 },
+  ]);
+});
+
 test("a room's status tail is its post counts, not receive air time", async () => {
   const { radio, session } = await nodeSession();
   const status = session.requestStatus(ROOM_KEY);

@@ -36,7 +36,7 @@ import { showMenu } from "../ui/Menu.js";
 import { Sheet } from "../ui/Sheet.js";
 import { Avatar } from "./Avatar.js";
 import { ChartIcon, CloseIcon, CopyIcon, LocationIcon, SearchIcon, SlidersIcon, StarFilledIcon } from "./Icons.js";
-import { LOW_BATTERY_MV } from "./node/Status.js";
+import { LOW_BATTERY_MV } from "./NodeReadings.js";
 import { ToolPanel } from "./tools/ToolPanel.js";
 
 // Leaflet and its styles load with the map, not with the app.

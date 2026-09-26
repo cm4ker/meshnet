@@ -1,5 +1,5 @@
 import { useRef, useSyncExternalStore } from "react";
-import { batteryTypeLabel, useBatteryType } from "../lib/batteryType.js";
+import { useBatteryType } from "../lib/batteryType.js";
 import { t } from "../i18n/index.js";
 import { battery, batteryPercent } from "../lib/format.js";
 import { disconnect, useLink } from "../lib/link.js";
@@ -19,7 +19,7 @@ import { Button, IconButton } from "../ui/Button.js";
 import { Group, LinkRow } from "../ui/List.js";
 import { showMenu } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
-import { AirIcon, BatteryIcon, BellIcon, GaugeIcon, InfoIcon, LinkIcon, LocationIcon, LogIcon, PaletteIcon, PowerIcon, RadioIcon, RefreshIcon, ShieldIcon, SlidersIcon, TextIcon, UsersIcon, WavesIcon } from "./Icons.js";
+import { AirIcon, BellIcon, GaugeIcon, InfoIcon, LinkIcon, LocationIcon, LogIcon, PaletteIcon, PowerIcon, RadioIcon, RefreshIcon, ShieldIcon, SlidersIcon, TextIcon, UsersIcon, WavesIcon } from "./Icons.js";
 import { presetName, radioTitle } from "./RadioPages.js";
 import { readingsSummary } from "./Readings.js";
 
@@ -101,7 +101,7 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
                       : t("radio.home.online")}
               </span>
             </span>
-            <button type="button" className="radio-battery" disabled={!self} title={t("radio.titles.battery")} onClick={() => openRadioPage("battery")}>
+            <button type="button" className="radio-battery" disabled={!self} title={t("radio.titles.readings")} onClick={() => openRadioPage("readings")}>
               {state.battery ? (
                 <>
                   <b>{batteryPercent(state.battery.mv, cell)}%</b>
@@ -126,8 +126,7 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
         <Group title={t("radio.home.thisRadio")}>
           {row("name", <LocationIcon size={17} />, self?.name)}
           {row("frequency", <RadioIcon size={17} />, self ? t("radio.home.presetPower", { preset: presetName(self), tx: self.txPower }) : undefined)}
-          {row("battery", <BatteryIcon size={17} />, batteryTypeLabel(cell))}
-          {row("sensors", <GaugeIcon size={17} />, own ? readingsSummary(own.readings) : undefined)}
+          {row("readings", <GaugeIcon size={17} />, [state.battery ? `${batteryPercent(state.battery.mv, cell)}%` : null, own ? readingsSummary(own.readings) : null].filter(Boolean).join(" · ") || undefined)}
           {row("contacts", <UsersIcon size={17} />, contactsValue)}
           {row("privacy", <ShieldIcon size={17} />)}
           {row("advanced", <SlidersIcon size={17} />)}

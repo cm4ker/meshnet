@@ -867,6 +867,8 @@ class DemoRadio extends BaseTransport {
         return [new Uint8Array([Resp.Ok])];
       }
       case Cmd.GetStats:
+        // Core: its battery, two hours and a quarter up, no errors, nothing queued.
+        if (frame[1] === 0) return [new ByteWriter().u8(Resp.Stats).u8(0).u16(3980).u32(8040).u16(0).u8(0).toBytes()];
         if (frame[1] !== 1) return [new Uint8Array([Resp.Err, 1])];
         return [
           new ByteWriter()

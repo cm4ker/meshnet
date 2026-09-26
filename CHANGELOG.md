@@ -8,12 +8,15 @@
 - On a phone, a node tapped in the list or on the map opens its profile at once, as on a desktop. The card in between, with only a Profile button for a repeater, is gone. Back returns to the map with the node ringed and its route drawn, and "On map" lowers the list so the map has the room.
 - The Mesh list starts right under the search. What to show, the order, "Yours and favourites on top" and fetching every contact again sit behind the button beside the search, which carries a dot when something is changed; each change shows as a chip under the search, taken off by its cross. The list is one list by default. "Who hears me" is a button on the map.
 
-### Sensors
-- Radio › Sensors shows this radio's own readings. It reads them as it opens and every half minute while open, over the link and not over the air. Clock and sensors no longer share Advanced.
-- Readings come as a set of tiles for each channel: the radio itself (battery as a charge, the board's temperature, GPS), a power supply (its power first, then voltage and current), the air. Numbers are written the reader's way.
-- In a profile, "Ask for readings" becomes "Ask again" once there are some. A GPS reading says how far and which way, with a link to the map. Why a node may stay silent is said only after it has.
+### Readings
+- Every node shows how it is doing in one block, Readings, the same for this radio, a person, a repeater, a room and a sensor: the battery first, then for a repeater or a room the Noise, On air and Running tiles, then the radio itself (Board, Position), then a set of tiles for each sensor channel (a power supply shows its power first, as voltage times current). One Refresh asks what the node answers. The repeater's Status and Telemetry blocks are gone.
+- A repeater's or a room's Refresh asks its status; its board, position and sensors are one row of their own, "Board, position and sensors · Ask", with their own time once answered.
+- The battery reads as a charge. A tap on it picks the cell for that node, Li-ion/LiPo or LiFePO4; until someone picks, the charge is counted as Li-ion and said with "≈". The app keeps a week of battery readings for every node, not only repeaters, from the answers it was asked for, draws them as a line, and says "going down" when the week's fall shows.
+- Radio › Readings holds this radio's battery, noise, air time, uptime, board, position and sensors, read over the link as the page opens and every half minute while open. The Battery and Sensors rows are gone from Radio.
+- Numbers are written the reader's way, 3,38 in Russian, and a position says how far and which way, with a link to the map.
 
 ### Fixes
+- A current flowing back, such as a battery charging through an INA sensor, reads as negative. The firmware's CayenneLPP writes voltage and current signed, and the app read them unsigned, so -16 mA showed as 65.52 A and the power as 228 W.
 - On the desktop, a radio on USB whose board speaks through TinyUSB (the nRF52 ones: T-Echo, RAK) connects. The port opened with DTR off, and such a radio answers nothing until the computer raises it.
 - A sensor's power reads as its voltage times its current when the channel carries both, so 3.38 V at 119 mA shows 402 mW rather than 0 mW. The firmware sends power in whole watts. A sensor's History does the same with its means, and with its lows and highs for the range.
 

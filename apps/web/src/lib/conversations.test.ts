@@ -70,6 +70,7 @@ function state(messages: MessageRecord[]): SessionState {
     telemetry: {},
     statuses: {},
     statusHistory: {},
+    batteryHistory: {},
     neighbours: {},
     accessLists: {},
     ownerInfo: {},

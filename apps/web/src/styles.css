@@ -5724,3 +5724,46 @@ button.hop {
   color: var(--accent);
   font-size: inherit;
 }
+/* The battery's tile opens the cell it is counted by. */
+button.reading-tile.tap {
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  button.reading-tile.tap:hover {
+    background: color-mix(in oklab, var(--text) 9%, transparent);
+  }
+}
+.reading-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.reading-tile .spark {
+  max-width: none;
+  margin-top: 2px;
+}
+/* A repeater's telemetry, its own request: when it answered, and asking again. */
+.reading-part-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.reading-part-head .link {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: inherit;
+}
+.reading-part-head + .line-block.readings {
+  padding-top: var(--space-2);
+}
+.reading-more {
+  padding: 0 var(--space-3) var(--space-2);
+}

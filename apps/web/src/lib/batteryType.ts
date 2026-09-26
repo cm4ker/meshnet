@@ -4,10 +4,10 @@ import type { BatteryType } from "./format.js";
 import { readSetting, writeSetting } from "./storage.js";
 
 /**
- * What each radio's cell is made of (#26), by the radio's public key. The
- * radio reports only volts and the firmware has no setting for the cell, so
- * the app keeps it and turns the volts into a percent with it. Only a radio
- * other than Li-ion is written down.
+ * What each node's cell is made of (#26), by the node's public key. A node
+ * reports only volts and the firmware has no setting for the cell, so the
+ * app keeps it and turns the volts into a percent with it. A node nobody
+ * picked a cell for reads as Li-ion, and its charge is said with "≈".
  */
 
 const KEY = "meshnet.batteryTypes";
@@ -21,7 +21,7 @@ export const BATTERY_TYPES: { value: BatteryType; label: string; hint: Key }[] =
 function restore(saved: unknown): Record<string, BatteryType> {
   if (!saved || typeof saved !== "object") return {};
   const types: Record<string, BatteryType> = {};
-  for (const [key, type] of Object.entries(saved)) if (type === "lifepo4") types[key] = type;
+  for (const [key, type] of Object.entries(saved)) if (type === "lifepo4" || type === "liion") types[key] = type;
   return types;
 }
 
@@ -37,11 +37,8 @@ export function batteryTypeLabel(type: BatteryType): string {
 }
 
 export function setBatteryType(radioKey: string, type: BatteryType): void {
-  const next = { ...types };
-  if (type === "liion") delete next[radioKey];
-  else next[radioKey] = type;
-  types = next;
-  writeSetting(KEY, Object.keys(next).length > 0 ? next : null);
+  types = { ...types, [radioKey]: type };
+  writeSetting(KEY, types);
   for (const listener of listeners) listener();
 }
 
@@ -52,5 +49,16 @@ export function useBatteryType(radioKey: string | undefined): BatteryType {
       return () => listeners.delete(listener);
     },
     () => batteryType(radioKey),
+  );
+}
+
+/** The cell someone picked for this node, or null when nobody has. */
+export function useChosenBatteryType(radioKey: string | undefined): BatteryType | null {
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    () => (radioKey && types[radioKey]) || null,
   );
 }

@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { AclRole, AdvType, contactConversation, isConversationType, isFavourite, isNodeType, NoReplyError } from "@meshnet/meshcore";
-import { errorText } from "../i18n/errors.js";
 import { t, type Key } from "../i18n/index.js";
-import { ago, agoPhrase } from "../lib/format.js";
+import { agoPhrase } from "../lib/format.js";
 import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "../lib/geo.js";
 import { useWide } from "../lib/layout.js";
 import { openConversation, openNodePage, showOnMap, useNav, type NodePage } from "../lib/nav.js";
@@ -12,15 +11,14 @@ import { session, useSession } from "../lib/session.js";
 import { act, toast } from "../lib/toast.js";
 import { IconButton } from "../ui/Button.js";
 import { Confirm, Prompt } from "../ui/Dialog.js";
-import { ActionRow, Group, InfoRow, LinkRow } from "../ui/List.js";
+import { Group, InfoRow, LinkRow } from "../ui/List.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
 import { ChatNotices } from "./ChatNotices.js";
 import { AirIcon, ChartIcon, ChatIcon, CheckIcon, CopyIcon, EditIcon, LockIcon, MapIcon, MoreIcon, PowerIcon, ShieldIcon, SlidersIcon, StarFilledIcon, StarIcon, TerminalIcon, TrashIcon, UsersIcon, CloseIcon } from "./Icons.js";
-import { NodeStatus } from "./node/Status.js";
+import { NodeReadings } from "./NodeReadings.js";
 import { QueuePill } from "./node/QueuePill.js";
 import { SignIn } from "./node/SignIn.js";
-import { Readings } from "./Readings.js";
 import { NotOnRadio } from "./ContactsPages.js";
 import { Gone, ScreenHead, type Chrome } from "./ScreenHead.js";
 import { RouteLink } from "./tools/RouteSheet.js";
@@ -68,9 +66,6 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
   const mapBeside = wide && section === "mesh";
   const contact = state.contacts[contactKey];
   const [ask, setAsk] = useState<"rename" | "remove" | "forget" | "reboot" | "signin" | null>(null);
-  // The last ask for readings got no answer: then, and only then, what may keep them away.
-  const [silent, setSilent] = useState(false);
-  const [asking, setAsking] = useState(false);
   const online = state.status === "ready";
 
   if (!contact) {
@@ -114,7 +109,6 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
         ? ""
         : t("mesh.profile.noPosition");
   const heard = heardAt(contact) || null;
-  const telemetry = state.telemetry[key];
   const owner = state.ownerInfo[key];
 
   const cli = (command: string, done: string) => () =>
@@ -217,7 +211,7 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
 
         {isConversationType(contact.type) ? <ChatNotices conversation={contactConversation(key)} direct={contact.type !== AdvType.Room} /> : null}
 
-        {node && (managed || signedIn) ? <NodeStatus contact={contact} /> : null}
+        {!node || managed || signedIn ? <NodeReadings contact={contact} /> : null}
 
         {node ? (
           <Group title={t("mesh.profile.manage")} note={signedIn ? (admin ? undefined : t("mesh.profile.needAdmin")) : t("mesh.profile.signInToSee")}>
@@ -235,29 +229,7 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
               );
             })}
           </Group>
-        ) : (
-          <Group title={telemetry ? t("mesh.profile.readingsAgo", { time: ago(telemetry.at) }) : t("mesh.profile.readings")} note={silent ? t("mesh.profile.readingsSilent") : undefined}>
-            {telemetry ? <Readings readings={telemetry.readings} from={self} onMap={() => showOnMap(key, true)} /> : null}
-            <ActionRow
-              label={telemetry ? t("mesh.profile.readingsAgain") : t("mesh.profile.requestReadings")}
-              air
-              busy={asking}
-              disabled={!online || asking}
-              onClick={async () => {
-                setAsking(true);
-                try {
-                  await session.requestTelemetry(key);
-                  setSilent(false);
-                } catch (e) {
-                  if (e instanceof NoReplyError) setSilent(true);
-                  else toast(errorText(e), "error");
-                } finally {
-                  setAsking(false);
-                }
-              }}
-            />
-          </Group>
-        )}
+        ) : null}
 
         <Group title={t("mesh.profile.details")}>
           <LinkRow label={t("mesh.profile.publicKey")} value={<span className="mono">{key.slice(0, 16)}…</span>} trailing={<CopyIcon size={14} className="line-chev" />} onClick={() => void navigator.clipboard?.writeText(key).then(() => toast(t("common.copied")))} />

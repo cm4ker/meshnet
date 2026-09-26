@@ -1,8 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { AdvertLocPolicy, TelemMode, type SessionState } from "@meshnet/meshcore";
 import { autostartEnabled, autostartLabel, hasAutostart, setAutostart } from "../lib/autostart.js";
-import { agoPhrase, battery as volts, bandwidth, batteryPercent, dayLabel, frequency, timeOfDay } from "../lib/format.js";
-import { BATTERY_TYPES, setBatteryType, useBatteryType } from "../lib/batteryType.js";
+import { bandwidth, dayLabel, frequency, timeOfDay } from "../lib/format.js";
 import { parseLatLon } from "../lib/geo.js";
 import { disconnect, useLink } from "../lib/link.js";
 import { setLookalikePrefs, useLookalikePrefs } from "../lib/lookalikes.js";
@@ -15,7 +14,7 @@ import { nativePlatform, shell } from "../lib/platform.js";
 import { recentStops, relayAvailable, relayWanted, setRelayWanted, setSharing, useRelay, type AppStop } from "../lib/relay.js";
 import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
 import { SEND_TRIES_MAX, setSendTries, triesSpanMs, useSendTries } from "../lib/sendTries.js";
-import { session, storage, useSelector, useSession } from "../lib/session.js";
+import { session, storage, useSession } from "../lib/session.js";
 import { act, toast } from "../lib/toast.js";
 import { getActiveTheme, getPreference, listThemes, setPreference, subscribeTheme } from "../theme/store.js";
 import { getSystemTextScale, getTextScale, getTextSizePreference, hasSystemTextSize, setTextSizePreference, subscribeTextSize, TEXT_STEPS } from "../theme/textSize.js";
@@ -28,7 +27,7 @@ import { CopyIcon } from "./Icons.js";
 import { ContactsPage, RemovedPage } from "./ContactsPages.js";
 import { LogView } from "./LogView.js";
 import { AirView } from "./AirView.js";
-import { Readings } from "./Readings.js";
+import { OwnReadings } from "./NodeReadings.js";
 import { ScreenHead, type Chrome } from "./ScreenHead.js";
 import { UpdateButton } from "./Updates.js";
 import { useDesktopUpdateInfo } from "../lib/updates.js";
@@ -45,8 +44,7 @@ export const RADIO_PARENTS: Partial<Record<RadioPage, RadioPage>> = { removed: "
 export const RADIO_TITLES: Record<RadioPage, Key> = {
   name: "radio.titles.name",
   frequency: "radio.titles.frequency",
-  battery: "radio.titles.battery",
-  sensors: "radio.titles.sensors",
+  readings: "radio.titles.readings",
   privacy: "radio.titles.privacy",
   contacts: "radio.titles.contacts",
   removed: "radio.titles.removed",
@@ -195,10 +193,8 @@ function PageBody({ page }: { page: RadioPage }) {
       return self ? <NamePage self={self} online={online} /> : <Offline />;
     case "frequency":
       return self ? <FrequencyPage self={self} online={online} /> : <Offline />;
-    case "battery":
-      return self ? <BatteryPage radioKey={self.key} online={online} /> : <Offline />;
-    case "sensors":
-      return self ? <SensorsPage self={self} online={online} /> : <Offline />;
+    case "readings":
+      return self ? <OwnReadings /> : <Offline />;
     case "privacy":
       return self ? (
         <>
@@ -398,72 +394,6 @@ function FrequencyPage({ self, online }: { self: Self; online: boolean }) {
  * only volts, so the type is what makes them a percent. Each type shows the
  * percent it would give now, so the one that looks right is plain to see.
  */
-function BatteryPage({ radioKey, online }: { radioKey: string; online: boolean }) {
-  const reading = useSelector((state) => state.battery);
-  const type = useBatteryType(radioKey);
-  // The choice is judged by the reading, so it is taken afresh.
-  useEffect(() => {
-    if (online) void session.refreshBattery();
-  }, [online]);
-  return (
-    <>
-      <Group>
-        <Block className="battery-now">
-          <span className="battery-now-text">
-            <b>{reading ? `${batteryPercent(reading.mv, type)}%` : "—"}</b>
-            <small>{reading ? t("radio.battery.read", { volts: volts(reading.mv), ago: agoPhrase(reading.at) }) : t("radio.battery.notRead")}</small>
-          </span>
-          <Button size="sm" disabled={!online} onClick={() => void session.refreshBattery()}>
-            {t("radio.battery.readAgain")}
-          </Button>
-        </Block>
-      </Group>
-      <Group title={t("radio.battery.type")} note={t("radio.battery.typeNote")}>
-        {BATTERY_TYPES.map((b) => (
-          <ChoiceRow key={b.value} label={b.label} hint={t(b.hint)} value={reading ? `${batteryPercent(reading.mv, b.value)}%` : undefined} checked={type === b.value} onSelect={() => setBatteryType(radioKey, b.value)} />
-        ))}
-      </Group>
-    </>
-  );
-}
-
-/** How often the sensors page asks the radio again while it is open. */
-const SENSORS_EVERY_MS = 30_000;
-
-/**
- * The radio's own sensors: its battery, its board, its GPS and whatever is wired to it. Asked of
- * the radio over its link, not of the air, so the page asks as it opens and again every half
- * minute while it stays open.
- */
-function SensorsPage({ self, online }: { self: Self; online: boolean }) {
-  const state = useSession();
-  const own = state.telemetry["self"];
-  const cell = useBatteryType(self.key);
-  useEffect(() => {
-    if (!online) return;
-    const read = () => void session.requestTelemetry().catch(() => undefined);
-    read();
-    const timer = window.setInterval(read, SENSORS_EVERY_MS);
-    return () => window.clearInterval(timer);
-  }, [online]);
-  const mode = (value: number) => telemetryOptions().find((o) => o.value === String(value))?.label.toLowerCase() ?? String(value);
-  return (
-    <>
-      <Group note={own ? t("radio.sensors.read", { time: agoPhrase(own.at) }) : t("radio.sensors.reading")}>
-        {own ? <Readings readings={own.readings} cell={cell} onCopy={(text) => void navigator.clipboard?.writeText(text).then(() => toast(t("common.copied")))} /> : null}
-        <ActionRow label={t("radio.sensors.again")} disabled={!online} onClick={() => void act(() => session.requestTelemetry())} />
-      </Group>
-      <Group>
-        <LinkRow
-          label={t("radio.sensors.who")}
-          hint={t("radio.sensors.whoValue", { battery: mode(self.telemetryModeBase), location: mode(self.telemetryModeLocation), sensors: mode(self.telemetryModeEnvironment) })}
-          onClick={() => push({ kind: "radio", page: "privacy" })}
-        />
-      </Group>
-    </>
-  );
-}
-
 function AdvancedPage({ self, online }: { self: Self; online: boolean }) {
   const state = useSession();
   const device = state.device;

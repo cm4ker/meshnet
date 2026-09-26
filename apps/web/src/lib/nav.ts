@@ -17,7 +17,7 @@ export type Section = "chats" | "mesh" | "radio";
 export type NodePage = "neighbours" | "history" | "settings" | "access" | "console";
 
 /** The radio section's pages. */
-export type RadioPage = "name" | "frequency" | "battery" | "sensors" | "privacy" | "contacts" | "removed" | "advanced" | "notifications" | "sound" | "messages" | "appearance" | "connection" | "air" | "log" | "power" | "about";
+export type RadioPage = "name" | "frequency" | "readings" | "privacy" | "contacts" | "removed" | "advanced" | "notifications" | "sound" | "messages" | "appearance" | "connection" | "air" | "log" | "power" | "about";
 
 export type Screen =
   | { kind: "chat"; conversation: string }
@@ -52,8 +52,12 @@ function restore(saved: unknown): Nav {
   const value = saved as Partial<Nav>;
   if (value.stacks && SECTIONS.includes(value.section as Section)) {
     const stacks = { ...EMPTY.stacks };
-    // A route was a screen of its own before it moved to the map.
-    for (const s of SECTIONS) if (Array.isArray(value.stacks[s])) stacks[s] = value.stacks[s].filter((x) => x && typeof x === "object" && "kind" in x && (x as { kind: string }).kind !== "route");
+    // A route was a screen of its own before it moved to the map; Battery and Sensors became Readings.
+    for (const s of SECTIONS)
+      if (Array.isArray(value.stacks[s]))
+        stacks[s] = value.stacks[s]
+          .filter((x) => x && typeof x === "object" && "kind" in x && (x as { kind: string }).kind !== "route")
+          .map((x) => (x.kind === "radio" && ((x.page as string) === "battery" || (x.page as string) === "sensors") ? { kind: "radio", page: "readings" } : x));
     return { section: value.section as Section, stacks, meshFocus: typeof value.meshFocus === "string" ? value.meshFocus : null };
   }
   // Seven sections became three: Contacts, Map and Nodes are Mesh; Settings and Log are Radio.
