@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { LppReading, SeriesSummary } from "@meshnet/meshcore";
-import { batteryPercent, lowCharge, powerSummary, powerWatts, trailingEmoji } from "./format.js";
+import { batteryPercent, emojiOnly, lowCharge, powerSummary, powerWatts, trailingEmoji } from "./format.js";
 
 test("the emoji a name ends with goes on its circle", () => {
   assert.equal(trailingEmoji("Fox 🦊"), "🦊");
@@ -17,6 +17,22 @@ test("a name ending in a letter, a digit or a text symbol has no emoji", () => {
   assert.equal(trailingEmoji("Node-21"), null);
   assert.equal(trailingEmoji("Acme ©"), null);
   assert.equal(trailingEmoji(""), null);
+});
+
+test("a message of one to three emoji and nothing else is drawn large (#41)", () => {
+  assert.equal(emojiOnly("👋"), 1);
+  assert.equal(emojiOnly(" 👋🏽 "), 1);
+  assert.equal(emojiOnly("🇩🇪 ❤️"), 2);
+  assert.equal(emojiOnly("👨‍👩‍👧👍1️⃣"), 3);
+});
+
+test("text, a digit, a text symbol or a fourth emoji keeps the bubble", () => {
+  assert.equal(emojiOnly("hi 👋"), 0);
+  assert.equal(emojiOnly("1"), 0);
+  assert.equal(emojiOnly("©"), 0);
+  assert.equal(emojiOnly("👋👋👋👋"), 0);
+  assert.equal(emojiOnly(""), 0);
+  assert.equal(emojiOnly("  "), 0);
 });
 
 test("a LiFePO4 cell near full reads near full, not nearly empty (#26)", () => {

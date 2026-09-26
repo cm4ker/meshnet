@@ -4,7 +4,7 @@ import { GEO, MENTION } from "../lib/composer.js";
 import { messagesIn, shownAt, titleOf } from "../lib/conversations.js";
 import { nameOfHash, relaysOf } from "../lib/echoes.js";
 import { getOpenAtUnread, takeUnread } from "../lib/firstUnread.js";
-import { agoPhrase, dayLabel, timeOfDay } from "../lib/format.js";
+import { agoPhrase, dayLabel, emojiOnly, timeOfDay } from "../lib/format.js";
 import { openChannel, openMessage, openProfile } from "../lib/nav.js";
 import { heardAt, hopsLabel, kindLabel } from "../lib/nodes.js";
 import { openRoute } from "../lib/toolActions.js";
@@ -369,6 +369,8 @@ const Message = memo(function Message({ message, lead, showSender, avatar, me, o
   const bad = out && (message.status === "unheard" || (looping && !direct) || gaveUp);
   const retryable = out && (message.status === "unheard" || message.status === "unconfirmed" || message.status === "failed");
   const flood = retryable && session.retryFloods(message);
+  // One to three emoji and nothing else: large, with no bubble (#41). A red one keeps its bubble for the strip.
+  const jumbo = bad ? 0 : emojiOnly(message.text);
 
   const retry = async () => {
     setBusy(true);
@@ -430,7 +432,7 @@ const Message = memo(function Message({ message, lead, showSender, avatar, me, o
         <div
           role="button"
           tabIndex={0}
-          className={["bubble", bad ? "bad" : ""].join(" ")}
+          className={jumbo ? `jumbo jumbo-${jumbo}` : ["bubble", bad ? "bad" : ""].join(" ")}
           onClick={() => {
             // A click that ends a text selection is not a tap.
             if (String(window.getSelection?.() ?? "").length > 0) return;

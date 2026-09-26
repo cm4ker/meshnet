@@ -84,8 +84,28 @@ export function trailingEmoji(name: string): string | null {
   if (!text || !graphemes) return null;
   let last = "";
   for (const { segment } of graphemes.segment(text)) last = segment;
-  if (/\p{Regional_Indicator}/u.test(last)) return last;
-  return /\p{Extended_Pictographic}/u.test(last) && (/\p{Emoji_Presentation}/u.test(last) || last.includes("\uFE0F")) ? last : null;
+  return isEmoji(last) ? last : null;
+}
+
+/** One grapheme drawn as an emoji: a flag, a keycap, or a picture that is not text by default. */
+function isEmoji(segment: string): boolean {
+  if (/\p{Regional_Indicator}/u.test(segment) || segment.includes("\u20E3")) return true;
+  return /\p{Extended_Pictographic}/u.test(segment) && (/\p{Emoji_Presentation}/u.test(segment) || segment.includes("\uFE0F"));
+}
+
+/**
+ * How many emoji a message is when it is nothing else, one to three, as a
+ * chat draws those large without a bubble (#41); 0 for anything with a
+ * letter, a digit or a fourth emoji in it. Spaces between them do not count.
+ */
+export function emojiOnly(text: string): number {
+  if (!graphemes) return 0;
+  let count = 0;
+  for (const { segment } of graphemes.segment(text)) {
+    if (/^\s+$/u.test(segment)) continue;
+    if (!isEmoji(segment) || ++count > 3) return 0;
+  }
+  return count;
 }
 
 /** A stable hue from a name, for the swatch behind its initials. */

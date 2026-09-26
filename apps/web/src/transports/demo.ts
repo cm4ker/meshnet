@@ -212,6 +212,7 @@ const LINES = [
   "Got the sensor node reporting again",
   "SNR to the tower is great from here",
   "Ping me when you're in range",
+  "👍",
 ];
 
 /** What the demo's repeater, room and sensor answer `get` with, and change on `set`. */
@@ -330,7 +331,7 @@ class DemoRadio extends BaseTransport {
 
   start(): void {
     // Queued before the app connected: their packets were never heard, so their routes are unknown.
-    this.queue.push(this.dm(PEOPLE[0]!, "Welcome to the demo mesh 👋"), this.channel(0, "Bob (bike)", "Public channel works too"));
+    this.queue.push(this.dm(PEOPLE[0]!, "Welcome to the demo mesh"), this.dm(PEOPLE[0]!, "👋"), this.channel(0, "Bob (bike)", "Public channel works too"));
     this.chatter = setInterval(() => void this.chat(), 25_000);
     this.murmur = setInterval(() => this.overhear(), 3_500);
     // The town's floods: every link once at first, so there is something to look through from the start.

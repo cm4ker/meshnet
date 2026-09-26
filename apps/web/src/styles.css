@@ -2829,6 +2829,46 @@ html.notices-window #root {
 .bubble:focus-visible {
   outline: 2px solid var(--accent);
 }
+/* One to three emoji and nothing else (#41): large on the chat's own ground, no bubble, the time on a patch of its own under them. */
+.jumbo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 100%;
+  color: var(--text);
+  cursor: pointer;
+  -webkit-touch-callout: none;
+}
+.msg.out .jumbo {
+  align-items: flex-end;
+}
+.app.narrow .jumbo {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.jumbo:focus-visible {
+  outline: 2px solid var(--accent);
+  border-radius: 12px;
+}
+.jumbo .msg-text {
+  font-size: calc(72px * var(--text-scale));
+  line-height: 1;
+  white-space: nowrap;
+}
+.jumbo-2 .msg-text {
+  font-size: calc(56px * var(--text-scale));
+}
+.jumbo-3 .msg-text {
+  font-size: calc(44px * var(--text-scale));
+}
+.jumbo .msg-meta {
+  float: none;
+  align-self: flex-end;
+  margin: 2px 0 0;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--panel);
+}
 .msg-sender {
   display: block;
   font-size: var(--text-xs);

@@ -10,6 +10,9 @@
 ### Settings
 - The Radio tab is called Settings, with a gear. The paths to its pages and the command palette say Settings too.
 
+### Chats
+- A message of one to three emoji and nothing else is drawn large, without a bubble, with its time on a small patch under it.
+
 ### Connecting
 - The connect screen puts one radio at the top: the one being connected to, or else the last one. Its card shows the name, the way and the address, Connect, and the switch to connect at launch. While the radio connects, the card says which try it is and which step it has reached (the link, the radio answering, contacts and channels), and Cancel stops it, the connect at launch included. A radio that asks for a PIN gets the field in the card. A failure is one line with what to check and Try again; the rest of the message is behind Details.
 - The search under the tabs runs by itself and pauses while a radio connects, so only one thing moves on the screen. Radios come first, the strongest on top. Phones sharing a radio, and ports that are not a radio's cable, fold under "N more". Names lose "MeshCore-", and the second line is the address.
