@@ -5,7 +5,7 @@ import { addressDevice, autoConnectWanted, connectors, lastLink, needsPairing, s
 import { Button } from "../ui/Button.js";
 import { Prompt } from "../ui/Dialog.js";
 import { Input, Toggle } from "../ui/Field.js";
-import { LinkIcon } from "./Icons.js";
+import { LinkIcon, PlayIcon } from "./Icons.js";
 import { UpdateButton } from "./Updates.js";
 import { PrivacyButton } from "./Privacy.js";
 import { t } from "../i18n/index.js";
@@ -46,7 +46,8 @@ export function ConnectView() {
                     className={active?.id === c.id ? "on" : ""}
                     onClick={() => setActive(c)}
                   >
-                    <LinkIcon kind={c.kind} />
+                    {/* The pretend radio is not a way to reach one: a Bluetooth mark here hid it from App Review. */}
+                    {c.id === "demo" ? <PlayIcon size={16} /> : <LinkIcon kind={c.kind} />}
                     {c.title}
                   </button>
                 ))}

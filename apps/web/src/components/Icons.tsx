@@ -44,6 +44,7 @@ export const StarIcon = icon('<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1.1 5.9L12 
 export const StarFilledIcon = icon('<path fill="currentColor" d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1.1 5.9L12 16.9l-5.3 2.8 1.1-5.9-4.3-4.1 5.9-.8z"/>');
 export const RefreshIcon = icon('<path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/>');
 export const StopIcon = icon('<rect x="7" y="7" width="10" height="10" rx="1.5"/>');
+export const PlayIcon = icon('<path d="M8 5.5v13l10.5-6.5z"/>');
 export const CloseIcon = icon('<path d="M6 6l12 12M18 6L6 18"/>');
 export const ReplyIcon = icon('<path d="M9.5 15L4 9.5 9.5 4"/><path d="M4 9.5h10a6 6 0 0 1 6 6V20"/>');
 export const CheckIcon = icon('<path d="M5 12.5l4.5 4.5L19 7"/>');
