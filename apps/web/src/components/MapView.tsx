@@ -26,7 +26,7 @@ import type { MenuAt } from "../lib/press.js";
 import { useSession } from "../lib/session.js";
 import { TILE_URL, tileAttribution, tileBlob } from "../lib/tiles.js";
 import { IconButton } from "../ui/Button.js";
-import { FitIcon, GroupIcon, LocateIcon, MinusIcon, PlusIcon } from "./Icons.js";
+import { FitIcon, GroupIcon, LocateIcon, MinusIcon, PlusIcon, WavesIcon } from "./Icons.js";
 
 function darkTheme(): boolean {
   return document.documentElement.dataset["appearance"] === "dark";
@@ -121,6 +121,9 @@ export interface MapProps {
   onHold?: ((lat: number, lon: number, at: MenuAt) => void) | undefined;
   /** A point of a route dragged onto a node: its key, or "self" for this radio. */
   onHandleDrop?: ((handle: MapHandle, onto: string) => void) | undefined;
+  /** "Who hears me" asked from its button over the map, and whether its answers are on the map now. */
+  onHears?: (() => void) | undefined;
+  hearsOn?: boolean | undefined;
   /** Points to bring into view together, once for each `id`: a repeater and its neighbours. */
   fit?: { id: string; points: [number, number][] } | null | undefined;
 }
@@ -142,7 +145,7 @@ function groupingWanted(): boolean {
 /** Where the map was left, so coming back to it, from a profile or another section, finds it there. */
 let lastView: { center: L.LatLng; zoom: number } | null = null;
 
-export default function MapView({ selected, onSelect, onGroup, filter, coverBottom = 0, coverTop = 0, zoomButtons = false, overlay = EMPTY_OVERLAY, onLeg, onHold, onHandleDrop, fit = null }: MapProps) {
+export default function MapView({ selected, onSelect, onGroup, filter, coverBottom = 0, coverTop = 0, zoomButtons = false, overlay = EMPTY_OVERLAY, onLeg, onHold, onHandleDrop, onHears, hearsOn = false, fit = null }: MapProps) {
   const state = useSession();
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
@@ -529,6 +532,11 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
         >
           <GroupIcon size={18} />
         </IconButton>
+        {onHears ? (
+          <IconButton label={t("mesh.whoHearsMe")} className={hearsOn ? "on" : ""} aria-pressed={hearsOn} disabled={state.status !== "ready" && !hearsOn} onClick={onHears}>
+            <WavesIcon size={18} />
+          </IconButton>
+        ) : null}
         <IconButton label={t("mesh.map.showAll")} onClick={fitAll}>
           <FitIcon size={18} />
         </IconButton>

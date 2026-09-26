@@ -18,7 +18,7 @@ import { contactEnd, defaultHeight, discoveryOverlay, EMPTY_OVERLAY, editOverlay
 import { useMeshTool, type LosEnd } from "../lib/meshTool.js";
 import { focusOnMap, openProfile, takeListLowered, useNav } from "../lib/nav.js";
 import { heardAt as heard, kindLabel } from "../lib/nodes.js";
-import { getNodeOrder, NODE_ORDERS, nodeComparator, nodeGroups, orderInForce, placed, setNodeOrder, useNodeOrder } from "../lib/nodeOrder.js";
+import { DEFAULT_NODE_ORDER, NODE_ORDERS, nodeComparator, nodeGroups, orderInForce, placed, setNodeOrder, useNodeOrder } from "../lib/nodeOrder.js";
 import type { MenuAt } from "../lib/press.js";
 import { usePing, measuredLegs, spanKey } from "../lib/ping.js";
 import { routeWords } from "../lib/routes.js";
@@ -31,10 +31,11 @@ import { isComplete, neighbourRows } from "../lib/neighbours.js";
 import { closeTool, dropOnRoute, lineOfSightTo, openLineOfSight, openNeighbourLink, tapInNeighbours, tapInRoute, tapInSpan, whoHearsMe } from "../lib/toolActions.js";
 import { getTextScale, subscribeTextSize } from "../theme/textSize.js";
 import { IconButton } from "../ui/Button.js";
-import { AirMark } from "../ui/List.js";
+import { ActionRow, Block, Group, SwitchRow } from "../ui/List.js";
 import { showMenu } from "../ui/Menu.js";
+import { Sheet } from "../ui/Sheet.js";
 import { Avatar } from "./Avatar.js";
-import { ChartIcon, ChevronDownIcon, CloseIcon, CopyIcon, LocationIcon, RefreshIcon, SearchIcon, SortIcon, StarFilledIcon, WavesIcon } from "./Icons.js";
+import { ChartIcon, CloseIcon, CopyIcon, LocationIcon, SearchIcon, SlidersIcon, StarFilledIcon } from "./Icons.js";
 import { LOW_BATTERY_MV } from "./node/Status.js";
 import { ToolPanel } from "./tools/ToolPanel.js";
 
@@ -67,6 +68,24 @@ function useFilter() {
       return () => filterListeners.delete(listener);
     },
     () => filter,
+  );
+}
+
+// Whether the filter's sheet is open: its button sits in the phone's sheet head, whose drag must not see the sheet's
+// own touches, so the sheet is drawn elsewhere, by FilterSheetHost.
+let filterOpen = false;
+const filterOpenListeners = new Set<() => void>();
+function setFilterOpen(open: boolean): void {
+  filterOpen = open;
+  for (const listener of filterOpenListeners) listener();
+}
+function useFilterOpen(): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      filterOpenListeners.add(listener);
+      return () => filterOpenListeners.delete(listener);
+    },
+    () => filterOpen,
   );
 }
 
@@ -116,6 +135,7 @@ export function MeshList({ selected, onOpen, head = true, only }: { selected: st
     <div className="list-pane">
       {head ? <MeshListHead /> : null}
       <MeshListBody selected={selected} onOpen={onOpen} only={only} hideSearch={!!only} />
+      {only ? null : <FilterSheetHost />}
     </div>
   );
 }
@@ -124,26 +144,109 @@ export function MeshListHead() {
   return (
     <header className="list-head">
       <h1>{t("mesh.title")}</h1>
-      <FetchButton />
     </header>
   );
 }
 
-function FetchButton() {
-  const online = useSession().status === "ready";
-  const [busy, setBusy] = useState(false);
+/** Whether the list shows anything but everyone, by last heard, in one list. */
+function useFilterChanged(): boolean {
+  const { kind } = useFilter();
+  const { order, pinned } = useNodeOrder();
+  return kind !== "all" || order !== DEFAULT_NODE_ORDER.order || pinned !== DEFAULT_NODE_ORDER.pinned;
+}
+
+function resetFilter(): void {
+  setFilter({ kind: "all" });
+  setNodeOrder(DEFAULT_NODE_ORDER);
+}
+
+/** Beside the search: what the list shows and in what order, wanted rarely. A dot says something is changed. */
+function FilterButton() {
+  const changed = useFilterChanged();
   return (
-    <IconButton
-      label={t("mesh.fetch")}
-      disabled={busy || !online}
-      onClick={async () => {
-        setBusy(true);
-        await act(() => session.refreshContacts(true), t("mesh.fetched"));
-        setBusy(false);
-      }}
-    >
-      <RefreshIcon size={17} className={busy ? "spin" : ""} />
+    <IconButton label={t("mesh.filter.title")} className={["filter-btn", changed ? "on" : ""].join(" ")} aria-haspopup="dialog" onClick={() => setFilterOpen(true)}>
+      <SlidersIcon size={17} />
+      {changed ? <span className="filter-dot" aria-hidden="true" /> : null}
     </IconButton>
+  );
+}
+
+/** Which nodes, in what order, yours and favourites in groups of their own or not, and every contact fetched again. */
+function FilterSheetHost() {
+  const open = useFilterOpen();
+  const onClose = () => setFilterOpen(false);
+  const state = useSession();
+  const { kind } = useFilter();
+  const { order, pinned } = useNodeOrder();
+  const changed = useFilterChanged();
+  const [busy, setBusy] = useState(false);
+  const lost = !placed(state.self);
+  const shown = orderInForce(order, state.self);
+  const all = Object.values(state.contacts);
+  const unplaced = all.filter((c) => !hasPosition(c.lat, c.lon)).length;
+  const count = t("mesh.list.count", { count: all.length }) + (unplaced ? ` · ${t("mesh.list.unplaced", { count: unplaced })}` : "");
+  return (
+    <Sheet open={open} onClose={onClose} title={t("mesh.filter.title")}>
+      <Group title={t("mesh.filter.show")}>
+        <Block className="filter-grid">
+          {KINDS.map((k) => (
+            <button key={k.id} type="button" className={["chip", kind === k.id ? "on" : ""].join(" ")} aria-pressed={kind === k.id} onClick={() => setFilter({ kind: k.id })}>
+              {t(k.label)}
+            </button>
+          ))}
+        </Block>
+      </Group>
+      <Group title={t("mesh.filter.order")}>
+        <Block className="filter-grid pairs">
+          {NODE_ORDERS.map((o) => {
+            const off = o.id === "near" && lost;
+            return (
+              <button key={o.id} type="button" className={["chip", shown === o.id ? "on" : ""].join(" ")} aria-pressed={shown === o.id} disabled={off} title={off ? t("mesh.sort.noPosition") : undefined} onClick={() => setNodeOrder({ order: o.id })}>
+                {t(o.label)}
+              </button>
+            );
+          })}
+        </Block>
+      </Group>
+      <Group>
+        <SwitchRow label={t("mesh.sort.pinned")} hint={pinned ? t("mesh.sort.pinnedOn") : t("mesh.sort.pinnedOff")} checked={pinned} onChange={(next) => setNodeOrder({ pinned: next })} />
+      </Group>
+      <Group note={count}>
+        <ActionRow
+          label={t("mesh.fetch")}
+          busy={busy}
+          disabled={busy || state.status !== "ready"}
+          onClick={async () => {
+            setBusy(true);
+            await act(() => session.refreshContacts(true), t("mesh.fetched"));
+            setBusy(false);
+          }}
+        />
+        {changed ? <ActionRow label={t("mesh.filter.reset")} onClick={resetFilter} /> : null}
+      </Group>
+    </Sheet>
+  );
+}
+
+/** What is changed from the usual, under the search, each taken off by its cross. */
+function ActiveFilters({ self }: { self: SessionState["self"] }) {
+  const { kind } = useFilter();
+  const { order, pinned } = useNodeOrder();
+  const shown = orderInForce(order, self);
+  const chips: { id: string; label: string; clear: () => void }[] = [];
+  if (kind !== "all") chips.push({ id: "kind", label: t(KINDS.find((k) => k.id === kind)!.label), clear: () => setFilter({ kind: "all" }) });
+  if (shown !== DEFAULT_NODE_ORDER.order) chips.push({ id: "order", label: t(NODE_ORDERS.find((o) => o.id === shown)!.label), clear: () => setNodeOrder({ order: DEFAULT_NODE_ORDER.order }) });
+  if (pinned !== DEFAULT_NODE_ORDER.pinned) chips.push({ id: "pinned", label: t("mesh.filter.pinnedChip"), clear: () => setNodeOrder({ pinned: DEFAULT_NODE_ORDER.pinned }) });
+  if (chips.length === 0) return null;
+  return (
+    <div className="chips" role="group" aria-label={t("mesh.filter.active")}>
+      {chips.map((c) => (
+        <button key={c.id} type="button" className="chip on chip-clear" aria-label={t("mesh.filter.remove", { name: c.label })} onClick={c.clear}>
+          {c.label}
+          <CloseIcon size={12} />
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -166,7 +269,6 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
   const rows = all.filter(only ? (c) => only.includes(c.key) : matcher(state, saved, kind, query)).sort(nodeComparator(order, state.self));
   const mine = (c: ContactRecord) => isYours(state, saved, c);
   const groups = nodeGroups(rows, mine, pinned, orderInForce(order, state.self));
-  const unplaced = all.filter((c) => !hasPosition(c.lat, c.lon)).length;
   // Rows are memoised, so they get a stable opener and the minute their "5 min" is counted from.
   const openRef = useRef(onOpen);
   openRef.current = onOpen;
@@ -196,21 +298,13 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
 
   return (
     <>
-      {hideSearch ? null : <MeshSearch />}
-      <div className="chips" role="group" aria-label={t("mesh.filter.show")} hidden={!!only}>
-        {KINDS.map((k) => (
-          <button key={k.id} type="button" className={["chip", kind === k.id ? "on" : ""].join(" ")} aria-pressed={kind === k.id} onClick={() => setFilter({ kind: k.id })}>
-            {t(k.label)}
-          </button>
-        ))}
-      </div>
-      {only ? null : (
-        <button type="button" className="hears-row" disabled={state.status !== "ready"} onClick={whoHearsMe}>
-          <WavesIcon size={17} />
-          <span className="grow">{t("mesh.whoHearsMe")}</span>
-          <AirMark />
-        </button>
+      {hideSearch ? null : (
+        <div className="mesh-search-row">
+          <MeshSearch />
+          <FilterButton />
+        </div>
       )}
+      {only ? null : <ActiveFilters self={state.self} />}
       <div className="list mesh-list">
         {all.length === 0 ? (
           <div className="empty muted">{t("mesh.list.empty")}</div>
@@ -219,70 +313,11 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
         ) : (
           <>
             {only ? null : <MemoryStrip state={state} />}
-            <div className="list-summary muted">
-              <span className="grow">
-                {t("mesh.list.count", { count: all.length })}
-                {unplaced ? ` · ${t("mesh.list.unplaced", { count: unplaced })}` : ""}
-              </span>
-              {only ? null : <SortButton self={state.self} />}
-            </div>
             {groups.map((g) => group(g.title, g.rows))}
           </>
         )}
       </div>
     </>
-  );
-}
-
-/** The list's order, named, and the menu that changes it. */
-function SortButton({ self }: { self: SessionState["self"] }) {
-  const { order, pinned } = useNodeOrder();
-  const shown = orderInForce(order, self);
-  const label = t(NODE_ORDERS.find((o) => o.id === shown)!.label);
-  return (
-    <button
-      type="button"
-      className={["sort-btn", shown !== "heard" || !pinned ? "changed" : ""].join(" ")}
-      aria-label={t("mesh.sort.now", { order: label.toLowerCase() })}
-      onClick={(e) => {
-        const r = e.currentTarget.getBoundingClientRect();
-        openSortMenu({ x: r.left, y: r.bottom + 4 }, self);
-      }}
-    >
-      <SortIcon size={14} />
-      {label}
-      <ChevronDownIcon size={12} />
-    </button>
-  );
-}
-
-/** Opened again after the switch flips, so the menu shows it flipped. */
-function openSortMenu(at: MenuAt, self: SessionState["self"]): void {
-  const { order, pinned } = getNodeOrder();
-  const shown = orderInForce(order, self);
-  const lost = !placed(self);
-  showMenu(
-    [
-      ...NODE_ORDERS.map((o) => ({
-        label: t(o.label),
-        checked: o.id === shown,
-        disabled: o.id === "near" && lost,
-        hint: o.id === "near" && lost ? t("mesh.sort.noPosition") : undefined,
-        onSelect: () => setNodeOrder({ order: o.id }),
-      })),
-      {
-        label: t("mesh.sort.pinned"),
-        hint: pinned ? t("mesh.sort.pinnedOn") : t("mesh.sort.pinnedOff"),
-        toggle: true,
-        checked: pinned,
-        group: true,
-        onSelect: () => {
-          setNodeOrder({ pinned: !pinned });
-          openSortMenu(at, self);
-        },
-      },
-    ],
-    { title: t("mesh.sort.title"), at },
   );
 }
 
@@ -526,7 +561,7 @@ export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zo
   const fit = hub ? { id: `${hub}:${whole ? "all" : "part"}`, points: fitPoints } : null;
   return (
     <Suspense fallback={<div className="empty muted">{t("mesh.map.loading")}</div>}>
-      <MapView selected={selected} onSelect={pick} onGroup={onGroup} filter={test} coverTop={coverTop} coverBottom={coverBottom} zoomButtons={zoomButtons} overlay={overlay} onLeg={leg} onHold={openSpotMenu} onHandleDrop={drop} fit={fit} />
+      <MapView selected={selected} onSelect={pick} onGroup={onGroup} filter={test} coverTop={coverTop} coverBottom={coverBottom} zoomButtons={zoomButtons} overlay={overlay} onLeg={leg} onHold={openSpotMenu} onHandleDrop={drop} onHears={tool?.kind === "hears" ? closeTool : whoHearsMe} hearsOn={tool?.kind === "hears"} fit={fit} />
     </Suspense>
   );
 }
@@ -588,6 +623,7 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
   const inset = useRef<HTMLDivElement>(null);
   const sheet = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
+  const head = useRef<HTMLDivElement>(null);
   // The box's height, how much of its top the notch or the status bar takes, where the chips end in
   // the sheet, and how tall the tool or the list of nodes at one spot is.
   const [space, setSpace] = useState({ height: 0, top: 0, peek: 0, card: 0 });
@@ -643,17 +679,20 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
     return () => resize.disconnect();
   }, []);
 
-  // The lowest position shows the search and the chips, and stops before the first line of the list.
-  // A new text size moves where the chips end; hidden, the sheet has nowhere to measure.
+  // The lowest position shows the search, and the chips of a changed filter when there are some, and stops
+  // before the first line of the list. A new text size moves where they end; hidden, the sheet has nowhere to measure.
   const textScale = useSyncExternalStore(subscribeTextSize, getTextScale);
+  const filtered = useFilterChanged();
   useLayoutEffect(() => {
     const el = sheet.current;
     const scroller = body.current;
-    const chips = listed ? scroller?.querySelector<HTMLElement>(".chips") : null;
-    if (!el || !scroller || !chips || space.height === 0 || hidden) return;
-    const peek = Math.round(chips.getBoundingClientRect().bottom - el.getBoundingClientRect().top + scroller.scrollTop);
+    const top = head.current;
+    if (!el || !scroller || !top || !listed || space.height === 0 || hidden) return;
+    const chips = scroller.querySelector<HTMLElement>(".chips");
+    const edge = chips ? chips.getBoundingClientRect().bottom + scroller.scrollTop : top.getBoundingClientRect().bottom;
+    const peek = Math.round(edge - el.getBoundingClientRect().top);
     setSpace((s) => (s.peek === peek ? s : { ...s, peek }));
-  }, [listed, space.height, hidden, textScale]);
+  }, [listed, space.height, hidden, textScale, filtered]);
 
   // A tool or the list of nodes at one spot sits at its own height instead of the list's middle one, so more
   // of the map shows around it.
@@ -831,6 +870,7 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
       ) : null}
       <div ref={sheet} className="mesh-sheet" style={{ height: full, transform: `translate3d(0, ${full - heights[detent]}px, 0)` }}>
         <div
+          ref={head}
           className="mesh-sheet-head"
           onPointerDown={(e) => {
             if (e.button !== 0 || (e.target as HTMLElement).closest("input, button, label")) return;
@@ -845,7 +885,7 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
           {listed ? (
             <div className="mesh-sheet-tools">
               <MeshSearchInline onFocus={() => detent !== "full" && setDetent("full")} />
-              <FetchButton />
+              <FilterButton />
             </div>
           ) : null}
         </div>
@@ -861,6 +901,7 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
           <div aria-hidden="true" style={{ height: full - heights[detent] }} />
         </div>
       </div>
+      <FilterSheetHost />
     </div>
   );
 }

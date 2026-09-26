@@ -27,13 +27,19 @@ export interface NodeOrderPrefs {
   pinned: boolean;
 }
 
-const KEY = "meshnet.nodeOrder";
+const KEY = "meshnet.nodeOrder.2";
+/** Where it was kept while the groups were on by default: the order chosen there is carried over, the groups start off. */
+const OLD_KEY = "meshnet.nodeOrder";
 
 function read(): NodeOrderPrefs {
   const saved = readSetting<Partial<NodeOrderPrefs> | null>(KEY, null);
-  const order = NODE_ORDERS.find((o) => o.id === saved?.order)?.id ?? "heard";
-  return { order, pinned: typeof saved?.pinned === "boolean" ? saved.pinned : true };
+  const old = saved ? null : readSetting<Partial<NodeOrderPrefs> | null>(OLD_KEY, null);
+  const order = NODE_ORDERS.find((o) => o.id === (saved ?? old)?.order)?.id ?? "heard";
+  return { order, pinned: typeof saved?.pinned === "boolean" ? saved.pinned : false };
 }
+
+/** How the list stands when nothing has been changed. */
+export const DEFAULT_NODE_ORDER: NodeOrderPrefs = { order: "heard", pinned: false };
 
 let prefs = read();
 const listeners = new Set<() => void>();

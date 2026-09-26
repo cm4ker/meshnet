@@ -6,6 +6,7 @@
 
 ### Mesh and the map
 - On a phone, a node tapped in the list or on the map opens its profile at once, as on a desktop. The card in between, with only a Profile button for a repeater, is gone. Back returns to the map with the node ringed and its route drawn, and "On map" lowers the list so the map has the room.
+- The Mesh list starts right under the search. What to show, the order, "Yours and favourites on top" and fetching every contact again sit behind the button beside the search, which carries a dot when something is changed; each change shows as a chip under the search, taken off by its cross. The list is one list by default. "Who hears me" is a button on the map.
 
 ## 0.3.0 — 2026-09-26
 

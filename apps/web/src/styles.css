@@ -4674,36 +4674,74 @@ button.hop {
     width: 100%;
   }
 }
-.hears-row {
+/* The Mesh list's search, with the button beside it for what the list shows and in what order. */
+.mesh-search-row {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  width: calc(100% - 2 * var(--space-3));
-  margin: var(--space-2) var(--space-3) 0;
-  padding: var(--space-2) var(--space-3);
-  border: 0;
-  border-radius: 10px;
-  background: var(--panel);
-  color: var(--text);
-  font: inherit;
-  font-weight: 500;
-  text-align: left;
-  cursor: pointer;
+  gap: var(--space-1);
+  padding: 0 var(--space-2) var(--space-2) var(--space-3);
 }
-.hears-row > svg:first-child {
+.mesh-search-row .search {
+  flex: 1;
+  margin: 0;
+}
+.filter-btn {
+  position: relative;
+  width: calc(34px * var(--box-scale));
+  height: calc(34px * var(--box-scale));
+  border-radius: var(--radius-lg);
+  background: var(--hover);
+  color: var(--text);
+}
+/* Something in the list is not as usual. */
+.filter-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+/* What is changed, under the search: a chip each, taken off by its cross. */
+.chip-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 6px;
+  border-color: transparent;
+  background: var(--accent-subtle);
   color: var(--accent);
 }
-.hears-row .grow {
-  flex: 1;
+.chip-clear.on {
+  background: var(--accent-subtle);
+  color: var(--accent);
 }
-.hears-row:disabled {
-  opacity: 0.5;
+/* The choices in the filter's sheet, laid out as tiles rather than a row that scrolls. */
+.line-block.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-1);
+}
+.line-block.filter-grid.pairs {
+  grid-template-columns: repeat(2, 1fr);
+}
+.filter-grid .chip {
+  height: var(--control-h);
+  border-radius: var(--radius-lg);
+  padding: 0 var(--space-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.filter-grid .chip.on {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+.filter-grid .chip:disabled {
+  opacity: 0.45;
   cursor: default;
-}
-@media (hover: hover) {
-  .hears-row:hover:not(:disabled) {
-    background: var(--hover);
-  }
 }
 
 .los-verdict {
