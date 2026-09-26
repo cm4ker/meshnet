@@ -19,8 +19,9 @@ import { Button, IconButton } from "../ui/Button.js";
 import { Group, LinkRow } from "../ui/List.js";
 import { showMenu } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
-import { AirIcon, BatteryIcon, BellIcon, InfoIcon, LinkIcon, LocationIcon, LogIcon, PaletteIcon, PowerIcon, RadioIcon, RefreshIcon, ShieldIcon, SlidersIcon, TextIcon, UsersIcon, WavesIcon } from "./Icons.js";
+import { AirIcon, BatteryIcon, BellIcon, GaugeIcon, InfoIcon, LinkIcon, LocationIcon, LogIcon, PaletteIcon, PowerIcon, RadioIcon, RefreshIcon, ShieldIcon, SlidersIcon, TextIcon, UsersIcon, WavesIcon } from "./Icons.js";
 import { presetName, radioTitle } from "./RadioPages.js";
+import { readingsSummary } from "./Readings.js";
 
 
 /** Advertising: once to the neighbours, or flooded across the mesh. */
@@ -47,6 +48,7 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
   const self = state.self;
   const online = state.status === "ready";
   const cell = useBatteryType(self?.key);
+  const own = state.telemetry["self"];
   const row = (page: RadioPage, icon: React.ReactNode, value?: string) => (
     <LinkRow key={page} icon={icon} label={radioTitle(page)} value={value} tone={page === "power" ? "danger" : undefined} selected={selected === page} onClick={() => openRadioPage(page)} />
   );
@@ -125,6 +127,7 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
           {row("name", <LocationIcon size={17} />, self?.name)}
           {row("frequency", <RadioIcon size={17} />, self ? t("radio.home.presetPower", { preset: presetName(self), tx: self.txPower }) : undefined)}
           {row("battery", <BatteryIcon size={17} />, batteryTypeLabel(cell))}
+          {row("sensors", <GaugeIcon size={17} />, own ? readingsSummary(own.readings) : undefined)}
           {row("contacts", <UsersIcon size={17} />, contactsValue)}
           {row("privacy", <ShieldIcon size={17} />)}
           {row("advanced", <SlidersIcon size={17} />)}

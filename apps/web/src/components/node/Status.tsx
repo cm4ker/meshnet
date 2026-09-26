@@ -3,6 +3,7 @@ import { AdvType, type ContactRecord, type NodeStats } from "@meshnet/meshcore";
 import { errorText } from "../../i18n/errors.js";
 import { locale, t } from "../../i18n/index.js";
 import { ago, agoPhrase, batteryPercent } from "../../lib/format.js";
+import { showOnMap } from "../../lib/nav.js";
 import { clockDrift, isAdmin } from "../../lib/nodes.js";
 import { session, useSession } from "../../lib/session.js";
 import { toast } from "../../lib/toast.js";
@@ -54,7 +55,7 @@ export function NodeStatus({ contact }: { contact: ContactRecord }) {
           title={t("node.status.readings", { time: telemetry ? ago(telemetry.at) : t("node.notAskedYet") })}
           note={contact.name ? t("node.status.alerts", { name: contact.name }) : t("node.status.alertsUnnamed")}
         >
-          {telemetry ? <Readings readings={telemetry.readings} /> : null}
+          {telemetry ? <Readings readings={telemetry.readings} from={state.self} onMap={() => showOnMap(key, true)} /> : null}
           <ActionRow label={t("node.status.askReadings")} air busy={busy === "telemetry"} disabled={!online} onClick={run("telemetry", () => session.requestTelemetry(key))} />
         </Group>
       ) : (
@@ -72,7 +73,7 @@ export function NodeStatus({ contact }: { contact: ContactRecord }) {
 
       {!sensor && telemetry ? (
         <Group title={t("node.status.telemetry", { time: ago(telemetry.at) })}>
-          <Readings readings={telemetry.readings} />
+          <Readings readings={telemetry.readings} from={state.self} onMap={() => showOnMap(key, true)} />
         </Group>
       ) : null}
 

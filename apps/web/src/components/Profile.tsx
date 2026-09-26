@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AclRole, AdvType, contactConversation, isConversationType, isFavourite, isNodeType, NoReplyError } from "@meshnet/meshcore";
+import { errorText } from "../i18n/errors.js";
 import { t, type Key } from "../i18n/index.js";
 import { ago, agoPhrase } from "../lib/format.js";
 import { bearingDeg, compass, distanceKm, formatDistance, hasPosition } from "../lib/geo.js";
@@ -67,6 +68,9 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
   const mapBeside = wide && section === "mesh";
   const contact = state.contacts[contactKey];
   const [ask, setAsk] = useState<"rename" | "remove" | "forget" | "reboot" | "signin" | null>(null);
+  // The last ask for readings got no answer: then, and only then, what may keep them away.
+  const [silent, setSilent] = useState(false);
+  const [asking, setAsking] = useState(false);
   const online = state.status === "ready";
 
   if (!contact) {
@@ -232,9 +236,26 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
             })}
           </Group>
         ) : (
-          <Group title={telemetry ? t("mesh.profile.readingsAgo", { time: ago(telemetry.at) }) : t("mesh.profile.readings")} note={telemetry ? undefined : t("mesh.profile.readingsNote")}>
-            {telemetry ? <Readings readings={telemetry.readings} /> : null}
-            <ActionRow label={t("mesh.profile.requestTelemetry")} air disabled={!online} onClick={() => void act(() => session.requestTelemetry(key))} />
+          <Group title={telemetry ? t("mesh.profile.readingsAgo", { time: ago(telemetry.at) }) : t("mesh.profile.readings")} note={silent ? t("mesh.profile.readingsSilent") : undefined}>
+            {telemetry ? <Readings readings={telemetry.readings} from={self} onMap={() => showOnMap(key, true)} /> : null}
+            <ActionRow
+              label={telemetry ? t("mesh.profile.readingsAgain") : t("mesh.profile.requestReadings")}
+              air
+              busy={asking}
+              disabled={!online || asking}
+              onClick={async () => {
+                setAsking(true);
+                try {
+                  await session.requestTelemetry(key);
+                  setSilent(false);
+                } catch (e) {
+                  if (e instanceof NoReplyError) setSilent(true);
+                  else toast(errorText(e), "error");
+                } finally {
+                  setAsking(false);
+                }
+              }}
+            />
           </Group>
         )}
 

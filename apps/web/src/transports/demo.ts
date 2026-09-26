@@ -244,6 +244,19 @@ function nodePrefs(p: Person): Record<string, string> {
  */
 const HEARS: Record<number, number> = { 0x03: 6.5, 0x6f: -3, 0x94: -6.25, 0x2c: -9 };
 
+/**
+ * What the demo radio's own sensors say, as Cayenne LPP: on channel 1 its battery (3.98 V), its
+ * processor (31.5 °C) and its GPS; on 4 a power monitor (3.38 V, 119 mA, and the power in whole
+ * watts, so 0, as the firmware sends it); on 5 the air (18.4 °C, 46.5 %, 1004.2 hPa).
+ */
+const DEMO_TELEMETRY_SELF = new Uint8Array([
+  1, 0x74, 0x01, 0x8e, 1, 0x67, 0x01, 0x3b, 1, 0x88, 0x08, 0x63, 0xda, 0x0b, 0x31, 0xd0, 0x00, 0x25, 0x1c,
+  4, 0x74, 0x01, 0x52, 4, 0x75, 0x00, 0x77, 4, 0x80, 0x00, 0x00,
+  5, 0x67, 0x00, 0xb8, 5, 0x68, 0x5d, 5, 0x73, 0x27, 0x3a,
+]);
+/** What anyone else's radio answers: its battery (4.02 V), its processor (28.0 °C) and its GPS. */
+const DEMO_TELEMETRY_OTHER = new Uint8Array([1, 0x74, 0x01, 0x92, 1, 0x67, 0x01, 0x18, 1, 0x88, 0x08, 0x65, 0xac, 0x0b, 0x31, 0xe4, 0x00, 0x23, 0x28]);
+
 function heardAt(hash: number): number {
   return Math.round(((HEARS[hash] ?? -4) + (Math.random() * 2 - 1)) * 4) / 4;
 }
@@ -772,7 +785,7 @@ class DemoRadio extends BaseTransport {
             .u8(Push.TelemetryResponse)
             .u8(0)
             .bytes(prefix)
-            .bytes(new Uint8Array([1, 0x74, 0x01, 0x8e, 1, 0x67, 0x00, 0xd2, 2, 0x68, 0x5a]))
+            .bytes(frame.length > 4 ? DEMO_TELEMETRY_OTHER : DEMO_TELEMETRY_SELF)
             .toBytes(),
         );
         return frame.length > 4 ? [this.sent(this.acks++)] : [];

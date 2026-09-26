@@ -46,6 +46,7 @@ export const RADIO_TITLES: Record<RadioPage, Key> = {
   name: "radio.titles.name",
   frequency: "radio.titles.frequency",
   battery: "radio.titles.battery",
+  sensors: "radio.titles.sensors",
   privacy: "radio.titles.privacy",
   contacts: "radio.titles.contacts",
   removed: "radio.titles.removed",
@@ -196,6 +197,8 @@ function PageBody({ page }: { page: RadioPage }) {
       return self ? <FrequencyPage self={self} online={online} /> : <Offline />;
     case "battery":
       return self ? <BatteryPage radioKey={self.key} online={online} /> : <Offline />;
+    case "sensors":
+      return self ? <SensorsPage self={self} online={online} /> : <Offline />;
     case "privacy":
       return self ? (
         <>
@@ -424,13 +427,49 @@ function BatteryPage({ radioKey, online }: { radioKey: string; online: boolean }
   );
 }
 
+/** How often the sensors page asks the radio again while it is open. */
+const SENSORS_EVERY_MS = 30_000;
+
+/**
+ * The radio's own sensors: its battery, its board, its GPS and whatever is wired to it. Asked of
+ * the radio over its link, not of the air, so the page asks as it opens and again every half
+ * minute while it stays open.
+ */
+function SensorsPage({ self, online }: { self: Self; online: boolean }) {
+  const state = useSession();
+  const own = state.telemetry["self"];
+  const cell = useBatteryType(self.key);
+  useEffect(() => {
+    if (!online) return;
+    const read = () => void session.requestTelemetry().catch(() => undefined);
+    read();
+    const timer = window.setInterval(read, SENSORS_EVERY_MS);
+    return () => window.clearInterval(timer);
+  }, [online]);
+  const mode = (value: number) => telemetryOptions().find((o) => o.value === String(value))?.label.toLowerCase() ?? String(value);
+  return (
+    <>
+      <Group note={own ? t("radio.sensors.read", { time: agoPhrase(own.at) }) : t("radio.sensors.reading")}>
+        {own ? <Readings readings={own.readings} cell={cell} onCopy={(text) => void navigator.clipboard?.writeText(text).then(() => toast(t("common.copied")))} /> : null}
+        <ActionRow label={t("radio.sensors.again")} disabled={!online} onClick={() => void act(() => session.requestTelemetry())} />
+      </Group>
+      <Group>
+        <LinkRow
+          label={t("radio.sensors.who")}
+          hint={t("radio.sensors.whoValue", { battery: mode(self.telemetryModeBase), location: mode(self.telemetryModeLocation), sensors: mode(self.telemetryModeEnvironment) })}
+          onClick={() => push({ kind: "radio", page: "privacy" })}
+        />
+      </Group>
+    </>
+  );
+}
+
 function AdvancedPage({ self, online }: { self: Self; online: boolean }) {
   const state = useSession();
   const device = state.device;
   useEffect(() => {
     if (online && !state.tuning) void session.refreshTuning().catch(() => undefined);
   }, [online, state.tuning]);
-  const own = state.telemetry["self"];
   return (
     <>
       <Group title={t("radio.advanced.device")}>
@@ -450,10 +489,8 @@ function AdvancedPage({ self, online }: { self: Self; online: boolean }) {
         ) : null}
         <LinkRow label={t("radio.advanced.publicKey")} value={<span className="mono">{self.key.slice(0, 16)}…</span>} trailing={<CopyIcon size={14} className="line-chev" />} onClick={() => void navigator.clipboard?.writeText(self.key).then(() => toast(t("common.copied")))} />
       </Group>
-      <Group title={t("radio.advanced.clockAndSensors")}>
+      <Group title={t("radio.advanced.clock")}>
         <ActionRow label={t("radio.advanced.setClock")} disabled={!online} onClick={() => void act(() => session.syncClock(), t("radio.advanced.clockSet"))} />
-        <ActionRow label={t("radio.advanced.readSensors")} disabled={!online} onClick={() => void act(() => session.requestTelemetry())} />
-        {own ? <Readings readings={own.readings} /> : null}
       </Group>
       <Group title={t("radio.advanced.tuning")}>
         <SelectRow
