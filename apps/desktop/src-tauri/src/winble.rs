@@ -56,6 +56,8 @@ const GATT_DEADLINE: Duration = Duration::from_secs(20);
 pub const CLOSED_EVENT: &str = "winble:closed";
 
 struct Link {
+    /// Which link this is, so a close meant for an earlier one leaves it alone.
+    id: u64,
     device: BluetoothLEDevice,
     service: GattDeviceService,
     rx: GattCharacteristic,
@@ -69,6 +71,8 @@ struct Link {
 #[derive(Default)]
 struct Worker {
     link: Option<Link>,
+    /// Links opened so far, which numbers them.
+    opened: u64,
 }
 
 type Job = Box<dyn FnOnce(&mut Worker) + Send + 'static>;
@@ -158,6 +162,8 @@ pub struct Found {
 #[serde(rename_all = "camelCase")]
 pub struct Connected {
     name: String,
+    /// The link's number, for `winble_disconnect`.
+    link: u64,
 }
 
 fn hex_address(address: u64) -> String {
@@ -407,7 +413,7 @@ fn close_link(link: Link) {
     log::info!("winble: link closed");
 }
 
-fn open_link(app: AppHandle, mac: u64, address: &str, on_frame: Channel<Vec<u8>>) -> Result<Link, String> {
+fn open_link(app: AppHandle, id: u64, mac: u64, address: &str, on_frame: Channel<Vec<u8>>) -> Result<Link, String> {
     let device = wait(
         BluetoothLEDevice::FromBluetoothAddressAsync(mac).map_err(|e| err("device", e))?,
         "device lookup",
@@ -477,7 +483,7 @@ fn open_link(app: AppHandle, mac: u64, address: &str, on_frame: Channel<Vec<u8>>
         .map_err(|e| err("status", e))?;
 
     log::info!("winble: link up to {name}");
-    Ok(Link { device, service, rx, tx, value_token, status_token })
+    Ok(Link { id, device, service, rx, tx, value_token, status_token })
 }
 
 /// Bonds with the radio using the PIN its screen shows (or its configured
@@ -561,10 +567,12 @@ pub async fn winble_connect(
         if let Some(old) = worker.link.take() {
             close_link(old);
         }
-        let link = open_link(app, mac, &address, on_frame)?;
+        worker.opened += 1;
+        let id = worker.opened;
+        let link = open_link(app, id, mac, &address, on_frame)?;
         let name = link.device.Name().map(|n| n.to_string()).unwrap_or_default();
         worker.link = Some(link);
-        Ok(Connected { name })
+        Ok(Connected { name, link: id })
     })
     .await
 }
@@ -589,10 +597,14 @@ pub async fn winble_send(state: State<'_, WinBle>, data: Vec<u8>) -> Result<(), 
 }
 
 #[tauri::command]
-pub async fn winble_disconnect(state: State<'_, WinBle>) -> Result<(), String> {
-    on_worker(&state, |worker| {
-        if let Some(link) = worker.link.take() {
-            close_link(link);
+pub async fn winble_disconnect(state: State<'_, WinBle>, link: Option<u64>) -> Result<(), String> {
+    on_worker(&state, move |worker| {
+        // A connect given up on can finish after the next one has begun, and
+        // its close then waits behind that connect: it must not take the new link down.
+        if worker.link.as_ref().is_some_and(|open| link.is_none_or(|id| open.id == id)) {
+            if let Some(open) = worker.link.take() {
+                close_link(open);
+            }
         }
         Ok(())
     })

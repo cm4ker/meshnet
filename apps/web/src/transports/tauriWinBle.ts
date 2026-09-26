@@ -26,7 +26,11 @@ class TauriWinBleTransport extends BaseTransport {
   readonly kind = "ble" as const;
   private unlisten: UnlistenFn | null = null;
 
-  constructor(readonly label: string) {
+  constructor(
+    readonly label: string,
+    /** The shell's number for this link: closing it late, after another was opened, leaves that one up. */
+    private readonly link: number,
+  ) {
     super();
   }
 
@@ -48,7 +52,7 @@ class TauriWinBleTransport extends BaseTransport {
   protected async shutdown(): Promise<void> {
     this.unlisten?.();
     this.unlisten = null;
-    await invoke("winble_disconnect").catch(() => undefined);
+    await invoke("winble_disconnect", { link: this.link }).catch(() => undefined);
   }
 }
 
@@ -97,18 +101,19 @@ export const tauriWinBleConnector: Connector = {
     let transport: TauriWinBleTransport | null = null;
     const channel = new Channel<number[]>();
     channel.onmessage = (data) => transport?.receive(data);
-    const open = () => invoke<{ name: string }>("winble_connect", { address: device.id, onFrame: channel });
+    const open = () => invoke<{ name: string; link: number }>("winble_connect", { address: device.id, onFrame: channel });
     let name: string;
+    let link: number;
     try {
       try {
-        ({ name } = await open());
+        ({ name, link } = await open());
       } catch (error) {
         // A phone sharing its radio has no PIN to type: it asks on its own
         // screen, and Windows takes any answer. So it is paired at once, and
         // only a radio (named MeshCore-…) is left to the PIN prompt.
         if (!/NEEDS_PAIRING/.test(String(error)) || device.name.startsWith(RADIO_PREFIX)) throw error;
         await invoke<string>("winble_pair", { address: device.id, pin: "" });
-        ({ name } = await open());
+        ({ name, link } = await open());
       }
     } catch (error) {
       const text = String(error);
@@ -117,7 +122,7 @@ export const tauriWinBleConnector: Connector = {
       }
       throw new Error(text);
     }
-    transport = new TauriWinBleTransport(name || device.name);
+    transport = new TauriWinBleTransport(name || device.name, link);
     await transport.watch();
     remember({ ...device, name: name || device.name });
     return transport;
