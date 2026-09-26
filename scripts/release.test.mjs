@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, basename, dirname } from "node:path";
-import { makeManifest, newerBuild, publish, releaseInfo } from "./release.mjs";
+import { makeManifest, newerBuild, pruneDevReleases, publish, releaseInfo } from "./release.mjs";
 
 const env = { GITHUB_REF: "refs/heads/master", GITHUB_EVENT_NAME: "push", GITHUB_RUN_NUMBER: "42", GITHUB_RUN_ATTEMPT: "2" };
 test("stable tags must match the shared version; dev runs and retries have unique versions", () => {
@@ -88,4 +88,17 @@ test("a build reaches the feed when it is newer than the feed, even if master mo
   assert.equal(newerBuild("0.2.0-dev.9.1", "0.2.0-dev.10.1"), false);
   assert.equal(newerBuild("0.2.0-dev.45.1", "0.2.0-dev.45.1"), false);
   assert.equal(newerBuild("0.2.0-dev.1.1", "garbage"), true);
+});
+
+test("only the two newest dev builds keep their releases", () => {
+  const calls = [];
+  const listed = ["dev", "dev-0.3.0-dev.9.1", "v0.2.0", "dev-0.3.0-dev.112.1", "dev-0.3.0-dev.110.2", "dev-0.3.0-dev.113.1", "dev-0.3.0-dev.110.1"];
+  pruneDevReleases("cm4ker/ommesh", (...args) => {
+    calls.push(args);
+    return args[1] === "list" ? JSON.stringify(listed.map((tagName) => ({ tagName }))) : "";
+  });
+  assert.ok(calls[0].includes("--exclude-drafts"));
+  const removed = calls.filter((call) => call[1] === "delete");
+  assert.deepEqual(removed.map((call) => call[2]), ["dev-0.3.0-dev.110.2", "dev-0.3.0-dev.110.1", "dev-0.3.0-dev.9.1"]);
+  assert.ok(removed.every((call) => call.includes("--cleanup-tag") && call.includes("--yes")));
 });

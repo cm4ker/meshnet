@@ -1,7 +1,7 @@
 # Every push to master is checked and built for every home the client has:
 # Windows installers for x64, 32-bit x86 and ARM64, a debug Android APK and the web
-# bundle. Each push gets an immutable pre-release; `dev/latest.json` points
-# to the newest one. A matching `vX.Y.Z` tag makes a stable release. PRs get
+# bundle. Each push gets its own pre-release, and only the newest two are kept;
+# `dev/latest.json` points to the newest one. A matching `vX.Y.Z` tag makes a stable release. PRs get
 # workflow artifacts. iOS is left out: it is built on a Mac and uploaded to
 # TestFlight by hand (apps/mobile/README.md).
 name: Build

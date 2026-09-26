@@ -90,7 +90,7 @@ export function publish(info, directory, env, run = gh) {
   run("release", "upload", "dev", "--repo", repo, "--clobber", ...manualAssets);
   const currentNames = new Set(manualAssets.map((path) => basename(path)));
   for (const asset of channelRelease?.assets ?? []) {
-    // Only rolling download aliases are replaced; immutable versioned releases are never pruned.
+    // Only rolling download aliases are replaced here; old versioned releases go in pruneDevReleases.
     // Builds from before the rename to Ommesh were named Meshnet.
     if (/^(?:Ommesh|Meshnet).*\.(?:exe(?:\.sig)?|apk|zip)$/.test(asset.name) && !currentNames.has(asset.name)) {
       run("release", "delete-asset", "dev", asset.name, "--repo", repo, "--yes");
@@ -100,6 +100,16 @@ export function publish(info, directory, env, run = gh) {
   run("release", "edit", "dev", "--repo", repo, "--prerelease", "--latest=false", "--title", `Dev · ${info.version}`, "--notes-file", notesFile);
   // This is the final write, after both architectures and their signatures exist.
   run("release", "upload", "dev", "--repo", repo, "--clobber", resolve(directory, "latest.json"));
+}
+
+/** Deletes all but the newest `keep` versioned Dev releases, with their tags. The feed
+ * points to the newest; the one before stays for clients that read the old feed. */
+export function pruneDevReleases(repo, run = gh, keep = 2) {
+  const tags = JSON.parse(run("release", "list", "--repo", repo, "--limit", "1000", "--exclude-drafts", "--json", "tagName"))
+    .map(({ tagName }) => tagName)
+    .filter((tag) => /^dev-.+-dev\.\d+\.\d+$/.test(tag))
+    .sort((a, b) => (newerBuild(a, b) ? -1 : newerBuild(b, a) ? 1 : 0));
+  for (const tag of tags.slice(keep)) run("release", "delete", tag, "--repo", repo, "--cleanup-tag", "--yes");
 }
 
 export function main(command, directory = "out", env = process.env) {
@@ -119,6 +129,7 @@ export function main(command, directory = "out", env = process.env) {
       if (!releaseByTag(env.GITHUB_REPOSITORY, "dev")) gh("release", "create", "dev", "--repo", env.GITHUB_REPOSITORY, "--target", env.GITHUB_SHA, "--prerelease", "--latest=false", "--title", "Dev builds", "--notes", "Development builds of Ommesh.");
     }
     publish(info, directory, env);
+    if (info.channel === "dev") pruneDevReleases(env.GITHUB_REPOSITORY);
   } else throw new Error("Usage: node scripts/release.mjs prepare|manifest|publish [directory]");
 }
 

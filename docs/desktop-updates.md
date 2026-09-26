@@ -17,7 +17,7 @@ Before installation, the app waits up to 45 seconds for message acknowledgements
 
 Stable packages default to Stable; prerelease packages default to Dev. An explicit choice persists. The updater installs only a newer SemVer version: switching Dev → Stable waits for a newer stable release. After tagging a stable release, bump the root version to the next release before publishing more Dev builds, so users on that stable version can upgrade to Dev. Do not move published version tags or reuse a version for different bytes.
 
-Each Dev build has its own immutable release tag, such as `dev-0.2.0-dev.42.1`. Its signed installers stay there. The rolling `dev` page links to the newest full release, mirrors its files for manual download and hosts `latest.json`. Old manual download copies are removed from the rolling page; clients download from the immutable release.
+Each Dev build has its own release tag, such as `dev-0.2.0-dev.42.1`. Its signed installers stay there, unchanged. Only the two newest Dev builds keep their releases: each publication deletes older ones, tags too. The one before the newest stays for clients that read the previous feed. The rolling `dev` page links to the newest full release, mirrors its files for manual download and hosts `latest.json`. Old manual download copies are removed from the rolling page; clients download from the versioned release.
 
 ## Signing and CI
 
@@ -29,7 +29,7 @@ The workflow builds both Windows architectures and their `.exe.sig` sidecars, th
 
 For a stable release, update the root version, commit it, and push its matching `vX.Y.Z` tag. The workflow publishes it as GitHub's latest stable release. Keep stable tags increasing. No extra update server is required.
 
-If publication fails, inspect the Actions log and the draft before retrying. A full Dev rerun gets a new attempt version. A stable draft can be removed and the run repeated only if it was never published. Never replace the installers of an already published release: clients may already hold its signed manifest. GitHub replaces the rolling `latest.json` asset by deleting and uploading it, so checks can briefly fail during promotion or until a failed promotion is retried. Already discovered updates remain valid because their installer URLs are immutable.
+If publication fails, inspect the Actions log and the draft before retrying. A full Dev rerun gets a new attempt version. A stable draft can be removed and the run repeated only if it was never published. Never replace the installers of an already published release: clients may already hold its signed manifest. GitHub replaces the rolling `latest.json` asset by deleting and uploading it, so checks can briefly fail during promotion or until a failed promotion is retried. An update found on the Dev feed stays downloadable until two newer builds are published.
 
 ## Verification and first rollout
 
