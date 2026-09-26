@@ -116,11 +116,14 @@ export function decodeLpp(bytes: Uint8Array): LppReading[] {
         case 0x73:
           out.push({ channel, type: "barometer", hpa: u16be(r) / 10 });
           break;
+        // Signed, whatever the library's header says: CayenneLPP 1.6.1, which the firmware pins,
+        // lists voltage and current in getTypeSigned, so a current flowing back (a charging
+        // battery on an INA sensor) comes as two's complement, and 0xFFF0 is -16 mA, not 65.52 A.
         case 0x74:
-          out.push({ channel, type: "voltage", volts: u16be(r) / 100 });
+          out.push({ channel, type: "voltage", volts: i16be(r) / 100 });
           break;
         case 0x75:
-          out.push({ channel, type: "current", amps: u16be(r) / 1000 });
+          out.push({ channel, type: "current", amps: i16be(r) / 1000 });
           break;
         case 0x76:
           out.push({ channel, type: "frequency", hz: u32be(r) });

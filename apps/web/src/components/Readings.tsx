@@ -60,8 +60,14 @@ export function Readings({
   from,
   onMap,
   onCopy,
+  skipBattery = false,
+  titled: alwaysTitled = false,
 }: {
   readings: LppReading[];
+  /** The battery is shown apart, above: channel 1's voltage is left out here. */
+  skipBattery?: boolean | undefined;
+  /** Each channel named even when there is one. */
+  titled?: boolean | undefined;
   cell?: BatteryType | undefined;
   /** Where this radio is, to say how far a GPS reading puts the node. */
   from?: { lat: number; lon: number } | null | undefined;
@@ -72,9 +78,13 @@ export function Readings({
 }) {
   if (readings.length === 0) return <InfoRow label={t("radio.readings.none")}>—</InfoRow>;
   const channels = new Map<number, LppReading[]>();
-  for (const r of readings) channels.set(r.channel, [...(channels.get(r.channel) ?? []), r]);
+  for (const r of readings) {
+    if (skipBattery && r.channel === SELF_CHANNEL && r.type === "voltage") continue;
+    channels.set(r.channel, [...(channels.get(r.channel) ?? []), r]);
+  }
   const sets = [...channels.entries()].sort((a, b) => a[0] - b[0]);
-  const titled = sets.length > 1;
+  if (sets.length === 0) return null;
+  const titled = alwaysTitled || sets.length > 1;
   return (
     <Block className="readings">
       {sets.map(([channel, list]) => (
@@ -169,7 +179,7 @@ function gpsTile(r: Extract<LppReading, { type: "gps" }>, how: { from: { lat: nu
     </button>
   ) : null;
   return {
-    label: t("radio.readings.gps"),
+    label: t("radio.readings.place"),
     value: placed ? value : t("radio.readings.noFix"),
     sub: placed ? (
       <>
@@ -181,6 +191,10 @@ function gpsTile(r: Extract<LppReading, { type: "gps" }>, how: { from: { lat: nu
 }
 
 /** A number in the reader's way of writing it: 3,38 in Russian. */
+export function numberText(value: number, max: number, min = max): string {
+  return num(value, max, min);
+}
+
 function num(value: number, max: number, min = max): string {
   return value.toLocaleString(locale(), { minimumFractionDigits: min, maximumFractionDigits: max, useGrouping: false });
 }
@@ -190,11 +204,11 @@ function voltsText(volts: number): string {
 }
 
 function ampsText(amps: number): string {
-  return amps < 1 ? `${Math.round(amps * 1000)} ${t("node.unit.milliampere")}` : `${num(amps, 2)} ${t("node.unit.ampere")}`;
+  return Math.abs(amps) < 1 ? `${Math.round(amps * 1000)} ${t("node.unit.milliampere")}` : `${num(amps, 2)} ${t("node.unit.ampere")}`;
 }
 
 function powerParts(watts: number): { value: string; unit: string } {
-  return watts < 1 ? { value: String(Math.round(watts * 1000)), unit: t("node.unit.milliwatt") } : { value: num(watts, 2), unit: t("node.unit.watt") };
+  return Math.abs(watts) < 1 ? { value: String(Math.round(watts * 1000)), unit: t("node.unit.milliwatt") } : { value: num(watts, 2), unit: t("node.unit.watt") };
 }
 
 /** A reading's number and its unit apart, for a tile; what has no unit of its own reads whole. */
@@ -203,7 +217,7 @@ function parts(r: LppReading): { value: string; unit?: string } {
     case "voltage":
       return { value: num(r.volts, 2), unit: t("node.unit.volt") };
     case "current":
-      return r.amps < 1 ? { value: String(Math.round(r.amps * 1000)), unit: t("node.unit.milliampere") } : { value: num(r.amps, 2), unit: t("node.unit.ampere") };
+      return Math.abs(r.amps) < 1 ? { value: String(Math.round(r.amps * 1000)), unit: t("node.unit.milliampere") } : { value: num(r.amps, 2), unit: t("node.unit.ampere") };
     case "power":
       return powerParts(powerWatts(r, [r]));
     case "temperature":
