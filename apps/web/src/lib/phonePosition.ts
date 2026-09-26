@@ -74,10 +74,18 @@ interface GeolocationPlugin {
   clearWatch(options: { id: string }): Promise<void>;
 }
 
-let native: Promise<GeolocationPlugin> | null = null;
-function plugin(): Promise<GeolocationPlugin> {
-  native ??= import("@capacitor/core").then(({ registerPlugin }) => registerPlugin<GeolocationPlugin>("Geolocation"));
-  return native;
+let native: GeolocationPlugin | null = null;
+
+/**
+ * Runs `use` with the plugin. Never resolve a Promise with the plugin itself:
+ * the Capacitor proxy answers `then`, and the promise would hang (see relay.ts).
+ */
+async function withGeo<T>(use: (geo: GeolocationPlugin) => Promise<T>): Promise<T> {
+  if (!native) {
+    const { registerPlugin } = await import("@capacitor/core");
+    native = registerPlugin<GeolocationPlugin>("Geolocation");
+  }
+  return use(native);
 }
 
 /** The plugin's error codes (OS-PLUG-GLOC-00NN), by what the reader can do about them. */
@@ -154,13 +162,14 @@ export async function locateOnce(): Promise<Fix> {
   try {
     let fix: Fix;
     if (isCapacitor()) {
-      const geo = await plugin();
-      await allowed(geo, true);
-      try {
-        fix = fixOf(await geo.getCurrentPosition(options));
-      } catch (error) {
-        throw nativeProblem(error);
-      }
+      fix = await withGeo(async (geo) => {
+        await allowed(geo, true);
+        try {
+          return fixOf(await geo.getCurrentPosition(options));
+        } catch (error) {
+          throw nativeProblem(error);
+        }
+      });
     } else {
       if (!("geolocation" in navigator)) throw new LocateError("unavailable");
       fix = await new Promise<Fix>((resolve, reject) => navigator.geolocation.getCurrentPosition((p) => resolve(fixOf(p)), (e) => reject(webProblem(e)), options));
@@ -178,10 +187,11 @@ export async function locateOnce(): Promise<Fix> {
 async function startWatch(onFix: (fix: Fix) => void, onProblem: (problem: LocateProblem) => void): Promise<() => void> {
   const options = { enableHighAccuracy: true, timeout: FIX_TIMEOUT_MS, maximumAge: 10_000 };
   if (isCapacitor()) {
-    const geo = await plugin();
-    await allowed(geo, false);
-    const id = await geo.watchPosition(options, (position, error) => (position ? onFix(fixOf(position)) : onProblem(nativeProblem(error).problem)));
-    return () => void geo.clearWatch({ id }).catch(() => undefined);
+    return withGeo(async (geo) => {
+      await allowed(geo, false);
+      const id = await geo.watchPosition(options, (position, error) => (position ? onFix(fixOf(position)) : onProblem(nativeProblem(error).problem)));
+      return () => void geo.clearWatch({ id }).catch(() => undefined);
+    });
   }
   if (!("geolocation" in navigator)) throw new LocateError("unavailable");
   const id = navigator.geolocation.watchPosition((p) => onFix(fixOf(p)), (e) => onProblem(webProblem(e).problem), options);
