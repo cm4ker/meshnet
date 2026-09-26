@@ -18,6 +18,7 @@ import { session, useSelector } from "./lib/session.js";
 import { startTray } from "./lib/tray.js";
 import { startCoreWatch } from "./lib/coreWatch.js";
 import { startTidyRule } from "./lib/cleanUp.js";
+import { startFollowPhone } from "./lib/followPhone.js";
 import { isWide, subscribeWide } from "./lib/layout.js";
 import { getNav, openConversation, openProfile, shownConversation, subscribeNav } from "./lib/nav.js";
 
@@ -112,6 +113,9 @@ export function App() {
 
   // The tidy-up rule, when it is on for the radio: it runs while the radio is connected, whatever is on screen.
   useEffect(() => startTidyRule(), []);
+
+  // Following the phone (#34), when it is on for the radio: its position moves after the phone while the app is open.
+  useEffect(() => startFollowPhone(), []);
 
   // A click on a notice opens what it was about.
   useEffect(() => {

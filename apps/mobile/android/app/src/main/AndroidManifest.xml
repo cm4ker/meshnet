@@ -55,8 +55,9 @@
       A radio is reached over Bluetooth LE or Wi-Fi TCP. Scanning on
       Android 12+ takes BLUETOOTH_SCAN, declared as never used for location
       since the client never derives a position from what it hears (the BLE
-      plugin is initialised with `androidNeverForLocation` to match); older
-      releases want the legacy pair and fine location for a scan.
+      plugin is initialised with `androidNeverForLocation` to match, and asks
+      for no location); older releases want the legacy pair and fine location
+      for a scan.
     -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" tools:targetApi="s" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
@@ -66,8 +67,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="30" />
+    <!-- Where the phone is, asked only when a button needs it: the map's "where am I", putting the radio
+         where the phone is, or following the phone while the app is open. Never in the background. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- Notifications are delivered immediately; the app never schedules exact alarms. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" tools:node="remove" />
     <!-- A buzz in place of the signal for the app's own banner while the ringer is on vibrate (NoticesPlugin.chime). -->

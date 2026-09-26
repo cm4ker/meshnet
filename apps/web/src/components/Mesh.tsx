@@ -15,6 +15,8 @@ import { useHears } from "../lib/hears.js";
 import { legId, useLegVerdicts } from "../lib/legVerdicts.js";
 import type { LinkRadio } from "../lib/los.js";
 import { useDiscovery } from "../lib/discovery.js";
+import { FOLLOW_MOVE_M, followsPhone, radioHasGps, useFollowStatus } from "../lib/followPhone.js";
+import { locateOnce, locateText, phoneLocates, usePhone } from "../lib/phonePosition.js";
 import { contactEnd, defaultHeight, discoveryOverlay, EMPTY_OVERLAY, editOverlay, hearsOverlay, losOverlay, neighboursOverlay, relayOf, routeOverlay, selfEnd, spanOverlay, type MapHandle, type MapOverlay } from "../lib/mapOverlay.js";
 import { useMeshTool, type LosEnd } from "../lib/meshTool.js";
 import { focusOnMap, openProfile, takeListLowered, useNav } from "../lib/nav.js";
@@ -473,6 +475,7 @@ function useMeshOverlay(selected: string | null, state: SessionState): MapOverla
 function openSpotMenu(lat: number, lon: number, at: MenuAt): void {
   const self = session.getState().self;
   const online = session.getState().status === "ready";
+  const following = followsPhone(self?.key) && radioHasGps(self?.key) !== true;
   const here = formatLatLon(lat, lon);
   showMenu(
     [
@@ -486,8 +489,9 @@ function openSpotMenu(lat: number, lon: number, at: MenuAt): void {
       {
         label: t("mesh.spot.putHere"),
         icon: <LocationIcon size={17} />,
-        disabled: !online || !self,
-        hint: online && self ? undefined : t("mesh.spot.connectToMove"),
+        // Following the phone, the radio would go back to it with the next move.
+        disabled: !online || !self || following,
+        hint: !online || !self ? t("mesh.spot.connectToMove") : following ? t("mesh.spot.following") : undefined,
         onSelect: () => void moveSelfTo(lat, lon),
       },
       { label: t("mesh.spot.copy"), icon: <CopyIcon size={17} />, group: true, onSelect: () => void navigator.clipboard?.writeText(here).then(() => toast(t("common.copied"), "", undefined, here)) },
@@ -506,9 +510,48 @@ async function moveSelfTo(lat: number, lon: number): Promise<void> {
   toast(t("mesh.spot.movedHere"), "", { label: t("common.undo"), run: () => void act(() => session.setLocation(was.lat, was.lon), t("mesh.spot.movedBack")) }, detail);
 }
 
+/** Whether "where am I" has found the phone in this run of the app: from then on the map shows it. */
+let phoneAsked = false;
+
+/**
+ * The phone on the map (#34): shown once "where am I" found it, or while the
+ * radio follows it, and kept coming only while the map is in sight. Under it,
+ * when this radio is somewhere else, a button puts the radio there.
+ */
+function usePhoneOnMap(state: SessionState, active: boolean) {
+  const locates = phoneLocates();
+  const [asked, setAsked] = useState(phoneAsked);
+  const follow = useFollowStatus(state.self?.key);
+  const following = follow.on && follow.gps !== true;
+  const { fix } = usePhone(locates && active && asked);
+  const phone = locates && (asked || following) ? fix : null;
+  const self = state.self;
+  let putHere: { distance: string | null; onPut: () => void } | null = null;
+  if (phone && self && state.status === "ready" && !following && follow.gps !== true) {
+    // In steps of 10 m, so a fix that wanders a metre does not redraw the button.
+    const far = hasPosition(self.lat, self.lon) ? Math.round(distanceKm(phone.lat, phone.lon, self.lat, self.lon) * 100) / 100 : null;
+    if (far === null || far * 1000 > FOLLOW_MOVE_M) putHere = { distance: far === null ? null : formatDistance(far), onPut: () => void moveSelfTo(phone.lat, phone.lon) };
+  }
+  const onLocate = locates
+    ? async () => {
+        try {
+          const found = await locateOnce();
+          phoneAsked = true;
+          setAsked(true);
+          return found;
+        } catch (error) {
+          toast(locateText(error), "error");
+          return null;
+        }
+      }
+    : undefined;
+  return { phone, putHere, onLocate };
+}
+
 /** The map with the filter applied, the focus and the tool drawn, and taps handed up or to the tool. */
-export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zoomButtons }: { selected: string | null; onSelect: (key: string | null) => void; onGroup: (keys: string[]) => void; coverTop?: number | undefined; coverBottom?: number | undefined; zoomButtons?: boolean | undefined }) {
+export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zoomButtons, active = true }: { selected: string | null; onSelect: (key: string | null) => void; onGroup: (keys: string[]) => void; coverTop?: number | undefined; coverBottom?: number | undefined; zoomButtons?: boolean | undefined; active?: boolean | undefined }) {
   const state = useSession();
+  const { phone, putHere, onLocate } = usePhoneOnMap(state, active);
   const saved = useSavedPasswords();
   const { kind, query } = useFilter();
   const tool = useMeshTool();
@@ -567,7 +610,7 @@ export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zo
   const fit = hub ? { id: `${hub}:${whole ? "all" : "part"}`, points: fitPoints } : null;
   return (
     <Suspense fallback={<div className="empty muted">{t("mesh.map.loading")}</div>}>
-      <MapView selected={selected} onSelect={pick} onGroup={onGroup} filter={test} coverTop={coverTop} coverBottom={coverBottom} zoomButtons={zoomButtons} overlay={overlay} onLeg={leg} onHold={openSpotMenu} onHandleDrop={drop} onHears={tool?.kind === "hears" ? closeTool : whoHearsMe} hearsOn={tool?.kind === "hears"} fit={fit} />
+      <MapView selected={selected} onSelect={pick} onGroup={onGroup} filter={test} coverTop={coverTop} coverBottom={coverBottom} zoomButtons={zoomButtons} overlay={overlay} onLeg={leg} onHold={openSpotMenu} onHandleDrop={drop} onHears={tool?.kind === "hears" ? closeTool : whoHearsMe} hearsOn={tool?.kind === "hears"} fit={fit} phone={phone} putHere={putHere} onLocate={onLocate} />
     </Suspense>
   );
 }
@@ -872,6 +915,7 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
           }}
           coverTop={space.top}
           coverBottom={heights[detent]}
+          active={!hidden}
         />
       ) : null}
       <div ref={sheet} className="mesh-sheet" style={{ height: full, transform: `translate3d(0, ${full - heights[detent]}px, 0)` }}>

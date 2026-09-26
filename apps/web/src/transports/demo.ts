@@ -688,6 +688,9 @@ class DemoRadio extends BaseTransport {
         return [new ByteWriter().u8(Resp.BattAndStorage).u16(3980).u32(120).u32(1024).toBytes()];
       case Cmd.GetTuningParams:
         return [new ByteWriter().u8(Resp.TuningParams).u32(0).u32(1000).toBytes()];
+      case Cmd.GetCustomVars:
+        // The demo radio has no GPS of its own: it is put where the phone is.
+        return [new Uint8Array([Resp.CustomVars])];
       case Cmd.SendTxtMsg: {
         if (frame[1] === TxtType.CliData) {
           const p = this.person(frame.subarray(7, 13));

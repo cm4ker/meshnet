@@ -9,7 +9,9 @@
  * and the lines over the nodes (lib/mapOverlay.ts: a route coloured by a
  * ping, a line of sight), are the caller's: the map draws them and reports
  * taps, on a node, on a line, and a long press anywhere, and a point of a
- * route dragged onto a node. Nothing here asks the air for anything.
+ * route dragged onto a node. The phone, once asked where it is, is a ring
+ * with a button under it that puts this radio there. Nothing here asks the
+ * air for anything.
  */
 
 import * as L from "leaflet";
@@ -22,6 +24,7 @@ import { hasPosition } from "../lib/geo.js";
 import { EMPTY_OVERLAY, type MapHandle, type MapOverlay } from "../lib/mapOverlay.js";
 import type { LosEnd } from "../lib/meshTool.js";
 import { NodeCanvas } from "../lib/nodeCanvas.js";
+import type { Fix } from "../lib/phonePosition.js";
 import type { MenuAt } from "../lib/press.js";
 import { useSession } from "../lib/session.js";
 import { TILE_URL, tileAttribution, tileBlob } from "../lib/tiles.js";
@@ -98,6 +101,24 @@ function selfIcon(name: string): L.DivIcon {
   });
 }
 
+/** The phone: a hollow ring, apart from this radio's filled dot; unnamed under the radio's own name when the two are together. */
+function phoneIcon(named: boolean): L.DivIcon {
+  const name = named ? `<span class="map-name">${escapeHtml(t("mesh.map.phone"))}</span>` : "";
+  return L.divIcon({
+    className: "map-phone",
+    html: `<span class="map-phone-ring"></span>${name}`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+  });
+}
+
+/** The button under the phone's ring; the marker has no size, and the button hangs from its point. */
+function putIcon(distance: string | null): L.DivIcon {
+  const pin = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><circle cx="12" cy="10" r="2"/></svg>';
+  const far = distance ? ` <small>${escapeHtml(distance)}</small>` : "";
+  return L.divIcon({ className: "map-put", html: `<span>${pin}${escapeHtml(t("mesh.map.putHere"))}${far}</span>`, iconSize: [0, 0], iconAnchor: [0, 0] });
+}
+
 
 export interface MapProps {
   /** The node picked, drawn ringed with its route. */
@@ -126,6 +147,12 @@ export interface MapProps {
   hearsOn?: boolean | undefined;
   /** Points to bring into view together, once for each `id`: a repeater and its neighbours. */
   fit?: { id: string; points: [number, number][] } | null | undefined;
+  /** The phone, when it is shown: a ring over a circle of how sure the fix is. */
+  phone?: Fix | null | undefined;
+  /** A button under the phone that puts this radio there, with how far the radio is now. */
+  putHere?: { distance: string | null; onPut: () => void } | null | undefined;
+  /** "Where am I": finds the phone and says where it is, or null to go to this radio instead. */
+  onLocate?: (() => Promise<{ lat: number; lon: number } | null>) | undefined;
 }
 
 /** How near a node, in pixels, a dragged point lets go onto it. */
@@ -145,18 +172,23 @@ function groupingWanted(): boolean {
 /** Where the map was left, so coming back to it, from a profile or another section, finds it there. */
 let lastView: { center: L.LatLng; zoom: number } | null = null;
 
-export default function MapView({ selected, onSelect, onGroup, filter, coverBottom = 0, coverTop = 0, zoomButtons = false, overlay = EMPTY_OVERLAY, onLeg, onHold, onHandleDrop, onHears, hearsOn = false, fit = null }: MapProps) {
+export default function MapView({ selected, onSelect, onGroup, filter, coverBottom = 0, coverTop = 0, zoomButtons = false, overlay = EMPTY_OVERLAY, onLeg, onHold, onHandleDrop, onHears, hearsOn = false, fit = null, phone = null, putHere = null, onLocate }: MapProps) {
   const state = useSession();
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const nodes = useRef<NodeCanvas | null>(null);
   const routeLayer = useRef<L.LayerGroup | null>(null);
   const selfMarker = useRef<L.Marker | null>(null);
+  const phoneMarker = useRef<L.Marker | null>(null);
+  const phoneHalo = useRef<L.Circle | null>(null);
+  const putMarker = useRef<L.Marker | null>(null);
   const fitted = useRef(false);
   const [grouping, setGrouping] = useState(groupingWanted);
+  const [locating, setLocating] = useState(false);
+  const [zoom, setZoom] = useState<number | null>(null);
   // The handlers Leaflet holds are set once; they read the latest callbacks from here.
-  const calls = useRef({ onSelect, onGroup, onLeg, onHold, onHandleDrop });
-  calls.current = { onSelect, onGroup, onLeg, onHold, onHandleDrop };
+  const calls = useRef({ onSelect, onGroup, onLeg, onHold, onHandleDrop, onPut: putHere?.onPut });
+  calls.current = { onSelect, onGroup, onLeg, onHold, onHandleDrop, onPut: putHere?.onPut };
 
   const contacts = state.contacts;
   const selfLat = state.self && hasPosition(state.self.lat, state.self.lon) ? state.self.lat : null;
@@ -237,6 +269,8 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
     m.on("moveend", () => {
       if (m.getSize().y > 0) lastView = { center: m.getCenter(), zoom: m.getZoom() };
     });
+    m.on("zoomend", () => setZoom(m.getZoom()));
+    setZoom(m.getZoom());
     map.current = m;
     // The pane is sized by the layout, which changes when a phone turns or a desktop window is resized.
     const resize = new ResizeObserver(() => m.invalidateSize());
@@ -263,6 +297,9 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
       nodes.current = null;
       routeLayer.current = null;
       selfMarker.current = null;
+      phoneMarker.current = null;
+      phoneHalo.current = null;
+      putMarker.current = null;
       fitted.current = false;
     };
   }, []);
@@ -288,6 +325,55 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
       selfMarker.current.setIcon(selfIcon(selfName));
     }
   }, [self, selfName]);
+
+  // The phone, under this radio's dot when the two are at one spot.
+  const phoneLat = phone?.lat ?? null;
+  const phoneLon = phone?.lon ?? null;
+  const phoneAccuracy = phone?.accuracy ?? null;
+  // Close enough to this radio that the two names would overlap at this zoom, the phone goes unnamed.
+  const phoneNamed = useMemo(() => {
+    const m = map.current;
+    if (!m || zoom === null || phoneLat === null || phoneLon === null || !self) return true;
+    return m.project([phoneLat, phoneLon], zoom).distanceTo(m.project([self.lat, self.lon], zoom)) > 40;
+  }, [zoom, phoneLat, phoneLon, self]);
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    if (phoneLat === null || phoneLon === null || phoneAccuracy === null) {
+      phoneMarker.current?.remove();
+      phoneHalo.current?.remove();
+      phoneMarker.current = null;
+      phoneHalo.current = null;
+      return;
+    }
+    const at = L.latLng(phoneLat, phoneLon);
+    if (!phoneMarker.current) {
+      phoneHalo.current = L.circle(at, { radius: phoneAccuracy, className: "map-phone-halo", interactive: false }).addTo(m);
+      phoneMarker.current = L.marker(at, { icon: phoneIcon(phoneNamed), interactive: false, keyboard: false, zIndexOffset: 900 }).addTo(m);
+    } else {
+      phoneMarker.current.setLatLng(at);
+      phoneHalo.current?.setLatLng(at).setRadius(phoneAccuracy);
+    }
+  }, [phoneLat, phoneLon, phoneAccuracy, phoneNamed]);
+  useEffect(() => {
+    phoneMarker.current?.setIcon(phoneIcon(phoneNamed));
+  }, [phoneNamed]);
+
+  // "Put the radio here", hanging under the phone's ring.
+  const putDistance = putHere ? putHere.distance : undefined;
+  useEffect(() => {
+    const m = map.current;
+    putMarker.current?.remove();
+    putMarker.current = null;
+    if (!m || putDistance === undefined || phoneLat === null || phoneLon === null) return;
+    const label = t("mesh.map.putHere");
+    putMarker.current = L.marker([phoneLat, phoneLon], { icon: putIcon(putDistance), title: label, alt: label, zIndexOffset: 1600 })
+      .on("click", (e) => {
+        L.DomEvent.stopPropagation(e);
+        calls.current.onPut?.();
+      })
+      .addTo(m);
+  }, [putDistance, phoneLat, phoneLon]);
 
   // The lines over the nodes: a route and how it sounded, a line of sight, the answers to "who hears me".
   useEffect(() => {
@@ -502,6 +588,22 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
     else if (points.length > 1) map.current?.fitBounds(L.latLngBounds(points), { ...padding(), maxZoom: 15 });
   };
 
+  const toRadio = () => {
+    const m = map.current;
+    if (m && self) centerOn([self.lat, self.lon], Math.max(m.getZoom(), 14));
+  };
+  // "Where am I" finds the phone, and goes to this radio when the phone cannot say.
+  const locate = async () => {
+    if (!onLocate) return toRadio();
+    if (locating) return;
+    setLocating(true);
+    const at = await onLocate().catch(() => null);
+    setLocating(false);
+    const m = map.current;
+    if (at && m) centerOn([at.lat, at.lon], Math.max(m.getZoom(), 15));
+    else toRadio();
+  };
+
   return (
     <div className="map-view">
       <div ref={box} className="map" />
@@ -540,8 +642,8 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
         <IconButton label={t("mesh.map.showAll")} onClick={fitAll}>
           <FitIcon size={18} />
         </IconButton>
-        {self ? (
-          <IconButton label={t("mesh.map.thisRadio")} onClick={() => map.current && centerOn([self.lat, self.lon], Math.max(map.current.getZoom(), 14))}>
+        {self || onLocate ? (
+          <IconButton label={onLocate ? t("mesh.map.whereAmI") : t("mesh.map.thisRadio")} className={[phone ? "on" : "", locating ? "busy" : ""].join(" ")} aria-busy={locating} onClick={() => void locate()}>
             <LocateIcon size={18} />
           </IconButton>
         ) : null}

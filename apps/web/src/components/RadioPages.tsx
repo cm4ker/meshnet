@@ -1,7 +1,8 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { AdvertLocPolicy, TelemMode, type SessionState } from "@meshnet/meshcore";
 import { autostartEnabled, autostartLabel, hasAutostart, setAutostart } from "../lib/autostart.js";
-import { bandwidth, dayLabel, frequency, timeOfDay } from "../lib/format.js";
+import { agoPhrase, bandwidth, dayLabel, frequency, timeOfDay } from "../lib/format.js";
+import { setFollowPhone, useFollowStatus } from "../lib/followPhone.js";
 import { parseLatLon } from "../lib/geo.js";
 import { disconnect, useLink } from "../lib/link.js";
 import { setLookalikePrefs, useLookalikePrefs } from "../lib/lookalikes.js";
@@ -11,6 +12,7 @@ import { SIGNALS, setNoticePrefs, useNoticePrefs, type Corner, type NoticePrefs 
 import { askPermission, hasNoticeSettings, openNoticeSettings } from "../lib/notify.js";
 import { previewSignal } from "../lib/chime.js";
 import { push, type RadioPage } from "../lib/nav.js";
+import { canLocate, locateOnce, locateText, phoneLocates } from "../lib/phonePosition.js";
 import { nativePlatform, shell } from "../lib/platform.js";
 import { recentStops, relayAvailable, relayWanted, setRelayWanted, setSharing, useRelay, type AppStop } from "../lib/relay.js";
 import { limitLabel, limitValue, parseLimit, ROUTE_LIMITS } from "../lib/routes.js";
@@ -238,35 +240,67 @@ function Offline() {
 }
 
 function NamePage({ self, online }: { self: Self; online: boolean }) {
-  const locate = () => {
-    navigator.geolocation?.getCurrentPosition(
-      (pos) => void act(() => session.setLocation(Number(pos.coords.latitude.toFixed(6)), Number(pos.coords.longitude.toFixed(6))), t("radio.name.positionTaken")),
-      (error) => toast(error.message || t("radio.name.noPosition"), "error"),
-      { enableHighAccuracy: true, timeout: 10_000 },
-    );
+  const follow = useFollowStatus(self.key);
+  const [locating, setLocating] = useState(false);
+  // The radio's own GPS writes its position itself; the phone would argue with it.
+  const following = follow.on && follow.gps !== true;
+  const locate = async () => {
+    setLocating(true);
+    try {
+      const fix = await locateOnce();
+      await act(() => session.setLocation(Number(fix.lat.toFixed(6)), Number(fix.lon.toFixed(6))), t("radio.name.positionTaken"));
+    } catch (error) {
+      toast(locateText(error), "error");
+    } finally {
+      setLocating(false);
+    }
   };
+  // Turned on, it asks the phone at once: the system's question comes up now, while the switch is in hand.
+  const setFollow = async (on: boolean) => {
+    if (!on) return setFollowPhone(self.key, false);
+    setLocating(true);
+    try {
+      await locateOnce();
+      setFollowPhone(self.key, true);
+    } catch (error) {
+      toast(locateText(error), "error");
+    } finally {
+      setLocating(false);
+    }
+  };
+  const followHint =
+    follow.gps === true
+      ? t("radio.name.followGps")
+      : !follow.on
+        ? t("radio.name.followHint")
+        : follow.rough !== null
+          ? t("radio.name.followRough", { accuracy: follow.rough })
+          : follow.wrote
+            ? t("radio.name.followWrote", { time: agoPhrase(follow.wrote.at), accuracy: follow.wrote.accuracy })
+            : t("radio.name.followWaiting");
+  const shared = self.advertLocPolicy !== AdvertLocPolicy.None;
   return (
     <>
       <Group>
         <CommitField label={t("radio.name.name")} hint={t("radio.name.nameHint")} value={self.name} maxLength={31} disabled={!online} onCommit={(name) => session.setName(name)} check={(text) => (text ? null : t("radio.name.nameEmpty"))} />
       </Group>
       <Group title={t("radio.name.position")}>
+        {phoneLocates() ? <SwitchRow label={t("radio.name.follow")} hint={followHint} checked={following} disabled={!online || locating || follow.gps === true} onChange={(v) => void setFollow(v)} /> : null}
         <CommitField
           label={t("radio.name.latitude")}
-          hint={t("radio.name.latitudeHint")}
+          hint={following ? undefined : t("radio.name.latitudeHint")}
           value={String(self.lat)}
           inputMode="decimal"
-          disabled={!online}
+          disabled={!online || following}
           check={orBoth(number(-90, 90, "radio.check.latitude"))}
           onCommit={(text) => setPosition(text, (n) => session.setLocation(n, self.lon))}
         />
-        <CommitField label={t("radio.name.longitude")} value={String(self.lon)} inputMode="decimal" disabled={!online} check={orBoth(number(-180, 180, "radio.check.longitude"))} onCommit={(text) => setPosition(text, (n) => session.setLocation(self.lat, n))} />
-        {/* Android location permissions are limited to legacy BLE scanning; positions remain editable manually. */}
-        {nativePlatform() !== "android" && "geolocation" in navigator ? <ActionRow label={t("radio.name.useDevice")} disabled={!online} onClick={locate} /> : null}
+        <CommitField label={t("radio.name.longitude")} value={String(self.lon)} inputMode="decimal" disabled={!online || following} check={orBoth(number(-180, 180, "radio.check.longitude"))} onCommit={(text) => setPosition(text, (n) => session.setLocation(self.lat, n))} />
+        {canLocate() && !following ? <ActionRow label={t("radio.name.useDevice")} disabled={!online} busy={locating} onClick={() => void locate()} /> : null}
         <SwitchRow
           label={t("radio.name.share")}
-          hint={t("radio.name.shareHint")}
-          checked={self.advertLocPolicy !== AdvertLocPolicy.None}
+          hint={shared && following ? t("radio.name.shareFollowHint") : t("radio.name.shareHint")}
+          checked={shared}
           disabled={!online}
           onChange={(v) => void saveOther(self, { advertLocPolicy: v ? AdvertLocPolicy.Share : AdvertLocPolicy.None })}
         />

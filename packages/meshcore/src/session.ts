@@ -2631,6 +2631,11 @@ export class MeshSession {
     return { noiseFloor, lastRssi, lastSnr, txAirSecs, rxAirSecs, at: this.now() };
   }
 
+  /** The radio's settings for its sensors, such as whether its own GPS is on (`gps` is "1"). Asked of the radio, not of the air. */
+  customVars(): Promise<Record<string, string>> {
+    return this.need().getCustomVars();
+  }
+
   // ---- repeaters, rooms and sensors ----
   //
   // The radio keeps one request to a remote node pending at a time: each new
