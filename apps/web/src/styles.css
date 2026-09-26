@@ -331,6 +331,10 @@ code,
 .input-reveal .input {
   padding-right: var(--control-h);
 }
+/* Edge and the Windows app's WebView2 draw an eye of their own; one is enough. */
+.input-reveal .input::-ms-reveal {
+  display: none;
+}
 .input-reveal-button {
   position: absolute;
   top: 0;
