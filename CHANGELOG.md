@@ -7,6 +7,11 @@
 ### The name
 - The app is called Ommesh everywhere: on the desktop and in a browser, as on a phone. On Windows the update takes Meshnet's place: the same folder, the Start menu and desktop shortcuts renamed, one entry in Installed apps, and autostart, history and settings kept.
 
+### Connecting
+- The connect screen puts one radio at the top: the one being connected to, or else the last one. Its card shows the name, the way and the address, Connect, and the switch to connect at launch. While the radio connects, the card says which try it is and which step it has reached (the link, the radio answering, contacts and channels), and Cancel stops it, the connect at launch included. A radio that asks for a PIN gets the field in the card. A failure is one line with what to check and Try again; the rest of the message is behind Details.
+- The search under the tabs runs by itself and pauses while a radio connects, so only one thing moves on the screen. Radios come first, the strongest on top. Phones sharing a radio, and ports that are not a radio's cable, fold under "N more". Names lose "MeshCore-", and the second line is the address.
+- Updates and the privacy policy are a small line at the bottom.
+
 ### Mesh and the map
 - On a phone, a node tapped in the list or on the map opens its profile at once, as on a desktop. The card in between, with only a Profile button for a repeater, is gone. Back returns to the map with the node ringed and its route drawn, and "On map" lowers the list so the map has the room.
 - The Mesh list starts right under the search. What to show, the order, "Yours and favourites on top" and fetching every contact again sit behind the button beside the search, which carries a dot when something is changed; each change shows as a chip under the search, taken off by its cross. The list is one list by default. "Who hears me" is a button on the map.
@@ -19,6 +24,8 @@
 - Numbers are written the reader's way, 3,38 in Russian, and a position says how far and which way, with a link to the map.
 
 ### Fixes
+- After Disconnect, connecting to another radio stays on the connect screen. It used to bring back the old radio's chats with "Reconnecting".
+- On Windows, a Bluetooth connect that was given up can no longer close the next connection when it finishes late.
 - A current flowing back, such as a battery charging through an INA sensor, reads as negative. The firmware's CayenneLPP writes voltage and current signed, and the app read them unsigned, so -16 mA showed as 65.52 A and the power as 228 W.
 - On the desktop, a radio on USB whose board speaks through TinyUSB (the nRF52 ones: T-Echo, RAK) connects. The port opened with DTR off, and such a radio answers nothing until the computer raises it.
 - A sensor's power reads as its voltage times its current when the channel carries both, so 3.38 V at 119 mA shows 402 mW rather than 0 mW. The firmware sends power in whole watts. A sensor's History does the same with its means, and with its lows and highs for the range.
