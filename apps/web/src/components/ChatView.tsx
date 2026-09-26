@@ -1,11 +1,14 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AdvType, isConversationType, isDirect, parseConversation, type ContactRecord, type MessageRecord, type SessionState } from "@meshnet/meshcore";
+import { useBackLayer } from "../lib/back.js";
 import { GEO, MENTION } from "../lib/composer.js";
 import { messagesIn, shownAt, titleOf } from "../lib/conversations.js";
 import { nameOfHash, relaysOf } from "../lib/echoes.js";
 import { getOpenAtUnread, takeUnread } from "../lib/firstUnread.js";
 import { agoPhrase, dayLabel, emojiOnly, timeOfDay } from "../lib/format.js";
 import { useJumboEmoji } from "../lib/jumboEmoji.js";
+import { onJump, takeJump, type Jump } from "../lib/jump.js";
+import { findMessages, searchTerm } from "../lib/messageSearch.js";
 import { openChannel, openMessage, openProfile } from "../lib/nav.js";
 import { heardAt, hopsLabel, kindLabel } from "../lib/nodes.js";
 import { openRoute } from "../lib/toolActions.js";
@@ -15,7 +18,7 @@ import { triesPhrase } from "../lib/sendTries.js";
 import { sendersOf } from "../lib/senders.js";
 import { session, useSession } from "../lib/session.js";
 import { toast } from "../lib/toast.js";
-import { IconButton } from "../ui/Button.js";
+import { Button, IconButton } from "../ui/Button.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
 import { Avatar, SenderName } from "./Avatar.js";
 import { Composer, type Reply } from "./Composer.js";
@@ -25,6 +28,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ChevronUpIcon,
   ClockIcon,
   CopyIcon,
   DoubleCheckIcon,
@@ -35,12 +39,17 @@ import {
   NodesIcon,
   RefreshIcon,
   ReplyIcon,
+  SearchIcon,
   StopIcon,
   TrashIcon,
   WavesIcon,
 } from "./Icons.js";
+import { marked } from "./Marked.js";
 import { ScreenHead, type Chrome } from "./ScreenHead.js";
 import { t } from "../i18n/index.js";
+
+/** Asks the open chat for its own search, from Ctrl+F on the desktop. */
+export const FIND_IN_CHAT_EVENT = "meshnet:find-in-chat";
 
 export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversation: string; chrome: Chrome; infoOpen?: boolean | undefined; onInfo?: () => void }) {
   const state = useSession();
@@ -162,6 +171,80 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
     el?.scrollTo({ top: el.scrollHeight, behavior: still ? "auto" : "smooth" });
   };
 
+  // One message in the middle of the list.
+  const centre = useCallback(
+    (id: string) => {
+      const el = scroller.current;
+      const row = el?.querySelector(`[data-id="${CSS.escape(id)}"]`);
+      if (!el || !row) return;
+      const box = el.getBoundingClientRect();
+      const at = row.getBoundingClientRect();
+      el.scrollTop += at.top - box.top - (box.height - at.height) / 2;
+      stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      measure();
+    },
+    [measure],
+  );
+
+  // Opened from a result of the search over all chats (#42): the message flashes, and the words it
+  // was found by stay marked in it until the chat is left.
+  const [found, setFound] = useState<Jump | null>(() => takeJump(conversation));
+  const [flashing, setFlashing] = useState<string | null>(() => found?.id ?? null);
+  useLayoutEffect(() => {
+    if (found) centre(found.id);
+  }, [found, centre]);
+  useEffect(() => {
+    if (!flashing) return;
+    const done = setTimeout(() => setFlashing(null), 1800);
+    return () => clearTimeout(done);
+  }, [flashing]);
+
+  // The chat's own search: every match marked, one at a time in sight, the newest first.
+  const [finding, setFinding] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [picked, setPicked] = useState<string | null>(null);
+  const findField = useRef<HTMLInputElement>(null);
+  const matches = useMemo(() => (finding ? findMessages(messages, findQuery) : []), [finding, messages, findQuery]);
+  const matched = useMemo(() => new Set(matches.map((m) => m.id)), [matches]);
+  // Held by its id, so a match arriving meanwhile does not move the one looked at.
+  const index = Math.max(0, matches.findIndex((m) => m.id === picked));
+  const current = matches[index]?.id ?? null;
+  const move = (by: number) => {
+    const next = matches[index + by];
+    if (next) setPicked(next.id);
+  };
+  const closeFind = useCallback(() => {
+    setFinding(false);
+    setFindQuery("");
+    setPicked(null);
+  }, []);
+  const openFind = useCallback(() => {
+    setFound(null);
+    setFinding(true);
+    findField.current?.focus();
+    findField.current?.select();
+  }, []);
+  useBackLayer(finding, closeFind);
+  useLayoutEffect(() => {
+    if (current) centre(current);
+  }, [current, centre]);
+  useEffect(() => {
+    window.addEventListener(FIND_IN_CHAT_EVENT, openFind);
+    return () => window.removeEventListener(FIND_IN_CHAT_EVENT, openFind);
+  }, [openFind]);
+  // A result picked while this chat is already open, as on the desktop.
+  useEffect(
+    () =>
+      onJump((jump) => {
+        if (jump.conversation !== conversation) return;
+        takeJump(conversation);
+        closeFind();
+        setFound(jump);
+        setFlashing(jump.id);
+      }),
+    [conversation, closeFind],
+  );
+
   useReveal(scroller, inner, (id) => {
     const message = messages.find((m) => m.id === id);
     if (message) answer(message);
@@ -173,35 +256,73 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
   const me = state.self?.name ?? null;
 
   return (
-    <div className="screen chat">
-      <ScreenHead
-        chrome={chrome}
-        actions={
-          onInfo ? (
-            <IconButton label={t("chats.chat.details")} className={infoOpen ? "on" : ""} aria-pressed={infoOpen} onClick={onInfo}>
-              <InfoIcon size={18} />
-            </IconButton>
-          ) : undefined
-        }
-      >
-        <button type="button" className="chat-who" onClick={details} disabled={!details} aria-label={t("chats.chat.about", { name: title })}>
-          <Avatar name={title} type={contact?.type} channel={target.kind === "channel"} size={32} />
-        </button>
-        <span className="screen-name-stack">
-          <button type="button" className="chat-who screen-name" onClick={details} disabled={!details}>
-            {title}
+    <div className={["screen chat", finding ? "finding" : ""].join(" ")}>
+      {finding ? (
+        <header className="screen-head chat-find-head">
+          <label className="search">
+            <SearchIcon size={15} />
+            <input
+              ref={findField}
+              value={findQuery}
+              autoFocus
+              onChange={(e) => {
+                setFindQuery(e.target.value);
+                setPicked(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  move(e.shiftKey ? -1 : 1);
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  closeFind();
+                }
+              }}
+              placeholder={t("chats.find.placeholder")}
+              aria-label={t("chats.find.placeholder")}
+              enterKeyHint="search"
+              data-chat-find
+            />
+          </label>
+          <Button variant="ghost" size="sm" onClick={closeFind}>
+            {t("common.cancel")}
+          </Button>
+        </header>
+      ) : (
+        <ScreenHead
+          chrome={chrome}
+          actions={
+            <>
+              <IconButton label={onInfo ? t("chats.find.buttonKey") : t("chats.find.button")} onClick={openFind}>
+                <SearchIcon size={18} />
+              </IconButton>
+              {onInfo ? (
+                <IconButton label={t("chats.chat.details")} className={infoOpen ? "on" : ""} aria-pressed={infoOpen} onClick={onInfo}>
+                  <InfoIcon size={18} />
+                </IconButton>
+              ) : null}
+            </>
+          }
+        >
+          <button type="button" className="chat-who" onClick={details} disabled={!details} aria-label={t("chats.chat.about", { name: title })}>
+            <Avatar name={title} type={contact?.type} channel={target.kind === "channel"} size={32} />
           </button>
-          {route && contact ? (
-            <button type="button" className={["chat-route", route.tone].join(" ")} onClick={() => openRoute(contact.key)}>
-              {route.tone === "pinned" ? <WavesIcon size={12} /> : null}
-              <span>{route.text}</span>
-              <ChevronRightIcon size={11} />
+          <span className="screen-name-stack">
+            <button type="button" className="chat-who screen-name" onClick={details} disabled={!details}>
+              {title}
             </button>
-          ) : target.kind === "contact" && (!contact || contact.unsaved) ? (
-            <span className="chat-route">{t("chats.chat.notOnRadio")}</span>
-          ) : null}
-        </span>
-      </ScreenHead>
+            {route && contact ? (
+              <button type="button" className={["chat-route", route.tone].join(" ")} onClick={() => openRoute(contact.key)}>
+                {route.tone === "pinned" ? <WavesIcon size={12} /> : null}
+                <span>{route.text}</span>
+                <ChevronRightIcon size={11} />
+              </button>
+            ) : target.kind === "contact" && (!contact || contact.unsaved) ? (
+              <span className="chat-route">{t("chats.chat.notOnRadio")}</span>
+            ) : null}
+          </span>
+        </ScreenHead>
+      )}
 
       <div
         className="chat-scroll"
@@ -235,6 +356,9 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
                   onReply={voice && m.sender ? answer : undefined}
                   onWho={voice ? who : undefined}
                   contacts={m.direction === "out" ? state.contacts : undefined}
+                  mark={finding ? (matched.has(m.id) ? findQuery : undefined) : found?.id === m.id ? found.query : undefined}
+                  current={m.id === current}
+                  flash={m.id === flashing}
                 />
               </div>
             );
@@ -254,6 +378,22 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
           <ChevronDownIcon size={20} />
         </button>
       </div>
+
+      {/* Searching, the field goes and the way between the matches takes its place. */}
+      {finding ? (
+        <footer className="chat-find-bar">
+          <span className="chat-find-count muted" aria-live="polite">
+            {searchTerm(findQuery) === null ? "" : matches.length ? t("chats.find.count", { n: index + 1, count: matches.length }) : t("chats.find.none")}
+          </span>
+          {/* Kept from taking the focus, so the keyboard stays up for another word. */}
+          <IconButton label={t("chats.find.older")} disabled={index >= matches.length - 1} onPointerDown={(e) => e.preventDefault()} onClick={() => move(1)}>
+            <ChevronUpIcon size={20} />
+          </IconButton>
+          <IconButton label={t("chats.find.newer")} disabled={index <= 0} onPointerDown={(e) => e.preventDefault()} onClick={() => move(-1)}>
+            <ChevronDownIcon size={20} />
+          </IconButton>
+        </footer>
+      ) : null}
 
       {target.kind === "contact" && (contact?.unsaved || (!contact && state.removed[target.key])) ? (
         <footer className="compose">
@@ -283,14 +423,17 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
   );
 }
 
-/** A message's text, with mentions and positions picked out; a mention of this radio stands out more. */
-function richText(text: string, me: string | null): ReactNode {
+/**
+ * A message's text, with mentions and positions picked out; a mention of this radio stands out
+ * more. Searched, the words found are marked in the text between them.
+ */
+function richText(text: string, me: string | null, mark: string | undefined): ReactNode {
   const pattern = new RegExp(`${MENTION.source}|${GEO.source}`, "g");
   const out: ReactNode[] = [];
   let at = 0;
   for (const m of text.matchAll(pattern)) {
     const start = m.index ?? 0;
-    if (start > at) out.push(text.slice(at, start));
+    if (start > at) out.push(marked(text.slice(at, start), mark));
     if (m[1] !== undefined) {
       out.push(
         <span key={start} className={m[1] === me ? "mention me" : "mention"}>
@@ -307,8 +450,8 @@ function richText(text: string, me: string | null): ReactNode {
     }
     at = start + m[0].length;
   }
-  if (at === 0) return text;
-  if (at < text.length) out.push(text.slice(at));
+  if (at === 0) return marked(text, mark);
+  if (at < text.length) out.push(marked(text.slice(at), mark));
   return out.map((part, i) => <Fragment key={i}>{part}</Fragment>);
 }
 
@@ -346,13 +489,19 @@ interface MessageProps {
   onWho: ((message: MessageRecord) => void) | undefined;
   /** For a message of ours only: the relays that echoed it are named from them. */
   contacts: SessionState["contacts"] | undefined;
+  /** What a search found it by, marked in its text. */
+  mark: string | undefined;
+  /** The match the chat's search has in sight. */
+  current: boolean;
+  /** Just opened from a search result. */
+  flash: boolean;
 }
 
 /**
  * One bubble. Memoised: a message arriving, or an echo of one, changes one record, and the
  * other bubbles of a long conversation have nothing new to draw.
  */
-const Message = memo(function Message({ message, lead, showSender, avatar, me, onReply: replyTo, onWho, contacts }: MessageProps) {
+const Message = memo(function Message({ message, lead, showSender, avatar, me, onReply: replyTo, onWho, contacts, mark, current, flash }: MessageProps) {
   const out = message.direction === "out";
   const [busy, setBusy] = useState(false);
   const large = useJumboEmoji();
@@ -435,7 +584,7 @@ const Message = memo(function Message({ message, lead, showSender, avatar, me, o
         <div
           role="button"
           tabIndex={0}
-          className={jumbo ? `jumbo jumbo-${jumbo}` : ["bubble", bad ? "bad" : ""].join(" ")}
+          className={[jumbo ? `jumbo jumbo-${jumbo}` : "bubble", bad ? "bad" : "", current ? "msg-current" : "", flash ? "msg-flash" : ""].join(" ")}
           onClick={() => {
             // A click that ends a text selection is not a tap.
             if (String(window.getSelection?.() ?? "").length > 0) return;
@@ -451,7 +600,7 @@ const Message = memo(function Message({ message, lead, showSender, avatar, me, o
           {...press}
         >
           {showSender && message.sender ? <SenderName name={message.sender} /> : null}
-          <span className="msg-text">{richText(message.text, me)}</span>
+          <span className="msg-text">{richText(message.text, me, mark)}</span>
           <span className="msg-meta">
             {tech ? <span className="msg-tech">{tech} ·</span> : null}
             <span>{timeOfDay(shownAt(message))}</span>

@@ -12,6 +12,8 @@
 
 ### Chats
 - A message of one to three emoji and nothing else is drawn large, without a bubble, with its time on a small patch under it.
+- The Find field over the chats finds messages in every chat as well as chats by name. From two letters, the messages that hold the word come in their own group, the newest first, each with its chat, who wrote it and the words around it, the word marked. A tap opens the chat at that message, which flashes; Back returns to the results. Case and ё do not matter.
+- A chat's magnifier, or Ctrl+F on a desktop, finds within that chat. Every match is marked, the one in sight ringed, and the arrows under the list, or Enter and Shift+Enter, step to earlier and later ones. Ctrl+F pressed again goes to the Find field over the chats.
 
 ### Connecting
 - The connect screen puts one radio at the top: the one being connected to, or else the last one. Its card shows the name, the way and the address, Connect, and the switch to connect at launch. While the radio connects, the card says which try it is and which step it has reached (the link, the radio answering, contacts and channels), and Cancel stops it, the connect at launch included. A radio that asks for a PIN gets the field in the card. A failure is one line with what to check and Try again; the rest of the message is behind Details.

@@ -1,9 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { isFavourite, parseConversation } from "@meshnet/meshcore";
-import { CHAT_ORDERS, changed, chatGroups, getChatOrder, setChatOrder, useChatOrder } from "../lib/chatOrder.js";
+import { isFavourite, parseConversation, TxtType, type MessageRecord } from "@meshnet/meshcore";
+import { CHAT_ORDERS, changed, chatGroups, chatsInOrder, getChatOrder, setChatOrder, useChatOrder } from "../lib/chatOrder.js";
 import { ago } from "../lib/format.js";
 import { summarize, type ConversationSummary } from "../lib/conversations.js";
 import { useDraft } from "../lib/drafts.js";
+import { jumpTo } from "../lib/jump.js";
+import { findMessages, fold, snippet } from "../lib/messageSearch.js";
 import { openConversation, setStack } from "../lib/nav.js";
 import { useNoticePrefs } from "../lib/noticePrefs.js";
 import { usePress, type MenuAt } from "../lib/press.js";
@@ -13,17 +15,30 @@ import { IconButton } from "../ui/Button.js";
 import { Confirm } from "../ui/Dialog.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
-import { BellOffIcon, CheckIcon, ChevronDownIcon, HashIcon, PersonIcon, PlusIcon, SearchIcon, SortIcon, StarFilledIcon, TrashIcon } from "./Icons.js";
+import { BellOffIcon, CheckIcon, ChevronDownIcon, CloseIcon, HashIcon, PersonIcon, PlusIcon, SearchIcon, SortIcon, StarFilledIcon, TrashIcon } from "./Icons.js";
+import { marked } from "./Marked.js";
 import { NewChat } from "./NewChat.js";
 import { t } from "../i18n/index.js";
 
 /** Asks the chat list to open its New chat sheet, from a shortcut or the palette. */
 export const NEW_CHAT_EVENT = "meshnet:new-chat";
 
+/** Results drawn at a time; a common word can be in thousands of messages. */
+const PAGE = 100;
+
+// The query outlives the list: Back from a result, or a trip to another tab, finds it as it was left.
+let keptQuery = "";
+
 export function ChatList({ selected }: { selected: string | null }) {
   const state = useSession();
   const rows = useMemo(() => summarize(state), [state]);
-  const [query, setQuery] = useState("");
+  const [query, setQueryState] = useState(keptQuery);
+  const [limit, setLimit] = useState(PAGE);
+  const setQuery = (q: string) => {
+    keptQuery = q;
+    setQueryState(q);
+    setLimit(PAGE);
+  };
   const [adding, setAdding] = useState(false);
   const [deleting, setDeleting] = useState<ConversationSummary | null>(null);
   const order = useChatOrder();
@@ -34,10 +49,14 @@ export function ChatList({ selected }: { selected: string | null }) {
     return () => window.removeEventListener(NEW_CHAT_EVENT, open);
   }, []);
 
-  const q = query.trim().toLowerCase();
-  const shown = q ? rows.filter((r) => r.title.toLowerCase().includes(q) || (r.preview ?? "").toLowerCase().includes(q)) : rows;
-  const groups = chatGroups(shown, order);
+  // A query finds chats by name and, from two letters, messages in every chat (#42).
+  const q = fold(query.trim());
+  const byId = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
+  const chatsFound = q ? chatsInOrder(rows.filter((r) => fold(r.title).includes(q)), order) : [];
+  const found = useMemo(() => findMessages(state.messages, query).filter((m) => byId.has(m.conversation)), [state.messages, query, byId]);
+  const groups = chatGroups(rows, order);
   const unread = rows.filter((r) => r.unread > 0).length;
+  const chatRow = (row: ConversationSummary) => <ChatRow key={row.id} row={row} radio={state.self?.key ?? ""} selected={selected === row.id} onDelete={() => setDeleting(row)} />;
 
   return (
     <div className="list-pane">
@@ -49,10 +68,55 @@ export function ChatList({ selected }: { selected: string | null }) {
       </header>
       <label className="search">
         <SearchIcon size={15} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("chats.list.find")} aria-label={t("chats.list.findLabel")} data-find />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && query) {
+              e.preventDefault();
+              setQuery("");
+            }
+          }}
+          placeholder={t("chats.list.find")}
+          aria-label={t("chats.list.findLabel")}
+          enterKeyHint="search"
+          data-find
+        />
+        {query ? (
+          <button type="button" className="search-clear" aria-label={t("chats.search.clear")} onClick={() => setQuery("")}>
+            <CloseIcon size={14} />
+          </button>
+        ) : null}
       </label>
       {rows.length === 0 ? (
         <div className="empty muted">{t("chats.list.empty")}</div>
+      ) : q ? (
+        <div className="list">
+          {chatsFound.length === 0 && found.length === 0 ? <div className="empty muted">{t("chats.list.noMatch")}</div> : null}
+          {chatsFound.length ? (
+            <>
+              <div className="list-group">{t("chats.search.chats")}</div>
+              <ul className="list-rows" role="list">
+                {chatsFound.map(chatRow)}
+              </ul>
+            </>
+          ) : null}
+          {found.length ? (
+            <>
+              <div className="list-group">{t("chats.search.messages", { count: found.length })}</div>
+              <ul className="list-rows" role="list">
+                {found.slice(0, limit).map((m) => (
+                  <FoundRow key={m.id} message={m} row={byId.get(m.conversation)!} query={query} />
+                ))}
+              </ul>
+              {found.length > limit ? (
+                <button type="button" className="list-more" onClick={() => setLimit(limit + PAGE)}>
+                  {t("chats.search.more", { count: Math.min(PAGE, found.length - limit) })}
+                </button>
+              ) : null}
+            </>
+          ) : null}
+        </div>
       ) : (
         <div className="list">
           <div className="list-summary muted">
@@ -62,20 +126,14 @@ export function ChatList({ selected }: { selected: string | null }) {
             </span>
             <SortButton />
           </div>
-          {shown.length === 0 ? (
-            <div className="empty muted">{t("chats.list.noMatch")}</div>
-          ) : (
-            groups.map((g) => (
-              <Fragment key={g.title}>
-                <div className="list-group">{g.title}</div>
-                <ul className="list-rows" role="list">
-                  {g.rows.map((row) => (
-                    <ChatRow key={row.id} row={row} radio={state.self?.key ?? ""} selected={selected === row.id} onDelete={() => setDeleting(row)} />
-                  ))}
-                </ul>
-              </Fragment>
-            ))
-          )}
+          {groups.map((g) => (
+            <Fragment key={g.title}>
+              <div className="list-group">{g.title}</div>
+              <ul className="list-rows" role="list">
+                {g.rows.map(chatRow)}
+              </ul>
+            </Fragment>
+          ))}
         </div>
       )}
       <NewChat open={adding} onClose={() => setAdding(false)} />
@@ -143,6 +201,42 @@ function openSortMenu(at: MenuAt): void {
       },
     ],
     { title: t("chats.order.menuTitle"), at },
+  );
+}
+
+/** A message the search found: its chat, who wrote it, the words around the match. Tapped, the chat opens at it. */
+function FoundRow({ message, row, query }: { message: MessageRecord; row: ConversationSummary; query: string }) {
+  const who =
+    message.direction === "out"
+      ? t("chats.search.you")
+      : (row.kind === "channel" || message.txtType === TxtType.SignedPlain) && message.sender
+        ? `${message.sender}:`
+        : null;
+  return (
+    <li>
+      <button
+        type="button"
+        className="row"
+        onClick={() => {
+          jumpTo({ conversation: message.conversation, id: message.id, query });
+          openConversation(message.conversation);
+        }}
+      >
+        <Avatar name={row.title} type={row.contact?.type} channel={row.kind === "channel"} size={44} />
+        <span className="row-main">
+          <span className="row-top">
+            <span className="row-title">{row.title}</span>
+            <span className="row-when muted">{ago(message.receivedAt)}</span>
+          </span>
+          <span className="row-bottom">
+            <span className="row-sub muted">
+              {who ? `${who} ` : ""}
+              {marked(snippet(message.text, query), query)}
+            </span>
+          </span>
+        </span>
+      </button>
+    </li>
   );
 }
 

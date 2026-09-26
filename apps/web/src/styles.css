@@ -1389,6 +1389,80 @@ textarea.input {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
+/* The cross that empties a search field. */
+.search-clear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-right: -6px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.search-clear:hover {
+  color: var(--text);
+}
+.search-clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* A word a search found (#42), in a result or in a message. */
+mark {
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--warning) 34%, transparent);
+  color: inherit;
+}
+.row-sub mark {
+  color: var(--text);
+}
+/* Under a page of results, the next page. */
+.list-more {
+  display: block;
+  width: 100%;
+  min-height: calc(44px * var(--box-scale));
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.list-more:hover {
+  background: var(--hover);
+}
+.list-more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* A chat's own search: the field in place of its head, and in place of the composer the way between the matches. */
+.chat-find-head .search {
+  flex: 1;
+  margin: 0 0 0 var(--space-2);
+}
+.chat.finding > .compose {
+  display: none;
+}
+.chat-find-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 52px;
+  padding: var(--space-1) var(--space-2) max(var(--space-1), var(--safe-bottom)) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.chat-find-count {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
 
 .list {
   list-style: none;
@@ -2837,6 +2911,41 @@ html.notices-window #root {
 }
 .bubble:focus-visible {
   outline: 2px solid var(--accent);
+}
+/* The chat's own search (#42): the match in sight ringed, its words in the ring's colour. */
+.msg-current {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.msg-current mark {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+/* Opened from a result of the search over all chats, a message flashes once. */
+.msg-flash {
+  animation: msg-flash 1.8s ease-out;
+}
+@keyframes msg-flash {
+  0%,
+  40% {
+    outline: 3px solid var(--accent);
+    outline-offset: 1px;
+  }
+  100% {
+    outline: 3px solid transparent;
+    outline-offset: 1px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-flash {
+    animation: none;
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+}
+.jumbo.msg-current,
+.jumbo.msg-flash {
+  border-radius: 12px;
 }
 /* One to three emoji and nothing else (#41): large on the chat's own ground, no bubble, the time on a patch of its own under them. */
 .jumbo {

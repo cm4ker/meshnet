@@ -19,7 +19,7 @@ import { Button } from "../ui/Button.js";
 import { Prompt } from "../ui/Dialog.js";
 import { ChannelView } from "./ChannelView.js";
 import { ChatList, NEW_CHAT_EVENT } from "./ChatList.js";
-import { ChatView } from "./ChatView.js";
+import { ChatView, FIND_IN_CHAT_EVENT } from "./ChatView.js";
 import { AlertIcon, ChatIcon, LinkIcon, NodesIcon, RadioIcon, SearchIcon, SettingsIcon } from "./Icons.js";
 import { MeshList, MeshMap, MeshPhone, useMeshAttention } from "./Mesh.js";
 import { MessageView } from "./MessageView.js";
@@ -519,8 +519,13 @@ function useDesktopKeys({ openPalette, togglePanel, escape }: { openPalette: () 
         goSection("chats");
         setTimeout(() => window.dispatchEvent(new Event(NEW_CHAT_EVENT)));
       } else if (mod && key === "f") {
+        // With a chat open, its own search (#42); pressed again there, the list's field, which searches every chat.
+        const inChat = document.activeElement?.hasAttribute("data-chat-find") ?? false;
         const find = document.querySelector<HTMLInputElement>(".pane [data-find]");
-        if (find) {
+        if (!inChat && getNav().section === "chats" && shownConversation(getNav(), true)) {
+          e.preventDefault();
+          window.dispatchEvent(new Event(FIND_IN_CHAT_EVENT));
+        } else if (find) {
           e.preventDefault();
           find.focus();
           find.select();
