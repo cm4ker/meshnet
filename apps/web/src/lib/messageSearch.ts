@@ -6,18 +6,28 @@
 
 import type { MessageRecord } from "@meshnet/meshcore";
 import { shownAt } from "./conversations.js";
+import { TWINS } from "./lookalikes.js";
 
 /** A shorter query finds too much to be of use; two code units still let one emoji through. */
 export const MIN_QUERY = 2;
 
-/** Lower case, ё as е, letter for letter: a place in the result is the same place in the text. */
+// Russian goes out with its Latin lookalikes (lookalikes.ts), from this app and from others, so
+// a Cyrillic letter and its twin are read as the twin: "мост" finds "Mocт". A capital's twin
+// counts for its small letter too, as В goes out as B and so в is read as b.
+const SAME: Record<string, string> = { ё: "e" };
+for (const [cyrillic, latin] of Object.entries(TWINS)) SAME[cyrillic.toLowerCase()] = latin.toLowerCase();
+
+/**
+ * Lower case, ё as е, a lookalike as its Latin twin; letter for letter, so a
+ * place in the result is the same place in the text.
+ */
 export function fold(text: string): string {
   let out = "";
   for (const ch of text) {
     const low = ch.toLowerCase();
-    out += low.length === ch.length ? low : ch;
+    out += low.length === ch.length ? (SAME[low] ?? low) : ch;
   }
-  return out.replaceAll("ё", "е");
+  return out;
 }
 
 /** The query as it is matched, or null while it is too short to search. */

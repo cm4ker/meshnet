@@ -34,6 +34,9 @@ const EXACT: Record<string, string> = {
 /** The same in most typefaces, not in every one: the Cyrillic у has a straighter tail in some. */
 const NEAR: Record<string, string> = { у: "y", У: "Y" };
 
+/** Every letter that may have gone out as a Latin twin, with its twin; a search reads them as one. */
+export const TWINS: Readonly<Record<string, string>> = { ...EXACT, ...NEAR };
+
 export interface LookalikePrefs {
   on: boolean;
   /** Also у and У. */

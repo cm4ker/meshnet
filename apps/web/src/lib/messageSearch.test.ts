@@ -28,15 +28,26 @@ function message(id: string, text: string, timestamp: number, conversation = "ch
   };
 }
 
-test("folding lowers case and reads ё as е, keeping every place", () => {
-  assert.equal(fold("Ёлка у МОСТА"), "елка у моста");
+test("folding lowers case, reads ё as е and a lookalike as its twin, keeping every place", () => {
+  assert.equal(fold("Ёлка у МОСТА"), fold("елка у моста"));
+  assert.equal(fold("ёж"), fold("еж"));
   assert.equal(fold("İstanbul").length, "İstanbul".length);
   assert.equal(fold("👍 Ok"), "👍 ok");
+  assert.equal(fold("Мост").length, 4);
+});
+
+test("Russian sent with Latin twins is found by its Cyrillic words, and back", () => {
+  // As packLookalikes sends them: а е о р с х and the capitals В К М Н Т go out Latin.
+  const packed = [message("a", "Pетpанcлятop на xолме cнова pаботает", 2), message("b", "Bот Mоcт", 1)];
+  assert.deepEqual(findMessages(packed, "ретранслятор").map((m) => m.id), ["a"]);
+  assert.deepEqual(findMessages(packed, "вот мост").map((m) => m.id), ["b"]);
+  assert.deepEqual(findMessages([message("c", "ретранслятор", 1)], "Pетpанcлятop").map((m) => m.id), ["c"]);
+  assert.deepEqual(matchRanges("У Pетpанcлятоpа", "ретранслятор"), [[2, 14]]);
 });
 
 test("a query of one letter is not searched; one emoji is", () => {
   assert.equal(searchTerm(" м "), null);
-  assert.equal(searchTerm("мо"), "мо");
+  assert.equal(searchTerm("мо"), fold("мо"));
   assert.equal(searchTerm("👍"), "👍");
 });
 

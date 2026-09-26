@@ -12,7 +12,7 @@
 
 ### Chats
 - A message of one to three emoji and nothing else is drawn large, without a bubble, with its time on a small patch under it.
-- The Find field over the chats finds messages in every chat as well as chats by name. From two letters, the messages that hold the word come in their own group, the newest first, each with its chat, who wrote it and the words around it, the word marked. A tap opens the chat at that message, which flashes; Back returns to the results. Case and ё do not matter.
+- The Find field over the chats finds messages in every chat as well as chats by name. From two letters, the messages that hold the word come in their own group, the newest first, each with its chat, who wrote it and the words around it, the word marked. A tap opens the chat at that message, which flashes; Back returns to the results. Case and ё do not matter, and Russian sent with Latin lookalike letters is found by its Russian words.
 - A chat's magnifier, or Ctrl+F on a desktop, finds within that chat. Every match is marked, the one in sight ringed, and the arrows under the list, or Enter and Shift+Enter, step to earlier and later ones. Ctrl+F pressed again goes to the Find field over the chats.
 
 ### Connecting
