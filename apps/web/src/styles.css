@@ -323,6 +323,37 @@ code,
 .input-prefixed .input {
   padding-left: calc(var(--space-2) + 1ch);
 }
+/* A password field with the eye that shows it. */
+.input-reveal {
+  position: relative;
+  display: block;
+}
+.input-reveal .input {
+  padding-right: var(--control-h);
+}
+.input-reveal-button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .input-reveal-button:hover {
+    color: var(--text);
+  }
+}
+.input-reveal-button[aria-pressed="true"] {
+  color: var(--accent);
+}
 .select {
   appearance: auto;
 }

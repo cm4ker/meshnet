@@ -1,4 +1,6 @@
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import { useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from "react";
+import { EyeIcon, EyeOffIcon } from "../components/Icons.js";
+import { t } from "../i18n/index.js";
 
 export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return (
@@ -12,6 +14,21 @@ export function Field({ label, hint, children }: { label: string; hint?: ReactNo
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   return <input className="input" {...props} />;
+}
+
+/** A password field with an eye at its end that shows what was typed, and hides it again. */
+export function PasswordInput(props: Omit<InputHTMLAttributes<HTMLInputElement>, "type">) {
+  const [shown, setShown] = useState(false);
+  const label = shown ? t("common.hidePassword") : t("common.showPassword");
+  return (
+    <span className="input-reveal">
+      <input className="input" type={shown ? "text" : "password"} autoCapitalize="off" autoCorrect="off" spellCheck={false} {...props} />
+      {/* Pressing it keeps the focus, and a phone's keyboard, in the field. */}
+      <button type="button" className="input-reveal-button" aria-label={label} title={label} aria-pressed={shown} onMouseDown={(e) => e.preventDefault()} onClick={() => setShown(!shown)}>
+        {shown ? <EyeOffIcon size={18} /> : <EyeIcon size={18} />}
+      </button>
+    </span>
+  );
 }
 
 export function Select({ children, ...rest }: SelectHTMLAttributes<HTMLSelectElement> & { children: ReactNode }) {

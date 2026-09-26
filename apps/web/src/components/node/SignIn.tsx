@@ -7,6 +7,7 @@ import { forgetPassword, hasSavedPassword, passwordStoreHint, readPassword, save
 import { session, useSession } from "../../lib/session.js";
 import { Button } from "../../ui/Button.js";
 import { Dialog } from "../../ui/Dialog.js";
+import { PasswordInput } from "../../ui/Field.js";
 import { Avatar } from "../Avatar.js";
 import { roleName } from "./Access.js";
 
@@ -104,9 +105,7 @@ export function SignIn({
         )}
         <label className="field">
           <span className="field-label">{t("node.signIn.password")}</span>
-          <input
-            className="input"
-            type="password"
+          <PasswordInput
             value={password}
             autoComplete="current-password"
             placeholder={contact?.type === AdvType.Sensor ? t("node.signIn.adminPassword") : t("node.signIn.adminOrGuest")}

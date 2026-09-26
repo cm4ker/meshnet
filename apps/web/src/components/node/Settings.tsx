@@ -24,7 +24,7 @@ import { hasSavedPassword, savePassword } from "../../lib/secrets.js";
 import { session, useSession } from "../../lib/session.js";
 import { Button } from "../../ui/Button.js";
 import { Confirm } from "../../ui/Dialog.js";
-import { Section } from "../../ui/Field.js";
+import { PasswordInput, Section } from "../../ui/Field.js";
 import { AlertIcon } from "../Icons.js";
 
 /** How long a trial of new radio settings lasts before the node falls back by itself. */
@@ -261,7 +261,7 @@ export function Settings({ contact }: { contact: ContactRecord }) {
           <div className="form-grid">
             <label className="field">
               <span className="field-label">{t("node.settings.newPassword")}</span>
-              <input className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              <PasswordInput autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
               <span className={["field-hint", passwordTooLong ? "danger" : ""].join(" ")}>
                 {passwordTooLong ? t("node.settings.passwordTooLong", { max: MAX_PASSWORD_LEN }) : t("node.settings.writeOnly")}
               </span>

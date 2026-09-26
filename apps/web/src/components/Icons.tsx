@@ -28,6 +28,8 @@ export const ContactsIcon = icon('<circle cx="9" cy="8" r="3.5"/><path d="M3 20c
 export const RadioIcon = icon('<circle cx="12" cy="13" r="2.5"/><path d="M7.5 17.5a6.5 6.5 0 0 1 0-9M16.5 8.5a6.5 6.5 0 0 1 0 9"/><path d="M4.5 20.5a10.5 10.5 0 0 1 0-15M19.5 5.5a10.5 10.5 0 0 1 0 15"/>');
 export const LogIcon = icon('<path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/>');
 export const SettingsIcon = icon('<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>');
+export const EyeIcon = icon('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>');
+export const EyeOffIcon = icon('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/><path d="M4 20L20 4"/>');
 export const BackIcon = icon('<path d="M15 5l-7 7 7 7"/>');
 export const SendIcon = icon('<path d="M4 12l16-8-6 16-2-6z"/>');
 export const BluetoothIcon = icon('<path d="M7 7l10 10-5 4V3l5 4L7 17"/>');
