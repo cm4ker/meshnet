@@ -2,7 +2,7 @@ import { useState } from "react";
 import { lppTypeName, NoReplyError, type ContactRecord, type LppReading, type SeriesSummary } from "@meshnet/meshcore";
 import { errorText } from "../../i18n/errors.js";
 import { t, type Key } from "../../i18n/index.js";
-import { ago } from "../../lib/format.js";
+import { ago, powerSummary } from "../../lib/format.js";
 import { session, useSession } from "../../lib/session.js";
 import { Button } from "../../ui/Button.js";
 import { Section } from "../../ui/Field.js";
@@ -108,7 +108,7 @@ export function History({ contact }: { contact: ContactRecord }) {
           <Section title={t("node.history.ranges")}>
             <div className="ranges">
               {shown.series.map((s, i) => (
-                <RangeRow key={i} summary={s} />
+                <RangeRow key={i} summary={lppTypeName(s.lppType) === "power" ? powerSummary(s, shown.series) : s} />
               ))}
             </div>
           </Section>

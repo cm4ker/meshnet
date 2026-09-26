@@ -1,6 +1,6 @@
 /** Small formatters shared by the views. */
 
-import type { LppReading } from "@meshnet/meshcore";
+import { lppTypeName, type LppReading, type SeriesSummary } from "@meshnet/meshcore";
 import { locale, t } from "../i18n/index.js";
 
 /*
@@ -150,4 +150,17 @@ export function powerWatts(reading: { channel: number; watts: number }, readings
     else if (r.type === "current") amps = r.amps;
   }
   return volts !== null && amps !== null ? volts * amps : reading.watts;
+}
+
+/**
+ * A power series, which comes in whole watts too, so a sensor drawing 0.4 W reads 0 all through.
+ * With voltage and current on its channel, their product stands in: the means multiplied for the
+ * mean, the lows and the highs for the ends, which bound the range rather than measure it.
+ */
+export function powerSummary(summary: SeriesSummary, series: readonly SeriesSummary[]): SeriesSummary {
+  const on = (type: LppReading["type"]) => series.find((s) => s.channel === summary.channel && lppTypeName(s.lppType) === type);
+  const volts = on("voltage");
+  const amps = on("current");
+  if (!volts || !amps) return summary;
+  return { ...summary, min: volts.min * amps.min, max: volts.max * amps.max, avg: volts.avg * amps.avg };
 }
