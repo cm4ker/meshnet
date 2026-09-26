@@ -3,7 +3,7 @@ import { AdvType, NoReplyError, TelemMode, type BatterySample, type ContactRecor
 import { errorText } from "../i18n/errors.js";
 import { locale, t } from "../i18n/index.js";
 import { BATTERY_TYPES, batteryTypeLabel, setBatteryType, useChosenBatteryType } from "../lib/batteryType.js";
-import { ago, agoPhrase, batteryPercent } from "../lib/format.js";
+import { ago, agoPhrase, batteryPercent, lowCharge } from "../lib/format.js";
 import { openNodePage, push, showOnMap } from "../lib/nav.js";
 import { clockDrift, isAdmin } from "../lib/nodes.js";
 import { session, useSession } from "../lib/session.js";
@@ -14,9 +14,7 @@ import { AlertIcon, CheckIcon } from "./Icons.js";
 import { numberText, Readings } from "./Readings.js";
 import { Sparkline } from "./node/Sparkline.js";
 
-/** Below this a single lithium cell is close to the cut-off. */
-export const LOW_BATTERY_MV = 3600;
-/** A week's fall this large says the battery is going down. */
+/** A week's fall this large says the battery is going down, and the week reads as from → to. */
 const FALLING_MV = 50;
 /** A node's clock this far off ours is worth setting. */
 const DRIFT_WORTH_FIXING_S = 30;
@@ -29,7 +27,8 @@ interface Tile {
   value: string;
   unit?: string | undefined;
   sub?: string | undefined;
-  warn?: string | undefined;
+  /** The value wants a look: it turns amber, with a sign so it is not colour alone. */
+  low?: boolean | undefined;
   line?: { values: number[]; times: number[]; unit: string; digits: number } | undefined;
   onClick?: (() => void) | undefined;
 }
@@ -37,16 +36,9 @@ interface Tile {
 function TileView({ tile }: { tile: Tile }) {
   const body = (
     <>
-      <span className="reading-label">
-        {tile.label}
-        {tile.warn ? (
-          <span className="pill warn">
-            <AlertIcon size={11} />
-            {tile.warn}
-          </span>
-        ) : null}
-      </span>
-      <span className="reading-value">
+      <span className="reading-label">{tile.label}</span>
+      <span className={["reading-value", tile.low ? "low" : ""].join(" ")} title={tile.low ? t("node.readings.lowCharge") : undefined}>
+        {tile.low ? <AlertIcon size={15} role="img" aria-hidden={false} aria-label={t("node.readings.lowCharge")} /> : null}
         {tile.value}
         {tile.unit ? <small>{tile.unit}</small> : null}
       </span>
@@ -69,13 +61,12 @@ function volts(mv: number): string {
 
 /**
  * The battery, as a charge by the cell someone picked for this node, or "≈" by Li-ion when
- * nobody did; this radio's own reads without "≈". A week of answers draws its line, and a
- * tap picks the cell.
+ * nobody did; this radio's own reads without "≈". A low charge colours the number, judged by
+ * the same cell. A week of answers draws its line, and a tap picks the cell.
  */
 function batteryTile(mv: number, history: BatterySample[], chosen: ReturnType<typeof useChosenBatteryType>, own: boolean, onClick: () => void): Tile {
   const type = chosen ?? "liion";
   const percent = batteryPercent(mv, type);
-  const low = mv > 0 && mv < LOW_BATTERY_MV;
   const first = history[0];
   const last = history.at(-1);
   const falling = !!first && !!last && history.length > 1 && first.mv - last.mv >= FALLING_MV;
@@ -96,7 +87,7 @@ function batteryTile(mv: number, history: BatterySample[], chosen: ReturnType<ty
     value: chosen || own ? String(percent) : t("radio.readings.about", { value: percent }),
     unit: t("node.unit.percent"),
     sub: [volts(mv), kind, week ? t("node.readings.week", { range: week }) : null].filter(Boolean).join(" · "),
-    warn: low ? t("node.readings.low") : falling ? t("node.readings.falling") : undefined,
+    low: lowCharge(mv, type),
     line: { values: history.map((s) => s.mv / 1000), times: history.map((s) => s.at), unit: t("node.unit.volt"), digits: 2 },
     onClick,
   };

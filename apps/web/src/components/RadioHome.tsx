@@ -1,7 +1,7 @@
 import { useRef, useSyncExternalStore } from "react";
 import { useBatteryType } from "../lib/batteryType.js";
 import { t } from "../i18n/index.js";
-import { battery, batteryPercent } from "../lib/format.js";
+import { battery, batteryPercent, lowCharge } from "../lib/format.js";
 import { disconnect, useLink } from "../lib/link.js";
 import { useLookalikePrefs } from "../lib/lookalikes.js";
 import { openRadioPage, type RadioPage } from "../lib/nav.js";
@@ -19,7 +19,7 @@ import { Button, IconButton } from "../ui/Button.js";
 import { Group, LinkRow } from "../ui/List.js";
 import { showMenu } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
-import { AirIcon, BellIcon, GaugeIcon, InfoIcon, LinkIcon, LocationIcon, LogIcon, PaletteIcon, PowerIcon, RadioIcon, RefreshIcon, ShieldIcon, SlidersIcon, TextIcon, UsersIcon, WavesIcon } from "./Icons.js";
+import { AirIcon, AlertIcon, BellIcon, GaugeIcon, InfoIcon, LinkIcon, LocationIcon, LogIcon, PaletteIcon, PowerIcon, RadioIcon, RefreshIcon, ShieldIcon, SlidersIcon, TextIcon, UsersIcon, WavesIcon } from "./Icons.js";
 import { presetName, radioTitle } from "./RadioPages.js";
 import { readingsSummary } from "./Readings.js";
 
@@ -48,6 +48,7 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
   const self = state.self;
   const online = state.status === "ready";
   const cell = useBatteryType(self?.key);
+  const low = !!state.battery && lowCharge(state.battery.mv, cell);
   const own = state.telemetry["self"];
   const row = (page: RadioPage, icon: React.ReactNode, value?: string) => (
     <LinkRow key={page} icon={icon} label={radioTitle(page)} value={value} tone={page === "power" ? "danger" : undefined} selected={selected === page} onClick={() => openRadioPage(page)} />
@@ -104,7 +105,10 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
             <button type="button" className="radio-battery" disabled={!self} title={t("radio.titles.readings")} onClick={() => openRadioPage("readings")}>
               {state.battery ? (
                 <>
-                  <b>{batteryPercent(state.battery.mv, cell)}%</b>
+                  <b className={low ? "low" : undefined} title={low ? t("node.readings.lowCharge") : undefined}>
+                    {low ? <AlertIcon size={13} role="img" aria-hidden={false} aria-label={t("node.readings.lowCharge")} /> : null}
+                    {batteryPercent(state.battery.mv, cell)}%
+                  </b>
                   <small>{battery(state.battery.mv)}</small>
                 </>
               ) : (

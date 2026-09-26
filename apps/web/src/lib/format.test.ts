@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { LppReading, SeriesSummary } from "@meshnet/meshcore";
-import { batteryPercent, powerSummary, powerWatts, trailingEmoji } from "./format.js";
+import { batteryPercent, lowCharge, powerSummary, powerWatts, trailingEmoji } from "./format.js";
 
 test("the emoji a name ends with goes on its circle", () => {
   assert.equal(trailingEmoji("Fox 🦊"), "🦊");
@@ -24,6 +24,19 @@ test("a LiFePO4 cell near full reads near full, not nearly empty (#26)", () => {
   assert.equal(batteryPercent(3350), 8);
   assert.equal(batteryPercent(3650, "lifepo4"), 100);
   assert.equal(batteryPercent(3200, "lifepo4"), 20);
+});
+
+test("a full LiFePO4 is not low, though a Li-ion at its volts would be (#31)", () => {
+  assert.equal(lowCharge(3430, "lifepo4"), false);
+  assert.equal(lowCharge(3430), true);
+});
+
+test("a cell is low at 20% of its own curve and below", () => {
+  assert.equal(lowCharge(3530), true);
+  assert.equal(lowCharge(3550), false);
+  assert.equal(lowCharge(3200, "lifepo4"), true);
+  assert.equal(lowCharge(3230, "lifepo4"), false);
+  assert.equal(lowCharge(0), false);
 });
 
 test("a charge is read off the curve, straight between its points, and kept within 0 to 100", () => {

@@ -52,6 +52,17 @@ export function useBatteryType(radioKey: string | undefined): BatteryType {
   );
 }
 
+/** Every cell picked so far, by node key, for a list that judges many nodes' batteries at once. */
+export function useBatteryTypes(): Readonly<Record<string, BatteryType>> {
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    () => types,
+  );
+}
+
 /** The cell someone picked for this node, or null when nobody has. */
 export function useChosenBatteryType(radioKey: string | undefined): BatteryType | null {
   return useSyncExternalStore(

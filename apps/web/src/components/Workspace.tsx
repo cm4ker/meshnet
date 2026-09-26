@@ -3,7 +3,7 @@ import { useBackLayer, useSectionsBack } from "../lib/back.js";
 import { chatsInOrder, getChatOrder } from "../lib/chatOrder.js";
 import { summarize, totalUnread } from "../lib/conversations.js";
 import { useBatteryType } from "../lib/batteryType.js";
-import { batteryPercent } from "../lib/format.js";
+import { batteryPercent, lowCharge } from "../lib/format.js";
 import { pairLink, reconnectNow, useLink } from "../lib/link.js";
 import { useWide } from "../lib/layout.js";
 import { back, focusOnMap, getNav, goSection, openConversation, setStack, shownConversation, topOf, useNav, type Nav, type Screen, type Section } from "../lib/nav.js";
@@ -20,7 +20,7 @@ import { Prompt } from "../ui/Dialog.js";
 import { ChannelView } from "./ChannelView.js";
 import { ChatList, NEW_CHAT_EVENT } from "./ChatList.js";
 import { ChatView } from "./ChatView.js";
-import { ChatIcon, LinkIcon, NodesIcon, RadioIcon, SearchIcon } from "./Icons.js";
+import { AlertIcon, ChatIcon, LinkIcon, NodesIcon, RadioIcon, SearchIcon } from "./Icons.js";
 import { MeshList, MeshMap, MeshPhone, useMeshAttention } from "./Mesh.js";
 import { MessageView } from "./MessageView.js";
 import { NodePageView } from "./node/NodePage.js";
@@ -436,7 +436,14 @@ function Desktop() {
         <button type="button" className="rail-radio" title={state.link ? `${state.self?.name ?? t("connect.tabs.radio")} · ${state.link.label}` : t("connect.rail.theRadio")} onClick={() => setStack("radio", [{ kind: "radio", page: "connection" }])}>
           {state.link ? <LinkIcon kind={state.link.kind} size={16} /> : <RadioIcon size={16} />}
           <span className={["dot", badges.offline ? "off" : "on"].join(" ")} aria-hidden="true" />
-          <span className="tab-label">{state.battery ? `${batteryPercent(state.battery.mv, cell)}%` : "—"}</span>
+          {state.battery && lowCharge(state.battery.mv, cell) ? (
+            <span className="tab-label low" title={t("node.readings.lowCharge")}>
+              <AlertIcon size={10} role="img" aria-hidden={false} aria-label={t("node.readings.lowCharge")} />
+              {batteryPercent(state.battery.mv, cell)}%
+            </span>
+          ) : (
+            <span className="tab-label">{state.battery ? `${batteryPercent(state.battery.mv, cell)}%` : "—"}</span>
+          )}
         </button>
       </nav>
       <aside className="pane">{list}</aside>

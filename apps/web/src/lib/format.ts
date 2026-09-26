@@ -126,6 +126,17 @@ export function batteryPercent(mv: number, type: BatteryType = "liion"): number 
   return 0;
 }
 
+/** At or below this charge a cell wants charging soon, whatever it is made of. */
+export const LOW_CHARGE_PERCENT = 20;
+
+/**
+ * Whether a cell is low, judged by its charge on the curve of what it is made of (#31): a fixed
+ * voltage made for Li-ion calls every LiFePO4 flat. No reading is not low.
+ */
+export function lowCharge(mv: number, type: BatteryType = "liion"): boolean {
+  return mv > 0 && batteryPercent(mv, type) <= LOW_CHARGE_PERCENT;
+}
+
 export function utf8Length(text: string): number {
   return new TextEncoder().encode(text).length;
 }

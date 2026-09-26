@@ -8,7 +8,8 @@ import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect
 import { AdvertLocPolicy, AdvType, isFavourite, type ContactRecord, type SessionState } from "@meshnet/meshcore";
 import { t, type Key } from "../i18n/index.js";
 import { useBackLayer } from "../lib/back.js";
-import { ago, battery } from "../lib/format.js";
+import { useBatteryTypes } from "../lib/batteryType.js";
+import { ago, batteryPercent, lowCharge, type BatteryType } from "../lib/format.js";
 import { bearingDeg, compass, distanceKm, formatDistance, formatLatLon, hasPosition } from "../lib/geo.js";
 import { useHears } from "../lib/hears.js";
 import { legId, useLegVerdicts } from "../lib/legVerdicts.js";
@@ -35,8 +36,7 @@ import { ActionRow, Block, Group, SwitchRow } from "../ui/List.js";
 import { showMenu } from "../ui/Menu.js";
 import { Sheet } from "../ui/Sheet.js";
 import { Avatar } from "./Avatar.js";
-import { ChartIcon, CloseIcon, CopyIcon, LocationIcon, SearchIcon, SlidersIcon, StarFilledIcon } from "./Icons.js";
-import { LOW_BATTERY_MV } from "./NodeReadings.js";
+import { AlertIcon, ChartIcon, CloseIcon, CopyIcon, LocationIcon, SearchIcon, SlidersIcon, StarFilledIcon } from "./Icons.js";
 import { ToolPanel } from "./tools/ToolPanel.js";
 
 // Leaflet and its styles load with the map, not with the app.
@@ -111,15 +111,17 @@ function matcher(state: SessionState, saved: readonly string[], kind: Kind, quer
   };
 }
 
-/** A node of yours in trouble: its last status says its battery is low. */
-export function lowBattery(state: SessionState, key: string): boolean {
+/** A node of yours in trouble: its last status says its battery is low, by the cell picked for it. */
+function lowBattery(state: SessionState, key: string, types: Readonly<Record<string, BatteryType>>): boolean {
   const last = state.statusHistory[key]?.at(-1);
-  return !!last && last.batteryMv > 0 && last.batteryMv < LOW_BATTERY_MV;
+  return !!last && lowCharge(last.batteryMv, types[key]);
 }
 
 /** Whether any node of yours needs a look, for the dot on the Mesh tab. */
 export function useMeshAttention(): boolean {
-  return useSelector((state) => Object.keys(state.statusHistory).some((key) => state.contacts[key] && lowBattery(state, key)));
+  // The cells live outside the session, so picking one judges the nodes again at once.
+  const types = useBatteryTypes();
+  return useSelector((state) => Object.keys(state.statusHistory).some((key) => state.contacts[key] && lowBattery(state, key, types)));
 }
 
 function whereFrom(self: SessionState["self"], c: ContactRecord): string | null {
@@ -265,6 +267,7 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
   const saved = useSavedPasswords();
   const { kind, query } = useFilter();
   const { order, pinned } = useNodeOrder();
+  const cells = useBatteryTypes();
   const all = Object.values(state.contacts);
   const rows = all.filter(only ? (c) => only.includes(c.key) : matcher(state, saved, kind, query)).sort(nodeComparator(order, state.self));
   const mine = (c: ContactRecord) => isYours(state, saved, c);
@@ -288,6 +291,7 @@ function MeshListBody({ selected, onOpen, hideSearch = false, only }: { selected
             onOpen={open}
             login={state.logins[c.key]}
             last={state.statusHistory[c.key]?.at(-1)}
+            cell={cells[c.key]}
             self={state.self}
             minute={minute}
           />
@@ -368,6 +372,8 @@ interface NodeRowProps {
   onOpen: (key: string) => void;
   login: SessionState["logins"][string] | undefined;
   last: SessionState["statusHistory"][string][number] | undefined;
+  /** The cell picked for the node, which its charge is counted by. */
+  cell: BatteryType | undefined;
   self: SessionState["self"];
   /** Only so the row's "5 min" moves on when the list next renders. */
   minute: number;
@@ -377,13 +383,15 @@ interface NodeRowProps {
  * One node in the list. Memoised: an advert changes one contact, and the other rows,
  * eighty of them in a busy mesh, have nothing new to draw.
  */
-const NodeRow = memo(function NodeRow({ contact: c, selected, yours, onOpen, login, last, self }: NodeRowProps) {
-  const low = !!last && last.batteryMv > 0 && last.batteryMv < LOW_BATTERY_MV;
+const NodeRow = memo(function NodeRow({ contact: c, selected, yours, onOpen, login, last, cell, self }: NodeRowProps) {
   // Most nodes have no route and flood, and many no position: said on every row it says nothing, so the profile says it.
   const route = yours ? null : routeWords(c);
   const bits = yours
-    ? [kindLabel(c.type), login?.ok ? t("mesh.row.signedIn") : t("mesh.row.notSignedIn"), last ? battery(last.batteryMv) : null]
+    ? [kindLabel(c.type), login?.ok ? t("mesh.row.signedIn") : t("mesh.row.notSignedIn")]
     : [kindLabel(c.type), c.unsaved ? t("mesh.row.notOnRadio") : whereFrom(self, c)];
+  // A node of yours says its charge as its readings do: by its cell, "≈" by Li-ion until one is picked.
+  const percent = yours && last && last.batteryMv > 0 ? batteryPercent(last.batteryMv, cell) : null;
+  const low = !!last && lowCharge(last.batteryMv, cell);
   return (
     <li>
       <button type="button" className={["row", selected ? "selected" : ""].join(" ")} onClick={() => onOpen(c.key)}>
@@ -399,9 +407,17 @@ const NodeRow = memo(function NodeRow({ contact: c, selected, yours, onOpen, log
           <span className="row-bottom">
             <span className="row-sub muted">
               {bits.filter(Boolean).join(" · ")}
+              {percent !== null ? (
+                <>
+                  {" · "}
+                  <span className={low ? "row-low" : undefined} title={low ? t("mesh.row.batteryLow") : undefined}>
+                    {low ? <AlertIcon size={11} role="img" aria-hidden={false} aria-label={t("mesh.row.batteryLow")} /> : null}
+                    {t("mesh.row.charge", { value: cell ? percent : t("radio.readings.about", { value: percent }) })}
+                  </span>
+                </>
+              ) : null}
               {route && route.tone !== "none" ? <span className={route.tone === "pinned" ? "" : "route-known"}> · {route.text}</span> : null}
             </span>
-            {yours ? <span className={["dot", low ? "warn" : last ? "on" : "stale"].join(" ")} title={low ? t("mesh.row.batteryLow") : last ? t("mesh.row.healthy") : t("mesh.row.noStatus")} /> : null}
           </span>
         </span>
       </button>
