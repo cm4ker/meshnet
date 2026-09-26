@@ -3,7 +3,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 
-def appVersion = new groovy.json.JsonSlurper().parse(rootProject.file('../../../package.json')).version
+// CI names each build (0.3.0-dev.108.1, from scripts/release.mjs); the web About page shows the same.
+def appVersion = System.getenv('MESHNET_VERSION') ?: new groovy.json.JsonSlurper().parse(rootProject.file('../../../package.json')).version
 def buildNumber = System.getenv('ANDROID_VERSION_CODE') ?: '1'
 if (!(buildNumber ==~ /[1-9][0-9]*/) || new BigInteger(buildNumber) > 2100000000) {
     throw new GradleException('ANDROID_VERSION_CODE must be an integer from 1 to 2100000000.')

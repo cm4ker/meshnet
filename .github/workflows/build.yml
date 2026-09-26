@@ -125,10 +125,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: node scripts/release.mjs prepare
       # A fixed debug key lets each APK install over the previous one. PRs from forks
-      # have no secrets and fall back to a throwaway key.
+      # have no secrets and fall back to a throwaway key. The run number grows with
+      # every build, so Android takes a newer APK as an update of the older one.
       - name: Build APK
         env:
           ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+          ANDROID_VERSION_CODE: ${{ github.run_number }}
         run: |
           set -euo pipefail
           if [ -n "$ANDROID_DEBUG_KEYSTORE_BASE64" ]; then
