@@ -1,5 +1,6 @@
 /** Small formatters shared by the views. */
 
+import type { LppReading } from "@meshnet/meshcore";
 import { locale, t } from "../i18n/index.js";
 
 /*
@@ -133,4 +134,20 @@ export function utf8Length(text: string): number {
 export function agoPhrase(ms: number | null, now = Date.now()): string {
   const text = ago(ms, now);
   return !ms || now - ms < 60_000 || now - ms >= 7 * 86_400_000 ? text : t("common.ago", { time: text });
+}
+
+/**
+ * A power reading's watts. The firmware sends power in whole watts (LPP_POWER), so a sensor
+ * drawing 0.4 W says 0; when its channel also carries voltage and current, their product is
+ * the finer figure.
+ */
+export function powerWatts(reading: { channel: number; watts: number }, readings: readonly LppReading[]): number {
+  let volts: number | null = null;
+  let amps: number | null = null;
+  for (const r of readings) {
+    if (r.channel !== reading.channel) continue;
+    if (r.type === "voltage") volts = r.volts;
+    else if (r.type === "current") amps = r.amps;
+  }
+  return volts !== null && amps !== null ? volts * amps : reading.watts;
 }

@@ -1,5 +1,6 @@
 import type { LppReading } from "@meshnet/meshcore";
 import { locale, t, type Key } from "../i18n/index.js";
+import { powerWatts } from "../lib/format.js";
 import { InfoRow } from "../ui/List.js";
 
 /** What each kind of reading measures. */
@@ -40,13 +41,13 @@ export function Readings({ readings }: { readings: LppReading[] }) {
     <>
       {readings.map((r, i) => (
         <InfoRow key={i} label={t(LABELS[r.type])} hint={t("radio.readings.channel", { channel: r.channel })}>
-          {value(r)}
+          {value(r, readings)}
         </InfoRow>
       ))}
     </>
   );
 }
-function value(r: LppReading): string {
+function value(r: LppReading, readings: readonly LppReading[]): string {
   switch (r.type) {
     case "voltage":
       return t("common.volts", { value: r.volts.toFixed(2) });
@@ -59,8 +60,7 @@ function value(r: LppReading): string {
     case "current":
       return t("radio.readings.milliamps", { value: Math.round(r.amps * 1000) });
     case "power":
-      // Sent in whole watts (LPP_POWER), so a milliwatt figure is only ever a thousand of them.
-      return t("radio.readings.milliwatts", { value: r.watts * 1000 });
+      return t("radio.readings.milliwatts", { value: Math.round(powerWatts(r, readings) * 1000) });
     case "energy":
       return t("radio.readings.kwh", { value: r.kwh.toFixed(3) });
     case "luminosity":
