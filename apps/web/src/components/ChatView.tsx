@@ -19,6 +19,7 @@ import { sendersOf } from "../lib/senders.js";
 import { session, useSession } from "../lib/session.js";
 import { toast } from "../lib/toast.js";
 import { Button, IconButton } from "../ui/Button.js";
+import { SearchField } from "../ui/Field.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
 import { Avatar, SenderName } from "./Avatar.js";
 import { Composer, type Reply } from "./Composer.js";
@@ -259,31 +260,28 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
     <div className={["screen chat", finding ? "finding" : ""].join(" ")}>
       {finding ? (
         <header className="screen-head chat-find-head">
-          <label className="search">
-            <SearchIcon size={15} />
-            <input
-              ref={findField}
-              value={findQuery}
-              autoFocus
-              onChange={(e) => {
-                setFindQuery(e.target.value);
-                setPicked(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  move(e.shiftKey ? -1 : 1);
-                } else if (e.key === "Escape") {
-                  e.preventDefault();
-                  closeFind();
-                }
-              }}
-              placeholder={t("chats.find.placeholder")}
-              aria-label={t("chats.find.placeholder")}
-              enterKeyHint="search"
-              data-chat-find
-            />
-          </label>
+          <SearchField
+            ref={findField}
+            value={findQuery}
+            autoFocus
+            onValue={(next) => {
+              setFindQuery(next);
+              setPicked(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                move(e.shiftKey ? -1 : 1);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                closeFind();
+              }
+            }}
+            placeholder={t("chats.find.placeholder")}
+            aria-label={t("chats.find.placeholder")}
+            enterKeyHint="search"
+            data-chat-find
+          />
           <Button variant="ghost" size="sm" onClick={closeFind}>
             {t("common.cancel")}
           </Button>

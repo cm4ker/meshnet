@@ -6,10 +6,11 @@ import { heardAt, kindLabel } from "../lib/nodes.js";
 import { routeWords } from "../lib/routes.js";
 import { session, useSession } from "../lib/session.js";
 import { Button } from "../ui/Button.js";
+import { SearchField } from "../ui/Field.js";
 import { Group, LinkRow } from "../ui/List.js";
 import { Sheet } from "../ui/Sheet.js";
 import { Avatar } from "./Avatar.js";
-import { HashIcon, KeyIcon, PersonIcon, PlusIcon, SearchIcon } from "./Icons.js";
+import { HashIcon, KeyIcon, PersonIcon, PlusIcon } from "./Icons.js";
 import { errorText } from "../i18n/errors.js";
 import { t } from "../i18n/index.js";
 
@@ -62,10 +63,7 @@ function People({ onDone }: { onDone: () => void }) {
   }, [state.contacts, query]);
   return (
     <>
-      <label className="search">
-        <SearchIcon size={15} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("chats.list.find")} aria-label={t("chats.newChat.findLabel")} autoFocus />
-      </label>
+      <SearchField value={query} onValue={setQuery} placeholder={t("chats.list.find")} aria-label={t("chats.newChat.findLabel")} autoFocus />
       {rows.length === 0 ? (
         <p className="group-note">{query ? t("chats.newChat.nobodyNamed") : t("chats.newChat.nobodyYet")}</p>
       ) : (

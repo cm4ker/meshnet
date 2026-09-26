@@ -32,7 +32,6 @@
     "other": "{count} непрочитанного"
   },
   "list.noMatch": "Ничего не найдено.",
-  "search.clear": "Стереть",
   "search.chats": "Чаты",
   "search.messages": "Сообщения · {count}",
   "search.more": "Показать ещё {count}",

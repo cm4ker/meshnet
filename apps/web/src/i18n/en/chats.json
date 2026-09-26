@@ -27,7 +27,6 @@
     "other": "{count} unread"
   },
   "list.noMatch": "Nothing matches.",
-  "search.clear": "Clear",
   "search.chats": "Chats",
   "search.messages": "Messages · {count}",
   "search.more": "Show {count} more",

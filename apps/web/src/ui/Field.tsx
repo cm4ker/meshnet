@@ -1,5 +1,5 @@
-import { useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from "react";
-import { EyeIcon, EyeOffIcon } from "../components/Icons.js";
+import { useState, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes } from "react";
+import { CloseIcon, EyeIcon, EyeOffIcon, SearchIcon } from "../components/Icons.js";
 import { t } from "../i18n/index.js";
 
 export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
@@ -28,6 +28,22 @@ export function PasswordInput(props: Omit<InputHTMLAttributes<HTMLInputElement>,
         {shown ? <EyeOffIcon size={18} /> : <EyeIcon size={18} />}
       </button>
     </span>
+  );
+}
+
+/** A search field: the magnifier, what is typed, and once something is, a cross that empties it (#44). */
+export function SearchField({ value, onValue, ref, ...rest }: Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange"> & { value: string; onValue: (next: string) => void; ref?: Ref<HTMLInputElement> | undefined }) {
+  return (
+    <label className="search">
+      <SearchIcon size={15} />
+      <input ref={ref} value={value} onChange={(e) => onValue(e.target.value)} {...rest} />
+      {value ? (
+        // Pressing it keeps the focus, and a phone's keyboard, where it was.
+        <button type="button" className="search-clear" aria-label={t("common.clear")} title={t("common.clear")} onMouseDown={(e) => e.preventDefault()} onClick={() => onValue("")}>
+          <CloseIcon size={14} />
+        </button>
+      ) : null}
+    </label>
   );
 }
 

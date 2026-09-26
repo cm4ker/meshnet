@@ -32,11 +32,12 @@ import { isComplete, neighbourRows } from "../lib/neighbours.js";
 import { closeTool, dropOnRoute, lineOfSightTo, openLineOfSight, openNeighbourLink, tapInNeighbours, tapInRoute, tapInSpan, whoHearsMe } from "../lib/toolActions.js";
 import { getTextScale, subscribeTextSize } from "../theme/textSize.js";
 import { IconButton } from "../ui/Button.js";
+import { SearchField } from "../ui/Field.js";
 import { ActionRow, Block, Group, SwitchRow } from "../ui/List.js";
 import { showMenu } from "../ui/Menu.js";
 import { Sheet } from "../ui/Sheet.js";
 import { Avatar } from "./Avatar.js";
-import { AlertIcon, ChartIcon, CloseIcon, CopyIcon, LocationIcon, SearchIcon, SlidersIcon, StarFilledIcon } from "./Icons.js";
+import { AlertIcon, ChartIcon, CloseIcon, CopyIcon, LocationIcon, SlidersIcon, StarFilledIcon } from "./Icons.js";
 import { ToolPanel } from "./tools/ToolPanel.js";
 
 // Leaflet and its styles load with the map, not with the app.
@@ -254,10 +255,7 @@ function ActiveFilters({ self }: { self: SessionState["self"] }) {
 function MeshSearch() {
   const { query } = useFilter();
   return (
-    <label className="search">
-      <SearchIcon size={15} />
-      <input value={query} onChange={(e) => setFilter({ query: e.target.value })} placeholder={t("mesh.find")} aria-label={t("mesh.find")} data-find />
-    </label>
+    <SearchField value={query} onValue={(next) => setFilter({ query: next })} placeholder={t("mesh.find")} aria-label={t("mesh.find")} data-find />
   );
 }
 
@@ -917,10 +915,7 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
 function MeshSearchInline({ onFocus }: { onFocus: () => void }) {
   const { query } = useFilter();
   return (
-    <label className="search">
-      <SearchIcon size={15} />
-      <input value={query} onFocus={onFocus} onChange={(e) => setFilter({ query: e.target.value })} placeholder={t("mesh.find")} aria-label={t("mesh.find")} enterKeyHint="search" />
-    </label>
+    <SearchField value={query} onFocus={onFocus} onValue={(next) => setFilter({ query: next })} placeholder={t("mesh.find")} aria-label={t("mesh.find")} enterKeyHint="search" />
   );
 }
 

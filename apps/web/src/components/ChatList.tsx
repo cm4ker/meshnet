@@ -13,9 +13,10 @@ import { session, useSession } from "../lib/session.js";
 import { toast } from "../lib/toast.js";
 import { IconButton } from "../ui/Button.js";
 import { Confirm } from "../ui/Dialog.js";
+import { SearchField } from "../ui/Field.js";
 import { showMenu, type MenuItem } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
-import { BellOffIcon, CheckIcon, ChevronDownIcon, CloseIcon, HashIcon, PersonIcon, PlusIcon, SearchIcon, SortIcon, StarFilledIcon, TrashIcon } from "./Icons.js";
+import { BellOffIcon, CheckIcon, ChevronDownIcon, HashIcon, PersonIcon, PlusIcon, SortIcon, StarFilledIcon, TrashIcon } from "./Icons.js";
 import { marked } from "./Marked.js";
 import { NewChat } from "./NewChat.js";
 import { t } from "../i18n/index.js";
@@ -66,28 +67,20 @@ export function ChatList({ selected }: { selected: string | null }) {
           <PlusIcon size={20} />
         </IconButton>
       </header>
-      <label className="search">
-        <SearchIcon size={15} />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape" && query) {
-              e.preventDefault();
-              setQuery("");
-            }
-          }}
-          placeholder={t("chats.list.find")}
-          aria-label={t("chats.list.findLabel")}
-          enterKeyHint="search"
-          data-find
-        />
-        {query ? (
-          <button type="button" className="search-clear" aria-label={t("chats.search.clear")} onClick={() => setQuery("")}>
-            <CloseIcon size={14} />
-          </button>
-        ) : null}
-      </label>
+      <SearchField
+        value={query}
+        onValue={setQuery}
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && query) {
+            e.preventDefault();
+            setQuery("");
+          }
+        }}
+        placeholder={t("chats.list.find")}
+        aria-label={t("chats.list.findLabel")}
+        enterKeyHint="search"
+        data-find
+      />
       {rows.length === 0 ? (
         <div className="empty muted">{t("chats.list.empty")}</div>
       ) : q ? (
