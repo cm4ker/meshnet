@@ -20,7 +20,7 @@ export class TauriSerialTransport extends BaseTransport {
   private readonly decoder = new StreamFrameDecoder();
 
   constructor(
-    private readonly port: Pick<InstanceType<SerialModule["SerialPort"]>, "open" | "watch" | "writeBinary" | "close">,
+    private readonly port: Pick<InstanceType<SerialModule["SerialPort"]>, "open" | "watch" | "writeBinary" | "close" | "writeDataTerminalReady" | "writeRequestToSend">,
     readonly label: string,
   ) {
     super();
@@ -29,6 +29,11 @@ export class TauriSerialTransport extends BaseTransport {
   async open(): Promise<void> {
     try {
       await this.port.open();
+      // On Windows the port opens with DTR off, and a radio on TinyUSB (the nRF52 boards: T-Echo, RAK)
+      // reads what it is sent but writes nothing back until the host raises it. Both lines up, as a
+      // browser's Web Serial and pyserial open a port.
+      await this.port.writeDataTerminalReady(true);
+      await this.port.writeRequestToSend(true);
       await this.port.watch(
         {
           onData: (data) => {

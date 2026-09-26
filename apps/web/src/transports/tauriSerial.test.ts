@@ -8,7 +8,10 @@ class FakePort {
   options: WatchOptions | undefined;
   watchError: Error | null = null;
   closes = 0;
+  lines: string[] = [];
   async open() { return "COM6"; }
+  async writeDataTerminalReady(level: boolean) { this.lines.push(`dtr:${level}`); }
+  async writeRequestToSend(level: boolean) { this.lines.push(`rts:${level}`); }
   async watch(handlers: WatchHandlers, options?: WatchOptions) {
     if (this.watchError) throw this.watchError;
     this.handlers = handlers;
@@ -25,6 +28,8 @@ test("USB watch preserves binary bytes and reassembles split replies", async () 
   const received: Uint8Array[] = [];
   transport.onFrame((frame) => received.push(frame));
   await transport.open();
+  // A TinyUSB radio answers only once the host raises DTR.
+  assert.deepEqual(port.lines, ["dtr:true", "rts:true"]);
   assert.equal(port.options?.decode, false);
   assert.equal(port.options?.routeUrc, false);
   port.handlers!.onData(new Uint8Array([0x3e, 3]));

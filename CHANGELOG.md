@@ -14,6 +14,7 @@
 - In a profile, "Ask for readings" becomes "Ask again" once there are some. A GPS reading says how far and which way, with a link to the map. Why a node may stay silent is said only after it has.
 
 ### Fixes
+- On the desktop, a radio on USB whose board speaks through TinyUSB (the nRF52 ones: T-Echo, RAK) connects. The port opened with DTR off, and such a radio answers nothing until the computer raises it.
 - A sensor's power reads as its voltage times its current when the channel carries both, so 3.38 V at 119 mA shows 402 mW rather than 0 mW. The firmware sends power in whole watts. A sensor's History does the same with its means, and with its lows and highs for the range.
 
 ## 0.3.0 — 2026-09-26
