@@ -31,7 +31,7 @@ export type Screen =
 export interface Nav {
   section: Section;
   stacks: Record<Section, Screen[]>;
-  /** The node picked on the map, whose card the map shows. */
+  /** The node picked on the map: ringed with its route, and on a desktop its profile beside the map. */
   meshFocus: string | null;
 }
 
@@ -169,9 +169,19 @@ export function openRadioPage(page: RadioPage): void {
   setStack("radio", [{ kind: "radio", page }]);
 }
 
-/** The map, with this node picked on it. */
-export function showOnMap(key: string): void {
+let listLowered = false;
+
+/** The map, with this node picked on it; `lower` asks a phone's list down, so the map has the room. */
+export function showOnMap(key: string, lower = false): void {
+  listLowered = lower;
   setStack("mesh", [], { meshFocus: key });
+}
+
+/** Whether the list was asked down since last asked; asking clears it. */
+export function takeListLowered(): boolean {
+  const lowered = listLowered;
+  listLowered = false;
+  return lowered;
 }
 
 export function focusOnMap(key: string | null): void {

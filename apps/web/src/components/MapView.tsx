@@ -405,35 +405,61 @@ export default function MapView({ selected, onSelect, onGroup, filter, coverBott
     marker.addTo(layer);
   }
 
-  // A node picked from outside the map, from its profile or the list, is brought into view.
+  // A node picked from outside the map, from its profile or the list, is brought into view. On a phone the
+  // pick opens its profile over the map, which then has no size; it is brought into view when the map shows again.
   const pickedKey = picked && hasPosition(picked.lat, picked.lon) ? picked.key : null;
-  useEffect(() => {
+  const unseenPick = useRef<string | null>(null);
+  const bringIntoView = (key: string) => {
     const m = map.current;
-    const c = pickedKey ? contacts[pickedKey] : undefined;
+    const c = contacts[key];
     if (!m || !c) return;
+    m.invalidateSize();
+    const at = L.latLng(c.lat, c.lon);
+    const size = m.getSize();
+    const { top, bottom } = cover.current;
+    const clear = { left: 40, right: size.x - 64, top: top + 56, bottom: size.y - bottom - 40 };
+    if (clear.right <= clear.left || clear.bottom <= clear.top) {
+      unseenPick.current = key;
+      return;
+    }
+    unseenPick.current = null;
+    const p = m.latLngToContainerPoint(at);
+    if (p.x > clear.left && p.x < clear.right && p.y > clear.top && p.y < clear.bottom) return;
+    // In sight but under the sheet or at an edge: moved just clear. Out of sight: brought to the middle.
+    if (p.x >= 0 && p.x <= size.x && p.y >= 0 && p.y <= size.y) {
+      const dx = p.x < clear.left ? p.x - clear.left : p.x > clear.right ? p.x - clear.right : 0;
+      const dy = p.y < clear.top ? p.y - clear.top : p.y > clear.bottom ? p.y - clear.bottom : 0;
+      m.panBy([dx, dy]);
+    } else {
+      centerOn(at, Math.max(m.getZoom(), 13));
+    }
+  };
+  const bringLatest = useRef(bringIntoView);
+  bringLatest.current = bringIntoView;
+  useEffect(() => {
+    unseenPick.current = null;
+    if (!pickedKey) return;
     // After the layout settles: a desktop's panel opens beside the map in the same render.
-    const frame = requestAnimationFrame(() => {
-      m.invalidateSize();
-      const at = L.latLng(c.lat, c.lon);
-      const size = m.getSize();
-      const { top, bottom } = cover.current;
-      const clear = { left: 40, right: size.x - 64, top: top + 56, bottom: size.y - bottom - 40 };
-      if (clear.right <= clear.left || clear.bottom <= clear.top) return;
-      const p = m.latLngToContainerPoint(at);
-      if (p.x > clear.left && p.x < clear.right && p.y > clear.top && p.y < clear.bottom) return;
-      // In sight but under the sheet or at an edge: moved just clear. Out of sight: brought to the middle.
-      if (p.x >= 0 && p.x <= size.x && p.y >= 0 && p.y <= size.y) {
-        const dx = p.x < clear.left ? p.x - clear.left : p.x > clear.right ? p.x - clear.right : 0;
-        const dy = p.y < clear.top ? p.y - clear.top : p.y > clear.bottom ? p.y - clear.bottom : 0;
-        m.panBy([dx, dy]);
-      } else {
-        centerOn(at, Math.max(m.getZoom(), 13));
-      }
-    });
+    const frame = requestAnimationFrame(() => bringLatest.current(pickedKey));
     return () => cancelAnimationFrame(frame);
-    // Only a new pick moves the map; its neighbours changing, or the sheet moving, do not.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickedKey]);
+  // The map shown again with a pick it could not show while hidden.
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    let frame = 0;
+    const resize = new ResizeObserver(() => {
+      const key = unseenPick.current;
+      if (!key || el.clientHeight === 0) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => bringLatest.current(key));
+    });
+    resize.observe(el);
+    return () => {
+      cancelAnimationFrame(frame);
+      resize.disconnect();
+    };
+  }, []);
 
   // A set of points asked to be seen together: after a pick's own move, so it has the last word.
   const fitId = fit?.id ?? null;

@@ -24,7 +24,7 @@ export type MeshTool =
       kind: "los";
       from: LosEnd;
       to: LosEnd;
-      /** The node whose card it was opened from, to go back to. */
+      /** The node picked when it was opened, to go back to. */
       back: string | null;
       /** How the leg sounded when last pinged, out and back, dB; back is null when the trace came home another way. */
       heard?: [number, number | null] | null;
@@ -40,13 +40,14 @@ export type MeshTool =
  * The route to a contact. `draft` is a route being changed, contact keys (or
  * hashes naming nobody for sure) in order from this radio; null while the
  * one the radio holds is shown. `returnTo` is the section it was opened
- * from, and the node the map had picked then, to go back to when it closes.
+ * from, the node the map had picked then, and the screens that were open
+ * over the map, such as the profile on a phone, to go back to when it closes.
  */
 export interface RouteTool {
   kind: "route";
   key: string;
   draft: string[] | null;
-  returnTo?: { section: Section; focus: string | null } | null;
+  returnTo?: { section: Section; focus: string | null; stack?: Screen[] } | null;
 }
 
 /**

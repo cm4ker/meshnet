@@ -17,11 +17,19 @@ import { clearPing, getPing, spanKey, stopPing } from "./ping.js";
 import { session } from "./session.js";
 import { toast } from "./toast.js";
 
-/** The route to a contact, in its sheet over the map. */
+/** The route to a contact, in its sheet over the map; opened from a profile over the map, it closes back to the profile. */
 export function openRoute(key: string): void {
   const nav = getNav();
   const tool = getMeshTool();
-  const returnTo = nav.section !== "mesh" ? { section: nav.section, focus: nav.meshFocus } : tool?.kind === "route" && tool.key === key ? (tool.returnTo ?? null) : null;
+  const stack = nav.stacks.mesh;
+  const returnTo =
+    nav.section !== "mesh"
+      ? { section: nav.section, focus: nav.meshFocus }
+      : tool?.kind === "route" && tool.key === key
+        ? (tool.returnTo ?? null)
+        : stack.length > 0
+          ? { section: nav.section, focus: nav.meshFocus, stack }
+          : null;
   showOnMap(key);
   setMeshTool({ kind: "route", key, draft: null, returnTo });
 }
@@ -47,7 +55,7 @@ export function tapInSpan(key: string | null, state: SessionState): boolean {
   return true;
 }
 
-/** The line of sight between two ends, over the map; `back` is the node whose card to return to, or the route it was opened from. */
+/** The line of sight between two ends, over the map; `back` is the node to pick again after, or the route it was opened from. */
 export function openLineOfSight(from: LosEnd, to: LosEnd, back: string | null, heard: [number, number | null] | null = null): void {
   const current = getMeshTool();
   const prev = current?.kind === "route" || current?.kind === "span" || current?.kind === "neighbours" ? current : current?.kind === "los" ? (current.prev ?? null) : null;
@@ -63,7 +71,7 @@ export function lineOfSightTo(lat: number, lon: number): void {
     toast(t("tools.setPositionFirst"));
     return;
   }
-  // Held while a node's card was open, Back returns to the card.
+  // Held while a node was picked, Back picks it again.
   const tool = getMeshTool();
   const back = tool?.kind === "los" ? tool.back : getNav().meshFocus;
   openLineOfSight(from, { lat, lon, name: t("tools.thisSpot"), key: null }, back);
@@ -194,7 +202,7 @@ export function whoHearsMe(): void {
 
 /**
  * Puts the tool away, one step: a line of sight back to the route it was
- * opened from, or to the node's card; a route back to where it was opened,
+ * opened from, or to the node picked; a route back to where it was opened,
  * and a check along a change that was not saved goes with it; a link
  * between neighbours back to the list, and the list back to the link it was
  * opened from, or to the screens it was opened from.
@@ -226,7 +234,9 @@ export function closeTool(): void {
   if (tool?.kind === "los" && tool.back) showOnMap(tool.back);
   else if (tool?.kind === "route") {
     if (getPing(tool.key)?.via) clearPing(tool.key);
-    if (tool.returnTo) {
+    if (tool.returnTo?.stack) {
+      setStack(tool.returnTo.section, tool.returnTo.stack, { meshFocus: tool.returnTo.focus });
+    } else if (tool.returnTo) {
       focusOnMap(tool.returnTo.focus);
       goSection(tool.returnTo.section);
     } else {

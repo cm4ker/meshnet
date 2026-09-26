@@ -196,7 +196,7 @@ export function Profile({ contactKey, chrome }: { contactKey: string; chrome: Ch
             )
           ) : null}
           {mapBeside ? null : (
-            <button type="button" className="hero-act" disabled={!placed} onClick={() => showOnMap(key)}>
+            <button type="button" className="hero-act" disabled={!placed} onClick={() => showOnMap(key, true)}>
               <MapIcon size={20} />
               {t("mesh.profile.onMap")}
             </button>

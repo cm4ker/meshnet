@@ -5,10 +5,10 @@
  */
 
 import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AdvertLocPolicy, AdvType, contactConversation, isConversationType, isFavourite, isNodeType, type ContactRecord, type SessionState } from "@meshnet/meshcore";
+import { AdvertLocPolicy, AdvType, isFavourite, type ContactRecord, type SessionState } from "@meshnet/meshcore";
 import { t, type Key } from "../i18n/index.js";
 import { useBackLayer } from "../lib/back.js";
-import { ago, agoPhrase, battery } from "../lib/format.js";
+import { ago, battery } from "../lib/format.js";
 import { bearingDeg, compass, distanceKm, formatDistance, formatLatLon, hasPosition } from "../lib/geo.js";
 import { useHears } from "../lib/hears.js";
 import { legId, useLegVerdicts } from "../lib/legVerdicts.js";
@@ -16,7 +16,7 @@ import type { LinkRadio } from "../lib/los.js";
 import { useDiscovery } from "../lib/discovery.js";
 import { contactEnd, defaultHeight, discoveryOverlay, EMPTY_OVERLAY, editOverlay, hearsOverlay, losOverlay, neighboursOverlay, relayOf, routeOverlay, selfEnd, spanOverlay, type MapHandle, type MapOverlay } from "../lib/mapOverlay.js";
 import { useMeshTool, type LosEnd } from "../lib/meshTool.js";
-import { focusOnMap, openConversation, openProfile, useNav } from "../lib/nav.js";
+import { focusOnMap, openProfile, takeListLowered, useNav } from "../lib/nav.js";
 import { heardAt as heard, kindLabel } from "../lib/nodes.js";
 import { getNodeOrder, NODE_ORDERS, nodeComparator, nodeGroups, orderInForce, placed, setNodeOrder, useNodeOrder } from "../lib/nodeOrder.js";
 import type { MenuAt } from "../lib/press.js";
@@ -31,12 +31,11 @@ import { isComplete, neighbourRows } from "../lib/neighbours.js";
 import { closeTool, dropOnRoute, lineOfSightTo, openLineOfSight, openNeighbourLink, tapInNeighbours, tapInRoute, tapInSpan, whoHearsMe } from "../lib/toolActions.js";
 import { getTextScale, subscribeTextSize } from "../theme/textSize.js";
 import { IconButton } from "../ui/Button.js";
-import { AirMark, Group } from "../ui/List.js";
+import { AirMark } from "../ui/List.js";
 import { showMenu } from "../ui/Menu.js";
 import { Avatar } from "./Avatar.js";
-import { ChartIcon, ChatIcon, ChevronDownIcon, CloseIcon, CopyIcon, InfoIcon, LocationIcon, RefreshIcon, SearchIcon, SortIcon, StarFilledIcon, WavesIcon } from "./Icons.js";
+import { ChartIcon, ChevronDownIcon, CloseIcon, CopyIcon, LocationIcon, RefreshIcon, SearchIcon, SortIcon, StarFilledIcon, WavesIcon } from "./Icons.js";
 import { LOW_BATTERY_MV } from "./node/Status.js";
-import { RouteLink } from "./tools/RouteSheet.js";
 import { ToolPanel } from "./tools/ToolPanel.js";
 
 // Leaflet and its styles load with the map, not with the app.
@@ -532,43 +531,6 @@ export function MeshMap({ selected, onSelect, onGroup, coverTop, coverBottom, zo
   );
 }
 
-/** A picked node, in a few lines: who, how far, the row that opens its route, and the way to its chat and profile. */
-export function NodeCard({ contactKey, onClose }: { contactKey: string; onClose: () => void }) {
-  const state = useSession();
-  const c = state.contacts[contactKey];
-  if (!c) return null;
-  const where = whereFrom(state.self, c);
-  return (
-    <div className="node-card">
-      <div className="node-card-head">
-        <Avatar name={c.name || c.prefix} type={c.type} size={40} />
-        <span className="row-main">
-          <span className="row-title">{c.name || c.prefix}</span>
-          <span className="row-sub muted">{[kindLabel(c.type), where, c.lastAdvert > 0 ? t("mesh.card.advert", { time: agoPhrase(c.lastAdvert * 1000) }) : null].filter(Boolean).join(" · ")}</span>
-        </span>
-        <IconButton label={t("mesh.card.close")} onClick={onClose}>
-          <CloseIcon size={18} />
-        </IconButton>
-      </div>
-      <Group>
-        <RouteLink contactKey={c.key} />
-      </Group>
-      <div className="hero-actions">
-        {isConversationType(c.type) ? (
-          <button type="button" className="hero-act primary" onClick={() => openConversation(contactConversation(c.key))}>
-            <ChatIcon size={20} />
-            {t("mesh.message")}
-          </button>
-        ) : null}
-        <button type="button" className="hero-act" onClick={() => openProfile(c.key)}>
-          <InfoIcon size={20} />
-          {t("mesh.card.profile")}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 /** Nodes at one spot, which no zoom separates. */
 function GroupList({ keys, onPick, onClose }: { keys: string[]; onPick: (key: string) => void; onClose: () => void }) {
   const state = useSession();
@@ -627,13 +589,13 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
   const sheet = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   // The box's height, how much of its top the notch or the status bar takes, where the chips end in
-  // the sheet, and how tall a picked node's card is.
+  // the sheet, and how tall the tool or the list of nodes at one spot is.
   const [space, setSpace] = useState({ height: 0, top: 0, peek: 0, card: 0 });
   const [detent, setDetentState] = useState<Detent>(() => (Object.values(state.contacts).some((c) => hasPosition(c.lat, c.lon)) ? lastDetent : "full"));
   const [group, setGroup] = useState<string[] | null>(null);
   const tool = useMeshTool();
   const focus = nav.meshFocus && state.contacts[nav.meshFocus] ? nav.meshFocus : null;
-  const listed = !focus && !group && !tool;
+  const listed = !group && !tool;
   const setDetent = (d: Detent) => {
     lastDetent = d;
     setDetentState(d);
@@ -645,14 +607,16 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
   useBackLayer(!hidden && listed && mapped && detent === "full", () => setDetent("half"));
   useBackLayer(!hidden && tool !== null, closeTool);
 
-  // A pick shows its card at half height, over the map, even when the list was up to read: "On map" in a
-  // profile comes here. Decided while rendering, so the map learns in the same pass how much the sheet covers.
+  // A pick leaves some map in view, ringed with its route, when the list was pulled all the way up: back from
+  // its profile, or "On map" in a profile. Decided while rendering, so the map learns in the same pass how much
+  // the sheet covers.
   const [picked, setPicked] = useState(focus);
   if (picked !== focus) {
     setPicked(focus);
-    if (focus && detent !== "half") setDetent("half");
+    if (focus && detent === "full") setDetent("half");
   }
-  // A tool opens over the map at its own height, like a card; so does a link between neighbours.
+  if (!hidden && takeListLowered() && detent !== "peek") setDetent("peek");
+  // A tool opens over the map at its own height; so does a link between neighbours.
   const toolId = tool ? (tool.kind === "neighbours" ? `neighbours:${tool.key}:${tool.link ?? ""}` : tool.kind) : null;
   const [shownTool, setShownTool] = useState(toolId);
   if (shownTool !== toolId) {
@@ -691,7 +655,8 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
     setSpace((s) => (s.peek === peek ? s : { ...s, peek }));
   }, [listed, space.height, hidden, textScale]);
 
-  // A card sits at its own height instead of the list's middle one, so more of the map shows around it.
+  // A tool or the list of nodes at one spot sits at its own height instead of the list's middle one, so more
+  // of the map shows around it.
   useLayoutEffect(() => {
     const el = sheet.current;
     const card = listed ? null : body.current?.firstElementChild;
@@ -704,7 +669,7 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
     resize.observe(card);
     measure();
     return () => resize.disconnect();
-  }, [listed, focus, group, toolId]);
+  }, [listed, group, toolId]);
 
   const full = Math.max(0, space.height - space.top - 8);
   const middle = Math.max(0, Math.min(full - 48, Math.max(240, Math.round(space.height * 0.46))));
@@ -839,9 +804,12 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
     };
   }, [motion]);
 
+  // A node tapped in the list or on the map opens its profile, as on a desktop; Back comes to the map with the
+  // node still ringed.
   const pick = (key: string | null) => {
     setGroup(null);
-    focusOnMap(key);
+    if (key) openProfile(key, true);
+    else focusOnMap(null);
   };
 
   return (
@@ -884,12 +852,10 @@ export function MeshPhone({ hidden = false }: { hidden?: boolean | undefined }) 
         <div className="mesh-sheet-body" ref={body}>
           {tool ? (
             <ToolPanel tool={tool} />
-          ) : focus ? (
-            <NodeCard contactKey={focus} onClose={() => pick(null)} />
           ) : group ? (
             <GroupList keys={group} onPick={pick} onClose={() => setGroup(null)} />
           ) : (
-            <MeshListBodyNoSearch onOpen={pick} />
+            <MeshListBodyNoSearch selected={focus} onOpen={pick} />
           )}
           {/* The part of the sheet below the screen's edge, so the end of the list can be scrolled into view. */}
           <div aria-hidden="true" style={{ height: full - heights[detent] }} />
@@ -910,10 +876,10 @@ function MeshSearchInline({ onFocus }: { onFocus: () => void }) {
 }
 
 /** The list without its own search field: in the sheet, the field sits in the handle. */
-function MeshListBodyNoSearch({ onOpen }: { onOpen: (key: string) => void }) {
+function MeshListBodyNoSearch({ selected, onOpen }: { selected: string | null; onOpen: (key: string) => void }) {
   return (
     <div className="mesh-sheet-list">
-      <MeshListBody selected={null} onOpen={onOpen} hideSearch />
+      <MeshListBody selected={selected} onOpen={onOpen} hideSearch />
     </div>
   );
 }
