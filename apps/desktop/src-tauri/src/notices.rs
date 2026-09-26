@@ -144,7 +144,7 @@ fn window(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
     WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("notices.html".into()))
-        .title("Meshnet notices")
+        .title("Ommesh notices")
         .inner_size(WIDTH, 120.0)
         .decorations(false)
         .transparent(true)

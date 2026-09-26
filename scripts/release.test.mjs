@@ -13,13 +13,13 @@ test("stable tags must match the shared version; dev runs and retries have uniqu
   assert.equal(releaseInfo("0.2.0", { ...env, GITHUB_EVENT_NAME: "pull_request" }).publish, false);
   assert.equal(releaseInfo("0.2.0", { ...env, GITHUB_EVENT_NAME: "workflow_dispatch" }).publish, false);
 });
-const files = ["Meshnet_0.2.0_x64-setup.exe", "Meshnet_0.2.0_arm64-setup.exe", "Meshnet_0.2.0_x86-setup.exe"].flatMap((name) => [name, `${name}.sig`]);
-const options = { version: "0.2.0", tag: "v0.2.0", repository: "cm4ker/meshnet", files, signature: () => "signed-package\n", date: "2026-09-22T00:00:00Z" };
+const files = ["Ommesh_0.2.0_x64-setup.exe", "Ommesh_0.2.0_arm64-setup.exe", "Ommesh_0.2.0_x86-setup.exe"].flatMap((name) => [name, `${name}.sig`]);
+const options = { version: "0.2.0", tag: "v0.2.0", repository: "cm4ker/ommesh", files, signature: () => "signed-package\n", date: "2026-09-22T00:00:00Z" };
 test("feed selects the exact architecture and immutable release files", () => {
   const manifest = makeManifest(options);
   assert.deepEqual(Object.keys(manifest.platforms), ["windows-x86_64", "windows-aarch64", "windows-i686"]);
-  assert.match(manifest.platforms["windows-i686"].url, /\/v0.2.0\/Meshnet_0.2.0_x86-setup.exe$/);
-  assert.match(manifest.platforms["windows-aarch64"].url, /\/v0.2.0\/Meshnet_0.2.0_arm64-setup.exe$/);
+  assert.match(manifest.platforms["windows-i686"].url, /\/v0.2.0\/Ommesh_0.2.0_x86-setup.exe$/);
+  assert.match(manifest.platforms["windows-aarch64"].url, /\/v0.2.0\/Ommesh_0.2.0_arm64-setup.exe$/);
   assert.equal(manifest.platforms["windows-x86_64"].signature, "signed-package");
 });
 test("never publish a partial or mismatched update", () => {
@@ -44,7 +44,7 @@ function publication(t) {
   const devFiles = files.map((name) => name.replace("0.2.0", version));
   writeFileSync(join(directory, "latest.json"), JSON.stringify(makeManifest({ ...options, version, tag: "dev-test", files: devFiles })));
   for (const name of devFiles) writeFileSync(join(directory, name), "test fixture");
-  return { directory, info: { version, channel: "dev", tag: "dev-test", publish: true }, env: { GITHUB_REPOSITORY: "cm4ker/meshnet", GITHUB_SHA: "abc" } };
+  return { directory, info: { version, channel: "dev", tag: "dev-test", publish: true }, env: { GITHUB_REPOSITORY: "cm4ker/ommesh", GITHUB_SHA: "abc" } };
 }
 
 test("publishes the complete immutable release before updating the rolling feed", (t) => {

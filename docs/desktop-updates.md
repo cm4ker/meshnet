@@ -4,7 +4,7 @@ Windows x64 and ARM64 use the [official Tauri updater](https://v2.tauri.app/plug
 
 The app checks at startup and every six hours while running, including when returning to the foreground after that interval. Automatic checking can be disabled. Checking never opens a modal or downloads a package. **Download update** shows progress; **Install and restart** becomes available only after signature verification. Closing the dialog keeps the download running. A downloaded update is kept for the current app session.
 
-Before installation, the app waits up to 45 seconds for message acknowledgements, synchronization and queued remote requests, flushes drafts, disconnects the radio and waits for history to commit to IndexedDB. A failed save prevents installation. If the installer cannot be started, Meshnet attempts to restore the radio connection. The installer preserves the app's data directory and preferences. Reconnecting after a successful restart follows **Reconnect at launch**.
+Before installation, the app waits up to 45 seconds for message acknowledgements, synchronization and queued remote requests, flushes drafts, disconnects the radio and waits for history to commit to IndexedDB. A failed save prevents installation. If the installer cannot be started, Ommesh attempts to restore the radio connection. The installer preserves the app's data directory and preferences. Reconnecting after a successful restart follows **Reconnect at launch**.
 
 ## Channels and versions
 

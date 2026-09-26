@@ -1,22 +1,20 @@
 <div align="center">
-  <img src="apps/web/public/icon.svg" width="88" height="88" alt="Meshnet logo" />
-  <h1>Meshnet</h1>
+  <img src="apps/web/public/icon.svg" width="88" height="88" alt="Ommesh logo" />
+  <h1>Ommesh</h1>
   <p><strong>Your mesh, in one place.</strong></p>
   <p>Chat, explore nearby nodes and manage your MeshCore radios.<br />On your desktop, in your browser and on your phone.</p>
   <p><strong>English</strong> · <a href="README.ru.md">Русский</a></p>
   <p>
-    <a href="https://github.com/cm4ker/meshnet/actions/workflows/build.yml"><img src="https://github.com/cm4ker/meshnet/actions/workflows/build.yml/badge.svg" alt="Build status" /></a>
+    <a href="https://github.com/cm4ker/ommesh/actions/workflows/build.yml"><img src="https://github.com/cm4ker/ommesh/actions/workflows/build.yml/badge.svg" alt="Build status" /></a>
     <a href="https://github.com/meshcore-dev/MeshCore"><img src="https://img.shields.io/badge/MeshCore-companion-74ade8" alt="MeshCore companion" /></a>
-    <a href="https://github.com/cm4ker/meshnet/releases/tag/dev"><img src="https://img.shields.io/badge/download-dev_build-a1c181" alt="Download development build" /></a>
+    <a href="https://github.com/cm4ker/ommesh/releases/tag/dev"><img src="https://img.shields.io/badge/download-dev_build-a1c181" alt="Download development build" /></a>
   </p>
   <p><a href="#features">Features</a> · <a href="#screenshots">Screenshots</a> · <a href="#get-started">Get started</a> · <a href="#development">Development</a></p>
 </div>
 
-![Meshnet desktop: mesh map, nearby nodes and repeater status](docs/screenshots/desktop-mesh.png)
+![Ommesh desktop: mesh map, nearby nodes and repeater status](docs/screenshots/desktop-mesh.png)
 
-**Meshnet** is a companion client for [MeshCore](https://github.com/meshcore-dev/MeshCore) LoRa radios. Connect a compatible radio over **Bluetooth, USB or Wi-Fi** and exchange messages through the mesh without an internet connection for messaging. Conversations stay on your device; the radio carries them over the air.
-
-The mobile app is named **Ommesh**. It shares the same client and features, with an interface adapted for a phone.
+**Ommesh** is a companion client for [MeshCore](https://github.com/meshcore-dev/MeshCore) LoRa radios. Connect a compatible radio over **Bluetooth, USB or Wi-Fi** and exchange messages through the mesh without an internet connection for messaging. Conversations stay on your device; the radio carries them over the air.
 
 ## Features
 
@@ -86,13 +84,13 @@ Actual captures of the web client in **demo mode**, at desktop and phone viewpor
 
 ## Get started
 
-Download the [rolling development build](https://github.com/cm4ker/meshnet/releases/tag/dev) or browse [all releases](https://github.com/cm4ker/meshnet/releases).
+Download the [rolling development build](https://github.com/cm4ker/ommesh/releases/tag/dev) or browse [all releases](https://github.com/cm4ker/ommesh/releases).
 
 | Platform | Bluetooth LE | USB serial | Wi-Fi / TCP | Build availability |
 | :--- | :---: | :---: | :---: | :--- |
 | Windows | ✓ | ✓ | ✓ | CI installers for x64, 32-bit x86 and ARM64 |
 | macOS / Linux | ✓ | ✓ | ✓ | Build the Tauri shell from source |
-| Android | ✓ | — | ✓ | CI debug APK; mobile app name: Ommesh |
+| Android | ✓ | — | ✓ | CI debug APK |
 | iOS | ✓ | — | ✓ | Build with Xcode on a Mac; see [mobile guide](apps/mobile/README.md) |
 | Browser | Web Bluetooth¹ | Web Serial¹ | — | Web bundle or local development server |
 
@@ -100,7 +98,7 @@ Download the [rolling development build](https://github.com/cm4ker/meshnet/relea
 
 1. Use a radio running **MeshCore companion firmware**.
 2. Choose an available connection method and connect to the radio. For Bluetooth, enter its pairing PIN when prompted. On Windows, if no prompt appears and the connection fails, pair the radio in the system Bluetooth settings (see “Bluetooth pairing” below).
-3. Meshnet loads contacts and channels and reads queued messages. Open **Chats** to talk, **Mesh** to explore and **Radio** to configure the device.
+3. Ommesh loads contacts and channels and reads queued messages. Open **Chats** to talk, **Mesh** to explore and **Radio** to configure the device.
 
 **No radio yet?** Run the web client below, open [localhost:5180/?demo](http://localhost:5180/?demo), select **Demo** and connect to **MeshCore-demo**.
 
@@ -158,7 +156,7 @@ Omit this variable and sync again to bundle the client for use without a develop
 packages/meshcore   Companion Radio Protocol, framing and sessions; no platform code
 apps/web           Shared React + TypeScript client, built with Vite
 apps/desktop       Tauri 2 shell for Windows, macOS and Linux
-apps/mobile        Capacitor 8 shell for Android and iOS (Ommesh)
+apps/mobile        Capacitor 8 shell for Android and iOS
 docs/screenshots   Demo captures used by both README translations
 ```
 
@@ -195,7 +193,7 @@ App artwork has one source: `apps/web/public/icon.svg`. After changing it, run `
 <summary><strong>Bluetooth pairing and USB firmware</strong></summary>
 
 - **Windows:** the radio only lets a paired computer use its UART service. With no pairing, the app asks for the PIN — shown on the radio's screen, or `123456` on a radio without one unless changed — pairs, and connects again. It also replaces a stale bond after a radio reset or reflash. Its native GATT implementation reads the Windows characteristic cache after pairing.
-- **Windows, if no PIN prompt appears:** open **Settings → Bluetooth & devices → Add device → Bluetooth**, pick the radio and enter the same PIN, then connect in Meshnet. After a radio reset or reflash, remove it there first. In a browser (Web Bluetooth), pair the radio in the system beforehand.
+- **Windows, if no PIN prompt appears:** open **Settings → Bluetooth & devices → Add device → Bluetooth**, pick the radio and enter the same PIN, then connect in Ommesh. After a radio reset or reflash, remove it there first. In a browser (Web Bluetooth), pair the radio in the system beforehand.
 - **nRF52 USB:** boards such as T-Echo, RAK4631 and Heltec T114 need the **`_usb` firmware build** for a USB connection. The `_ble` build's serial port does not carry the companion protocol.
 - **Android:** the BLE plugin requests an MTU of 512 bytes; companion frames can be up to 176 bytes. The system pairing prompt handles the PIN.
 - **iOS:** the shell enables `bluetooth-central` background mode to support the connection while switching apps.

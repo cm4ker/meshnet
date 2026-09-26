@@ -170,8 +170,8 @@ jobs:
           cp artifacts/meshnet-windows-x64/*.exe* out/
           cp artifacts/meshnet-windows-arm64/*.exe* out/
           cp artifacts/meshnet-windows-x86/*.exe* out/
-          cp artifacts/meshnet-android/app-debug.apk out/Meshnet_android-debug.apk
-          (cd artifacts/meshnet-web && zip -qr ../../out/Meshnet_web.zip .)
+          cp artifacts/meshnet-android/app-debug.apk out/Ommesh_android-debug.apk
+          (cd artifacts/meshnet-web && zip -qr ../../out/Ommesh_web.zip .)
           ls -l out
       - name: Create the complete update feed
         run: node scripts/release.mjs manifest out

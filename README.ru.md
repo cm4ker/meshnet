@@ -1,22 +1,20 @@
 <div align="center">
-  <img src="apps/web/public/icon.svg" width="88" height="88" alt="Логотип Meshnet" />
-  <h1>Meshnet</h1>
+  <img src="apps/web/public/icon.svg" width="88" height="88" alt="Логотип Ommesh" />
+  <h1>Ommesh</h1>
   <p><strong>Ваша mesh-сеть — в одном приложении.</strong></p>
   <p>Общайтесь, находите узлы рядом и управляйте устройствами MeshCore.<br />На компьютере, в браузере и на телефоне.</p>
   <p><a href="README.md">English</a> · <strong>Русский</strong></p>
   <p>
-    <a href="https://github.com/cm4ker/meshnet/actions/workflows/build.yml"><img src="https://github.com/cm4ker/meshnet/actions/workflows/build.yml/badge.svg" alt="Статус сборки" /></a>
+    <a href="https://github.com/cm4ker/ommesh/actions/workflows/build.yml"><img src="https://github.com/cm4ker/ommesh/actions/workflows/build.yml/badge.svg" alt="Статус сборки" /></a>
     <a href="https://github.com/meshcore-dev/MeshCore"><img src="https://img.shields.io/badge/MeshCore-companion-74ade8" alt="Клиент MeshCore" /></a>
-    <a href="https://github.com/cm4ker/meshnet/releases/tag/dev"><img src="https://img.shields.io/badge/download-dev_build-a1c181" alt="Скачать сборку для тестирования" /></a>
+    <a href="https://github.com/cm4ker/ommesh/releases/tag/dev"><img src="https://img.shields.io/badge/download-dev_build-a1c181" alt="Скачать сборку для тестирования" /></a>
   </p>
   <p><a href="#возможности">Возможности</a> · <a href="#скриншоты">Скриншоты</a> · <a href="#как-начать">Как начать</a> · <a href="#разработка">Разработка</a></p>
 </div>
 
-![Meshnet на компьютере: карта сети, список узлов и состояние ретранслятора](docs/screenshots/desktop-mesh.png)
+![Ommesh на компьютере: карта сети, список узлов и состояние ретранслятора](docs/screenshots/desktop-mesh.png)
 
-**Meshnet** — приложение для LoRa-радиоустройств с [MeshCore](https://github.com/meshcore-dev/MeshCore). Подключите совместимое устройство по **Bluetooth, USB или Wi-Fi** и обменивайтесь сообщениями через mesh-сеть без интернета. Переписка хранится на вашем компьютере или телефоне, а радио передаёт сообщения в эфир.
-
-Мобильная версия называется **Ommesh**. Она использует тот же клиент и возможности, с интерфейсом, адаптированным для телефона.
+**Ommesh** — приложение для LoRa-радиоустройств с [MeshCore](https://github.com/meshcore-dev/MeshCore). Подключите совместимое устройство по **Bluetooth, USB или Wi-Fi** и обменивайтесь сообщениями через mesh-сеть без интернета. Переписка хранится на вашем компьютере или телефоне, а радио передаёт сообщения в эфир.
 
 ## Возможности
 
@@ -86,13 +84,13 @@
 
 ## Как начать
 
-Скачайте [актуальную сборку для тестирования](https://github.com/cm4ker/meshnet/releases/tag/dev) или откройте [все релизы](https://github.com/cm4ker/meshnet/releases).
+Скачайте [актуальную сборку для тестирования](https://github.com/cm4ker/ommesh/releases/tag/dev) или откройте [все релизы](https://github.com/cm4ker/ommesh/releases).
 
 | Платформа | Bluetooth LE | USB serial | Wi-Fi / TCP | Доступные сборки |
 | :--- | :---: | :---: | :---: | :--- |
 | Windows | ✓ | ✓ | ✓ | Установщики x64, x86 (32 бита) и ARM64 из CI |
 | macOS / Linux | ✓ | ✓ | ✓ | Сборка оболочки Tauri из исходников |
-| Android | ✓ | — | ✓ | Отладочный APK из CI; имя приложения — Ommesh |
+| Android | ✓ | — | ✓ | Отладочный APK из CI |
 | iOS | ✓ | — | ✓ | Сборка в Xcode на Mac; [мобильная документация](apps/mobile/README.md) |
 | Браузер | Web Bluetooth¹ | Web Serial¹ | — | Готовый веб-клиент или локальный сервер разработки |
 
@@ -100,7 +98,7 @@
 
 1. Подготовьте радио с **companion-прошивкой MeshCore**.
 2. Выберите доступный способ подключения и подключитесь. При Bluetooth-сопряжении введите PIN устройства, если появится запрос. В Windows, если запрос не появился и подключение не проходит, сопрягите радио через системные настройки Bluetooth (см. «Bluetooth-сопряжение» ниже).
-3. Meshnet загрузит контакты и каналы, затем прочитает очередь сообщений. **Chats** — для общения, **Mesh** — для обзора сети, **Radio** — для настройки устройства.
+3. Ommesh загрузит контакты и каналы, затем прочитает очередь сообщений. **Chats** — для общения, **Mesh** — для обзора сети, **Radio** — для настройки устройства.
 
 **Пока нет радио?** Запустите веб-клиент по инструкции ниже, откройте [localhost:5180/?demo](http://localhost:5180/?demo), выберите **Demo** и подключитесь к **MeshCore-demo**.
 
@@ -158,7 +156,7 @@ Remove-Item Env:CAP_SERVER_URL
 packages/meshcore   Companion Radio Protocol, кадры и сессии без платформенного кода
 apps/web           Общий клиент на React + TypeScript, сборка Vite
 apps/desktop       Оболочка Tauri 2 для Windows, macOS и Linux
-apps/mobile        Оболочка Capacitor 8 для Android и iOS (Ommesh)
+apps/mobile        Оболочка Capacitor 8 для Android и iOS
 docs/screenshots   Демонстрационные снимки для обеих версий README
 ```
 
@@ -195,7 +193,7 @@ docs/screenshots   Демонстрационные снимки для обеи
 <summary><strong>Bluetooth-сопряжение и прошивка для USB</strong></summary>
 
 - **Windows:** радио пускает к UART-сервису только сопряжённый компьютер. Если сопряжения нет, приложение само спрашивает PIN — он на экране радио, у радио без экрана `123456`, если его не меняли, — сопрягается и подключается снова. Оно же заменяет устаревшую привязку после сброса или перепрошивки радио. Нативная реализация GATT после сопряжения читает характеристики из кеша Windows.
-- **Windows, если PIN не спросили:** откройте **Параметры → Bluetooth и устройства → Добавить устройство → Bluetooth**, выберите радио и введите тот же PIN, затем подключитесь в Meshnet. После сброса или перепрошивки радио сначала удалите его там. В браузере (Web Bluetooth) сопрягайте радио в системе заранее.
+- **Windows, если PIN не спросили:** откройте **Параметры → Bluetooth и устройства → Добавить устройство → Bluetooth**, выберите радио и введите тот же PIN, затем подключитесь в Ommesh. После сброса или перепрошивки радио сначала удалите его там. В браузере (Web Bluetooth) сопрягайте радио в системе заранее.
 - **USB на nRF52:** для T-Echo, RAK4631, Heltec T114 и подобных плат нужна **прошивка `_usb`**. Serial-порт сборки `_ble` не передаёт companion-протокол.
 - **Android:** BLE-плагин запрашивает MTU 512 байт; кадры companion-протокола могут достигать 176 байт. PIN вводится в системном диалоге сопряжения.
 - **iOS:** оболочка включает фоновый режим `bluetooth-central`, чтобы поддерживать соединение при переключении между приложениями.

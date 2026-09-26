@@ -25,4 +25,4 @@ MADE FOR YOUR PHONE
 
 Mesh messaging uses your connected radio; it does not need an internet connection. Loading new map or elevation areas does require internet access. Wi-Fi connections require compatible companion firmware with TCP support. Android USB connections are not supported.
 
-Ommesh is the mobile version of the Meshnet project. The app interface is currently in English. Radio range and delivery depend on your hardware, configuration and local mesh.
+The app interface is currently in English. Radio range and delivery depend on your hardware, configuration and local mesh.

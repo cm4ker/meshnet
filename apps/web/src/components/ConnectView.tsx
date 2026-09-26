@@ -26,7 +26,7 @@ export function ConnectView() {
         <header className="connect-head">
           <img src="./icon.svg" alt="" width={40} height={40} />
           <div>
-            <h1>{shell() === "capacitor" ? "Ommesh" : "Meshnet"}</h1>
+            <h1>Ommesh</h1>
             <p className="muted">{t("connect.tagline")}</p>
           </div>
         </header>

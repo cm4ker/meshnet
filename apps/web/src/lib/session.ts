@@ -16,7 +16,7 @@ import { pushTrace } from "./trace.js";
 export const storage = new IndexedDbStorage();
 
 export const session = new MeshSession({
-  appName: "Meshnet",
+  appName: "Ommesh",
   storage,
   trace: pushTrace,
 });

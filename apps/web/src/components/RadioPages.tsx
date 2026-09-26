@@ -469,7 +469,7 @@ function NotificationsPage() {
   const desktop = shell() === "tauri";
   const phone = shell() === "capacitor";
   const windows = desktop && navigator.userAgent.includes("Windows");
-  const app = phone ? "Ommesh" : "Meshnet";
+  const app = "Ommesh";
   const own = prefs.shownBy === "app";
   // Who draws them, and what that means here: a computer's app draws all of them, a phone's and a tab's only while on screen.
   const shownHint = own
@@ -760,7 +760,7 @@ function AboutPage() {
   }, []);
   return <>
     <Group note={t("radio.about.note")}>
-      <InfoRow label={shell() === "capacitor" ? "Ommesh" : "Meshnet"} icon={<img src="./icon.svg" alt="" width={24} height={24} />}>{info.version}</InfoRow>
+      <InfoRow label="Ommesh" icon={<img src="./icon.svg" alt="" width={24} height={24} />}>{info.version}</InfoRow>
       <InfoRow label={t("radio.about.runningIn")}>{shell() === "tauri" ? t("radio.about.desktop") : shell() === "capacitor" ? t("radio.about.phone") : t("radio.about.browser")}</InfoRow>
     </Group>
     {stops.length > 0 ? (

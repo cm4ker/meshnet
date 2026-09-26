@@ -43,7 +43,7 @@ fn menu<R: Runtime, M: Manager<R>>(app: &M, open: &str, quit: &str) -> tauri::Re
 }
 
 fn build(app: &App) -> tauri::Result<TrayIcon> {
-    let menu = menu(app, "Open Meshnet", "Quit")?;
+    let menu = menu(app, "Open Ommesh", "Quit")?;
     TrayIconBuilder::with_id(ID)
         .icon(Image::from_bytes(ICON)?)
         .tooltip(&app.package_info().name)

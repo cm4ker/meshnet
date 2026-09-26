@@ -27,7 +27,7 @@
   "update.offline": "Check when you have an internet connection.",
   "update.progress": "Update download",
   "update.version": "Version {version}",
-  "update.restartNote": "Installation restarts Meshnet and briefly disconnects your radio. Your history, drafts and settings are kept.",
+  "update.restartNote": "Installation restarts Ommesh and briefly disconnects your radio. Your history, drafts and settings are kept.",
   "update.lastChecked": "Last checked: {time}",
   "update.error.init": "Could not initialize updates. {reason}",
   "update.error.radioBusy": "The radio is still busy. Wait for its requests to finish and try again.",

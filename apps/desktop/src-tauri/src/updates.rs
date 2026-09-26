@@ -42,8 +42,8 @@ pub async fn desktop_check_update(
         return Err("In-app updates are currently available on Windows.".into());
     }
     let endpoint = match channel {
-        Channel::Stable => "https://github.com/cm4ker/meshnet/releases/latest/download/latest.json",
-        Channel::Dev => "https://github.com/cm4ker/meshnet/releases/download/dev/latest.json",
+        Channel::Stable => "https://github.com/cm4ker/ommesh/releases/latest/download/latest.json",
+        Channel::Dev => "https://github.com/cm4ker/ommesh/releases/download/dev/latest.json",
     };
     // The installer ends the process outright, with no quitting for the
     // window state plugin to hear, so the window is written down first. The

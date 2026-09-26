@@ -32,7 +32,7 @@ export function makeManifest({ version, tag, repository, files, signature, date 
     if (!signed) throw new Error(`Empty signature for ${arch}`);
     platforms[target] = { signature: signed, url: `https://github.com/${repository}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(name)}` };
   }
-  return { version, notes: `Meshnet ${version}\nRelease details: https://github.com/${repository}/releases/tag/${encodeURIComponent(tag)}`, pub_date: date, platforms };
+  return { version, notes: `Ommesh ${version}\nRelease details: https://github.com/${repository}/releases/tag/${encodeURIComponent(tag)}`, pub_date: date, platforms };
 }
 
 function gh(...args) {
@@ -70,7 +70,7 @@ export function publish(info, directory, env, run = gh) {
   const notesFile = resolve(directory, "release-notes.md");
   writeFileSync(notesFile, `${manifest.notes}\n\nBuilt from ${env.GITHUB_SHA}.\n`);
   const assets = readdirSync(directory).filter((name) => name !== "release-notes.md").map((name) => resolve(directory, name));
-  run("release", "create", info.tag, "--repo", repo, "--target", env.GITHUB_SHA, "--draft", "--latest=false", "--title", `Meshnet ${info.version}`, "--notes-file", notesFile, ...(info.channel === "dev" ? ["--prerelease"] : []));
+  run("release", "create", info.tag, "--repo", repo, "--target", env.GITHUB_SHA, "--draft", "--latest=false", "--title", `Ommesh ${info.version}`, "--notes-file", notesFile, ...(info.channel === "dev" ? ["--prerelease"] : []));
   run("release", "upload", info.tag, "--repo", repo, ...assets);
   run("release", "edit", info.tag, "--repo", repo, "--draft=false", ...(info.channel === "stable" ? ["--latest"] : ["--latest=false"]));
   if (info.channel !== "dev") return;
@@ -91,11 +91,12 @@ export function publish(info, directory, env, run = gh) {
   const currentNames = new Set(manualAssets.map((path) => basename(path)));
   for (const asset of channelRelease?.assets ?? []) {
     // Only rolling download aliases are replaced; immutable versioned releases are never pruned.
-    if (/^Meshnet.*\.(?:exe(?:\.sig)?|apk|zip)$/.test(asset.name) && !currentNames.has(asset.name)) {
+    // Builds from before the rename to Ommesh were named Meshnet.
+    if (/^(?:Ommesh|Meshnet).*\.(?:exe(?:\.sig)?|apk|zip)$/.test(asset.name) && !currentNames.has(asset.name)) {
       run("release", "delete-asset", "dev", asset.name, "--repo", repo, "--yes");
     }
   }
-  writeFileSync(notesFile, `Latest development build: [Meshnet ${info.version}](https://github.com/${repo}/releases/tag/${info.tag}).\n\nWindows installers, Android APK and web bundle are also attached here for manual download. Desktop clients use latest.json below, which points to the immutable versioned release.\n`);
+  writeFileSync(notesFile, `Latest development build: [Ommesh ${info.version}](https://github.com/${repo}/releases/tag/${info.tag}).\n\nWindows installers, Android APK and web bundle are also attached here for manual download. Desktop clients use latest.json below, which points to the immutable versioned release.\n`);
   run("release", "edit", "dev", "--repo", repo, "--prerelease", "--latest=false", "--title", `Dev · ${info.version}`, "--notes-file", notesFile);
   // This is the final write, after both architectures and their signatures exist.
   run("release", "upload", "dev", "--repo", repo, "--clobber", resolve(directory, "latest.json"));
@@ -115,7 +116,7 @@ export function main(command, directory = "out", env = process.env) {
     if (!info.publish) throw new Error("Only publishing pushes can create releases");
     // Bootstrap the channel once; existing releases and their files are kept.
     if (info.channel === "dev") {
-      if (!releaseByTag(env.GITHUB_REPOSITORY, "dev")) gh("release", "create", "dev", "--repo", env.GITHUB_REPOSITORY, "--target", env.GITHUB_SHA, "--prerelease", "--latest=false", "--title", "Dev builds", "--notes", "Development builds of Meshnet.");
+      if (!releaseByTag(env.GITHUB_REPOSITORY, "dev")) gh("release", "create", "dev", "--repo", env.GITHUB_REPOSITORY, "--target", env.GITHUB_SHA, "--prerelease", "--latest=false", "--title", "Dev builds", "--notes", "Development builds of Ommesh.");
     }
     publish(info, directory, env);
   } else throw new Error("Usage: node scripts/release.mjs prepare|manifest|publish [directory]");

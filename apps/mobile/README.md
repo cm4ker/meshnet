@@ -81,7 +81,7 @@ the package's original enabled state. On the tested phone that state was
 `default`:
 
     adb shell pm disable-user --user 0 com.heytap.accessory
-    # Connect to realme 15T in Meshnet on Windows.
+    # Connect to realme 15T in Ommesh on Windows.
     adb shell pm default-state --user 0 com.heytap.accessory
 
 The package runs realme's cross-device features, which are unavailable during

@@ -1,6 +1,6 @@
 {
-  "name": "Meshnet",
-  "short_name": "Meshnet",
+  "name": "Ommesh",
+  "short_name": "Ommesh",
   "description": "A MeshCore companion client",
   "start_url": "./",
   "display": "standalone",

@@ -37,10 +37,9 @@ pub fn run() {
         // do so too where the app goes without saying.
         // The notices window places itself in a corner each time; kept, it would come back where it last was.
         .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(WINDOW_STATE).with_denylist(&[notices::LABEL]).build())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![MINIMIZED]),
-        ))
+        // The entry keeps the name it had before the app became Ommesh, so an autostart
+        // turned on back then still counts; the installer's hooks remove it by that name.
+        .plugin(tauri_plugin_autostart::Builder::new().app_name("Meshnet").arg(MINIMIZED).build())
         .setup(|app| {
             tray::install(app);
             if std::env::args().any(|arg| arg == MINIMIZED) {
