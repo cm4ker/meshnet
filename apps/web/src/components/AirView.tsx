@@ -1,5 +1,5 @@
 /**
- * Radio › On the air: every packet the radio hears, whoever it is for, and
+ * Settings › On the air: every packet the radio hears, whoever it is for, and
  * three numbers on top: its noise floor, how busy the channel was over the
  * last minute, how many packets that was. Listening only; a tap on a packet
  * says what it was.

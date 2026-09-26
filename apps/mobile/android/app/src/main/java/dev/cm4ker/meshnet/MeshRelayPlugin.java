@@ -194,7 +194,7 @@ public class MeshRelayPlugin extends Plugin {
         });
     }
 
-    /** Why the app or its page stopped lately ({@link AppExits}), for Radio › About. */
+    /** Why the app or its page stopped lately ({@link AppExits}), for Settings › About. */
     @PluginMethod
     public void exits(PluginCall call) {
         JSObject result = new JSObject();

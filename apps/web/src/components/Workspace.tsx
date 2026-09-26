@@ -20,7 +20,7 @@ import { Prompt } from "../ui/Dialog.js";
 import { ChannelView } from "./ChannelView.js";
 import { ChatList, NEW_CHAT_EVENT } from "./ChatList.js";
 import { ChatView } from "./ChatView.js";
-import { AlertIcon, ChatIcon, LinkIcon, NodesIcon, RadioIcon, SearchIcon } from "./Icons.js";
+import { AlertIcon, ChatIcon, LinkIcon, NodesIcon, RadioIcon, SearchIcon, SettingsIcon } from "./Icons.js";
 import { MeshList, MeshMap, MeshPhone, useMeshAttention } from "./Mesh.js";
 import { MessageView } from "./MessageView.js";
 import { NodePageView } from "./node/NodePage.js";
@@ -39,7 +39,7 @@ import { errorText } from "../i18n/errors.js";
 const SECTIONS: { id: Section; label: Key; icon: ReactNode }[] = [
   { id: "chats", label: "connect.tabs.chats", icon: <ChatIcon size={22} /> },
   { id: "mesh", label: "connect.tabs.mesh", icon: <NodesIcon size={22} /> },
-  { id: "radio", label: "connect.tabs.radio", icon: <RadioIcon size={22} /> },
+  { id: "radio", label: "connect.tabs.settings", icon: <SettingsIcon size={22} /> },
 ];
 
 export function Workspace() {
@@ -433,7 +433,7 @@ function Desktop() {
         ))}
         <span className="grow" />
         <UpdateButton compact />
-        <button type="button" className="rail-radio" title={state.link ? `${state.self?.name ?? t("connect.tabs.radio")} · ${state.link.label}` : t("connect.rail.theRadio")} onClick={() => setStack("radio", [{ kind: "radio", page: "connection" }])}>
+        <button type="button" className="rail-radio" title={state.link ? `${state.self?.name ?? t("connect.rail.theRadio")} · ${state.link.label}` : t("connect.rail.theRadio")} onClick={() => setStack("radio", [{ kind: "radio", page: "connection" }])}>
           {state.link ? <LinkIcon kind={state.link.kind} size={16} /> : <RadioIcon size={16} />}
           <span className={["dot", badges.offline ? "off" : "on"].join(" ")} aria-hidden="true" />
           {state.battery && lowCharge(state.battery.mv, cell) ? (

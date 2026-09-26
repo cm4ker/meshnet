@@ -203,7 +203,7 @@
   "power.forgetTitle": "Delete the history?",
   "power.forgetBody": "Every message this device has kept for this radio is deleted. The radio itself is untouched.",
   "power.forgotten": "History deleted",
-  "home.title": "Radio",
+  "home.title": "Settings",
   "home.advertiseTitle": "Advertise this radio",
   "home.nearby": "Nearby",
   "home.nearbyHint": "Neighbours only, zero hop. Cheap.",

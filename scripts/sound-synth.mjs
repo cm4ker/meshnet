@@ -12,7 +12,7 @@
 
 export const RATE = 48000;
 
-/** The signals the reader picks from (Radio › Notifications › Sound); `chirp` is the default. */
+/** The signals the reader picks from (Settings › Notifications › Sound); `chirp` is the default. */
 export const SOUNDS = {
   // A LoRa packet opens with a preamble of up-chirps and then down-chirps:
   // this is that, slowed down and pitched into hearing. Two up, one down.

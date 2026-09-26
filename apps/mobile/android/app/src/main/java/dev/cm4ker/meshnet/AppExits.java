@@ -17,7 +17,7 @@ import org.json.JSONObject;
 /**
  * Why the app, or its page, stopped lately: what Android records of the app's own ends (Android 11
  * and later), and the page's renderer, a process of its own, gone while the app went on
- * ({@link MainActivity}). Shown in Radio › About, so a phone that keeps losing the app can say why.
+ * ({@link MainActivity}). Shown in Settings › About, so a phone that keeps losing the app can say why.
  */
 final class AppExits {
     private static final String PREFS = "meshnet.exits";

@@ -39,7 +39,7 @@
   "ping.notLinked": "Nothing the radio has heard links them yet. It learns who hears whom from the packets it hears.",
   "ping.direct": "Heard direct: there is nobody between you to check.",
   "pickRepeater": "Pick a repeater: only they pass a trace on.",
-  "setPositionFirst": "Set this radio's position first: Radio › Name and position.",
+  "setPositionFirst": "Set this radio's position first: Settings › Name and position.",
   "thisSpot": "This spot",
   "onlyRepeaters": "Only repeaters pass messages on.",
   "los.title": "Line of sight",

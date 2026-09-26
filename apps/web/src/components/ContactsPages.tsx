@@ -1,5 +1,5 @@
 /**
- * Radio › Contacts: which new nodes the radio keeps, what it does once its
+ * Settings › Contacts: which new nodes the radio keeps, what it does once its
  * memory is full, the tidy-up rule, and the contacts taken off it, to be put
  * back. The first three are the radio's own settings (`manual_add_contacts`,
  * `autoadd_config`, `autoadd_max_hops` in the firmware); the rule is this app's.

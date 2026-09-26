@@ -7,6 +7,9 @@
 ### The name
 - The app is called Ommesh everywhere: on the desktop and in a browser, as on a phone. On Windows the update takes Meshnet's place: the same folder, the Start menu and desktop shortcuts renamed, one entry in Installed apps, and autostart, history and settings kept.
 
+### Settings
+- The Radio tab is called Settings, with a gear. The paths to its pages and the command palette say Settings too.
+
 ### Connecting
 - The connect screen puts one radio at the top: the one being connected to, or else the last one. Its card shows the name, the way and the address, Connect, and the switch to connect at launch. While the radio connects, the card says which try it is and which step it has reached (the link, the radio answering, contacts and channels), and Cancel stops it, the connect at launch included. A radio that asks for a PIN gets the field in the card. A failure is one line with what to check and Try again; the rest of the message is behind Details.
 - The search under the tabs runs by itself and pauses while a radio connects, so only one thing moves on the screen. Radios come first, the strongest on top. Phones sharing a radio, and ports that are not a radio's cable, fold under "N more". Names lose "MeshCore-", and the second line is the address.
@@ -20,7 +23,7 @@
 - Every node shows how it is doing in one block, Readings, the same for this radio, a person, a repeater, a room and a sensor: the battery first, then for a repeater or a room the Noise, On air and Running tiles, then the radio itself (Board, Position), then a set of tiles for each sensor channel (a power supply shows its power first, as voltage times current). One Refresh asks what the node answers. The repeater's Status and Telemetry blocks are gone.
 - A repeater's or a room's Refresh asks its status; its board, position and sensors are one row of their own, "Board, position and sensors · Ask", with their own time once answered.
 - The battery reads as a charge. A tap on it picks the cell for that node, Li-ion/LiPo or LiFePO4; until someone picks, the charge is counted as Li-ion and said with "≈". The app keeps a week of battery readings for every node, not only repeaters, from the answers it was asked for, draws them as a line, and says "going down" when the week's fall shows.
-- Radio › Readings holds this radio's battery, noise, air time, uptime, board, position and sensors, read over the link as the page opens and every half minute while open. The Battery and Sensors rows are gone from Radio.
+- Settings › Readings holds this radio's battery, noise, air time, uptime, board, position and sensors, read over the link as the page opens and every half minute while open. The Battery and Sensors rows are gone from Settings.
 - Numbers are written the reader's way, 3,38 in Russian, and a position says how far and which way, with a link to the map.
 
 ### Fixes

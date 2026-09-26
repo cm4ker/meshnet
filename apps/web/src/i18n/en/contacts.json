@@ -63,8 +63,8 @@
   "cleanUp.title": "Clean up",
   "cleanUp.removeNodes": { "one": "Remove {count} node", "other": "Remove {count} nodes" },
   "cleanUp.notHeardOver": {
-    "one": "Not heard for over {count} day. You can put any of them back from Radio › Contacts › Removed.",
-    "other": "Not heard for over {count} days. You can put any of them back from Radio › Contacts › Removed."
+    "one": "Not heard for over {count} day. You can put any of them back from Settings › Contacts › Removed.",
+    "other": "Not heard for over {count} days. You can put any of them back from Settings › Contacts › Removed."
   },
   "cleanUp.allHeard": { "one": "Every node was heard in the last {count} day.", "other": "Every node was heard in the last {count} days." },
   "cleanUp.notHeardFor": "Not heard for",

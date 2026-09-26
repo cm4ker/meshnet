@@ -89,7 +89,7 @@ export function RadioHome({ selected }: { selected: RadioPage | null }) {
             {/* A glyph, not initials: "Node-21" would read "NO". The fallback name only picks the hue, the same in every language. */}
             <Avatar name={self?.name ?? "Radio"} size={44} icon={<RadioIcon size={22} />} />
             <span className="row-main">
-              <span className="row-title">{self?.name ?? t("radio.home.title")}</span>
+              <span className="row-title">{self?.name ?? t("connect.rail.theRadio")}</span>
               <span className={["row-sub", online ? "muted" : "danger"].join(" ")}>
                 {!online
                   ? link.phase === "connecting"

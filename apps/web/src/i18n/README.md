@@ -20,7 +20,7 @@ i18n/
 3. Give each counted string the plural forms the language has (see below).
 4. `pnpm --filter @meshnet/web test` says what is missing or mistyped.
 
-That is all. The language shows up under Radio › Appearance › Language, named
+That is all. The language shows up under Settings › Appearance › Language, named
 in its own words, and "System" picks it when the phone or computer is set to
 it. Nothing to register and no code to touch. A folder can keep notes of its
 own beside the JSON, such as a glossary (`ru/GLOSSARY.md`).
