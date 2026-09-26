@@ -141,6 +141,31 @@ export function mentionOf(name: string): string {
   return `@[${name}] `;
 }
 
+/** How much of a message a reply quotes: a few words, enough to tell which message it was. */
+const QUOTE_CHARS = 15;
+/** A reply's head, as the composer writes it: the mention, then the quoted line. */
+const QUOTE_HEAD = /^(?:@\[[^\]\n]{1,32}\] )?>[^\n]*\n/;
+
+/**
+ * The start of a message, for the line a reply puts at the head of the field:
+ * its own quote and the names it opens with left out, cut at a word, and "…"
+ * where something was cut.
+ */
+export function quoteOf(text: string): string {
+  const said = text
+    .replace(QUOTE_HEAD, "")
+    .replace(/^(?:@\[[^\]\n]{1,32}\] ?)+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const chars = Array.from(said);
+  if (chars.length <= QUOTE_CHARS) return said;
+  let cut = chars.slice(0, QUOTE_CHARS).join("");
+  const space = cut.lastIndexOf(" ");
+  // Cut inside a word: back to the space before it, unless that leaves too little.
+  if (chars[QUOTE_CHARS] !== " " && space >= 8) cut = cut.slice(0, space);
+  return `${cut.replace(/[\s.,;:!?-]+$/, "")}…`;
+}
+
 /**
  * A text too long for one message, cut between words into parts that each
  * fit `budget` with their ` (1/2)` mark. Words longer than a part are cut

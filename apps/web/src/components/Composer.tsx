@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { AdvType, MAX_TEXT_LEN, parseConversation } from "@meshnet/meshcore";
-import { costOf, blockEdges, hasCyrillic, headerBytes, mentionOf, mentionQuery, pathBytes, segments, splitParts, translit } from "../lib/composer.js";
+import { costOf, blockEdges, hasCyrillic, headerBytes, mentionOf, mentionQuery, pathBytes, quoteOf, segments, splitParts, translit } from "../lib/composer.js";
 import { messagesIn } from "../lib/conversations.js";
 import { getDraft, setDraft } from "../lib/drafts.js";
 import { utf8Length } from "../lib/format.js";
@@ -44,6 +44,9 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
   const [touch] = useState(touchFirst);
   const field = useRef<HTMLTextAreaElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
+  // The line a reply put at the head of the field. While it is there as it was put, it is the
+  // reply's, not the writer's: it goes when the reply does, and a draft is kept without it.
+  const quoted = useRef("");
 
   const target = parseConversation(conversation);
   const contact = target.kind === "contact" ? state.contacts[target.key] : undefined;
@@ -56,7 +59,9 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
   const shape = self ? { spreadingFactor: self.spreadingFactor, bandwidthHz: self.bandwidthHz, codingRate: self.codingRate } : null;
   const cost = costOf(text, { pack, prefix, header, radio: shape });
   const body = text.trim();
-  const empty = body === "";
+  const head = quoted.current && text.startsWith(quoted.current) ? quoted.current : "";
+  // A quote with nothing written under it is not a message yet.
+  const empty = text.slice(head.length).trim() === "";
   const over = cost.over > 0;
   const tone = over ? "over" : cost.used >= cost.budget * 0.8 ? "warn" : "";
 
@@ -77,7 +82,7 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
   }, [many, messages, self?.name]);
   const matches = pick ? people.filter((n) => n.toLowerCase().includes(pick.query.toLowerCase())).slice(0, 6) : [];
 
-  useEffect(() => setDraft(radio, conversation, text), [radio, conversation, text]);
+  useEffect(() => setDraft(radio, conversation, text.slice(head.length)), [radio, conversation, text, head]);
 
   useLayoutEffect(() => {
     const el = field.current;
@@ -94,12 +99,39 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
       setText(text.slice(0, from) + insert + text.slice(to));
       return;
     }
-    el.focus();
+    el.focus({ preventScroll: true });
     el.setSelectionRange(from, to);
-    if (!document.execCommand("insertText", false, insert)) {
+    if (!document.execCommand(insert ? "insertText" : "delete", false, insert)) {
       el.setRangeText(insert, from, to, "end");
       setText(el.value);
     }
+  };
+
+  // A reply chosen is a reply to be written: the start of the message it answers heads the field,
+  // the caret goes under it, and on a phone the keyboard comes up.
+  useLayoutEffect(() => {
+    const el = field.current;
+    if (!reply || !el) return;
+    const said = quoteOf(reply.text);
+    const line = said ? `>${said}\n` : "";
+    const was = quoted.current && el.value.startsWith(quoted.current) ? quoted.current.length : 0;
+    quoted.current = line;
+    if (el.value.slice(0, was) !== line) replace(0, was, line);
+    el.focus({ preventScroll: true });
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [reply]);
+
+  /** The reply let go: its quote goes with it, unless it has been written over. */
+  const dropReply = () => {
+    const el = field.current;
+    if (head && el && document.activeElement === el) {
+      // The caret stays where it was in what was written.
+      const [from, to] = [el.selectionStart, el.selectionEnd].map((at) => Math.max(0, at - head.length));
+      replace(0, head.length, "");
+      el.setSelectionRange(from!, to!);
+    } else if (head) setText(text.slice(head.length));
+    quoted.current = "";
+    onReplyDone();
   };
 
   const watchCaret = () => {
@@ -123,6 +155,7 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
   const cleared = () => {
     setText("");
     setPick(null);
+    quoted.current = "";
     onReplyDone();
     onSent();
   };
@@ -189,7 +222,7 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
     }
     if (e.key === "Escape" && reply) {
       e.preventDefault();
-      onReplyDone();
+      dropReply();
       return;
     }
     // A sent message cannot be edited on a mesh; the last one comes back to be corrected and sent again.
@@ -265,11 +298,12 @@ export function Composer({ conversation, title, reply, onReplyDone, onSent }: { 
         {reply ? (
           <div className="compose-bar">
             <ReplyIcon size={15} className="compose-bar-icon" />
+            {/* Who is answered; what they said is quoted in the field. */}
             <span className="compose-bar-text">
-              <b>{reply.name}</b> · {reply.text}
+              <b>{reply.name}</b>
             </span>
             <span className="compose-cost">{t("chats.composer.plusBytes", { bytes: utf8Length(mention) })}</span>
-            <button type="button" className="compose-bar-close" aria-label={t("chats.composer.cancelReply")} onMouseDown={(e) => e.preventDefault()} onClick={onReplyDone}>
+            <button type="button" className="compose-bar-close" aria-label={t("chats.composer.cancelReply")} onMouseDown={(e) => e.preventDefault()} onClick={dropReply}>
               <CloseIcon size={14} />
             </button>
           </div>

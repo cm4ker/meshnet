@@ -53,7 +53,10 @@ export function Sheet({ open, onClose, title, children, className }: { open: boo
     box.current?.focus({ preventScroll: true });
     return () => {
       window.removeEventListener("keydown", onKey, true);
-      before?.focus?.({ preventScroll: true });
+      // Back where the focus was, unless what was chosen has taken it somewhere of its own: a reply
+      // puts it in the field, and the keyboard would go down again.
+      const now = document.activeElement;
+      if (!now || now === document.body || box.current?.contains(now)) before?.focus?.({ preventScroll: true });
     };
   }, [open]);
 

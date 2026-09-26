@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { airtimeMs, blockEdges, costOf, headerBytes, mentionQuery, segments, splitParts, translit } from "./composer.js";
+import { airtimeMs, blockEdges, costOf, headerBytes, mentionQuery, quoteOf, segments, splitParts, translit } from "./composer.js";
 import { packLookalikes } from "./lookalikes.js";
 import { utf8Length } from "./format.js";
 
@@ -59,6 +59,31 @@ test("a mention is being typed after @ at the start or after a space, not inside
   assert.deepEqual(mentionQuery("@", 1), { start: 0, query: "" });
   assert.equal(mentionQuery("mail@host", 9), null);
   assert.equal(mentionQuery("@[Dima] ", 8), null);
+});
+
+test("a reply quotes the start of a message, cut at a word", () => {
+  assert.equal(quoteOf("Я слышу, SNR +6"), "Я слышу, SNR +6");
+  // "кто-нибудь" is one word, and the cut falls inside it.
+  assert.equal(quoteOf("А с моста кто-нибудь пробовал?"), "А с моста…");
+  // The fifteenth character ends a word: nothing to go back for.
+  assert.equal(quoteOf("Repeater on the hill is back up"), "Repeater on the…");
+  // A word longer than the quote is cut where it must be.
+  assert.equal(quoteOf("Перераспределение частот"), "Перераспределен…");
+  assert.equal(quoteOf("Привет, как дела у вас"), "Привет, как…");
+  // Punctuation does not stand before the ellipsis.
+  assert.equal(quoteOf("Проверка связи, приём"), "Проверка связи…");
+});
+
+test("a reply's quote leaves out the names a message opens with, and the quote it carries", () => {
+  assert.equal(quoteOf("@[Mira] Проверь антенну вечером"), "Проверь антенну…");
+  assert.equal(quoteOf("@[Kolya] >А с моста…\nС балкона тоже"), "С балкона тоже");
+  assert.equal(quoteOf(">Слышу\nИ я"), "И я");
+  assert.equal(quoteOf("Две\nстроки   текста"), "Две строки…");
+});
+
+test("a reply's quote counts characters, so an emoji is never cut in half", () => {
+  assert.equal(quoteOf("📡📡📡📡📡📡📡📡📡📡📡📡📡📡📡📡📡"), `${"📡".repeat(15)}…`);
+  assert.equal(quoteOf(""), "");
 });
 
 test("a long text splits between words, each part within the budget with its mark", () => {

@@ -54,8 +54,12 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
   const scroller = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
   const [reply, setReply] = useState<Reply | null>(null);
+  // The message being answered, kept in sight while the keyboard comes up for the answer.
+  const answering = useRef<string | null>(null);
   const answer = useCallback((message: MessageRecord) => {
-    if (message.sender) setReply({ name: message.sender, text: message.text });
+    if (!message.sender) return;
+    answering.current = message.id;
+    setReply({ name: message.sender, text: message.text });
   }, []);
   // Who wrote it: the profile, when the radio knows one node by that name; else a choice.
   const who = useCallback(
@@ -131,12 +135,21 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
     }
     measure();
   }, [messages.length, conversation]);
-  // The keyboard coming up shrinks the list from below; the last message stays in sight.
+  // The keyboard coming up shrinks the list from below; the last message stays in sight. Read
+  // further up, the list keeps its lower edge instead, so what sat just above the field stays
+  // there. Either way, never so far that the message being answered goes off the top.
   useEffect(() => {
     const el = scroller.current;
     if (!el || typeof ResizeObserver === "undefined") return;
+    let height = el.clientHeight;
     const keep = new ResizeObserver(() => {
+      const shrunk = height - el.clientHeight;
+      height = el.clientHeight;
       if (stuck.current) el.scrollTop = el.scrollHeight;
+      else el.scrollTop += shrunk;
+      const row = answering.current ? el.querySelector(`[data-id="${CSS.escape(answering.current)}"]`) : null;
+      const hidden = row ? el.getBoundingClientRect().top - row.getBoundingClientRect().top : 0;
+      if (hidden > 0) el.scrollTop -= hidden;
       measure();
     });
     keep.observe(el);
@@ -256,7 +269,10 @@ export function ChatView({ conversation, chrome, infoOpen, onInfo }: { conversat
           conversation={conversation}
           title={title}
           reply={reply}
-          onReplyDone={() => setReply(null)}
+          onReplyDone={() => {
+            answering.current = null;
+            setReply(null);
+          }}
           onSent={() => {
             stuck.current = true;
           }}
