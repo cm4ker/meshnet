@@ -2301,12 +2301,20 @@ html.notices-window #root {
   overflow: hidden;
   background: transparent;
 }
+/* Held to the window's edge at the corner: a card that grows grows away from it, as the window does. */
 .notice-stack {
+  position: fixed;
+  bottom: 0;
+  left: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
   width: 376px;
   padding: 12px;
+}
+.notice-stack[data-top] {
+  top: 0;
+  bottom: auto;
 }
 .notice-stack .notice-card {
   box-shadow: 0 6px 18px rgb(0 0 0 / 0.28);

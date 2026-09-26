@@ -44,6 +44,12 @@ window.addEventListener("storage", (e) => {
   if (e.key === "meshnet.textSize" && e.newValue) setTextSizePreference(e.newValue as TextSizePreference);
 });
 
+/** Tells the shell how tall the stack is; with no card, the window hides. */
+function layout(stack: HTMLElement | null) {
+  const height = stack?.childElementCount ? Math.ceil(stack.getBoundingClientRect().height) : 0;
+  void invoke("notice_layout", { height }).catch(() => undefined);
+}
+
 function Notices() {
   // Drawn again in a new language.
   useLanguage();
@@ -88,13 +94,22 @@ function Notices() {
   // The window is as tall as the stack, and hidden with none. Hidden under the
   // pointer, it hears no "mouse left", so it lets go of the hold itself.
   useLayoutEffect(() => {
-    const height = cards.length ? Math.ceil(stack.current?.getBoundingClientRect().height ?? 0) : 0;
-    void invoke("notice_layout", { height }).catch(() => undefined);
+    layout(stack.current);
     if (cards.length === 0) {
       setHovered(false);
       setBusy(null);
     }
   }, [cards]);
+
+  // A card grows under the pointer (its reply row) and shrinks after it: the
+  // window follows, away from the corner, so the row is never under the taskbar.
+  useEffect(() => {
+    const at = stack.current;
+    if (!at) return;
+    const watch = new ResizeObserver(() => layout(at));
+    watch.observe(at);
+    return () => watch.disconnect();
+  }, []);
 
   const remove = (tag: string) => {
     setCards((all) => all.filter((c) => c.tag !== tag));
@@ -105,7 +120,7 @@ function Notices() {
   const shown = top ? [...cards].reverse() : cards;
 
   return (
-    <div ref={stack} className="notice-stack" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+    <div ref={stack} className="notice-stack" data-top={top || undefined} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
       {shown.map((card) => (
         <NoticeCard
           key={card.tag}
