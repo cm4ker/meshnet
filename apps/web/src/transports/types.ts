@@ -8,7 +8,15 @@ export interface FoundDevice {
   /** A second line: an address, a manufacturer, a signal. */
   detail: string | null;
   rssi: number | null;
+  /**
+   * What it is, where the connector can tell better than the name (a serial
+   * port's kind); left out, `roleOf` reads it from the name.
+   */
+  role?: DeviceRole;
 }
+
+/** A radio; a phone sharing its radio; a port that is likely something else. */
+export type DeviceRole = "radio" | "phone" | "port";
 
 /**
  * One way of reaching a radio on this platform. `picker` connectors hand the
@@ -52,4 +60,6 @@ export function needsPairing(error: unknown): boolean {
 export interface RememberedLink {
   connectorId: string;
   device: FoundDevice;
+  /** The node's own name, as the radio gave it: a port or an address says nothing of which radio it was. */
+  radioName?: string | undefined;
 }

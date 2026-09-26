@@ -19,13 +19,23 @@ export interface LinkState {
   retrying: boolean;
   /** Which try this is, while a link is being retried or a picked radio tried again; 0 otherwise. */
   attempt: number;
+  /** The last try failed for want of a bond, whether or not the client can make one itself. */
+  unpaired: boolean;
   /** The last try failed for want of a bond, and the connector can make one with a PIN (`pairLink`). */
   pair: boolean;
   /** A dropped link waits for its next try; `reconnectNow` brings it forward. */
   waiting: boolean;
+  /** The radio asked for, from the first try until a disconnect or a cancel; `device` is null for a chooser. */
+  target: { connectorId: string; device: FoundDevice | null } | null;
+  /**
+   * The link dropped rather than was left, and is being got back: its chats
+   * stay on screen meanwhile. A radio asked for anew, after a disconnect, is
+   * connected from the connect screen instead.
+   */
+  dropped: boolean;
 }
 
-let state: LinkState = { phase: "idle", error: null, retrying: false, attempt: 0, pair: false, waiting: false };
+let state: LinkState = { phase: "idle", error: null, retrying: false, attempt: 0, unpaired: false, pair: false, waiting: false, target: null, dropped: false };
 const listeners = new Set<() => void>();
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let wantedLink: { connector: Connector; device: FoundDevice | null } | null = null;
@@ -33,7 +43,7 @@ let wantedLink: { connector: Connector; device: FoundDevice | null } | null = nu
 let generation = 0;
 
 function set(patch: Partial<LinkState>): void {
-  state = { ...state, pair: false, waiting: false, ...patch };
+  state = { ...state, unpaired: false, pair: false, waiting: false, ...patch };
   for (const listener of listeners) listener();
 }
 
@@ -92,28 +102,37 @@ async function open(connector: Connector, device: FoundDevice | null, gen: numbe
 /** How many times a radio picked by hand is tried before the failure is shown: a weak one often times out once. */
 export const CONNECT_TRIES = 3;
 
-export async function connectWith(connector: Connector, device: FoundDevice | null): Promise<void> {
+export function connectWith(connector: Connector, device: FoundDevice | null): Promise<void> {
+  return reach(connector, device, false);
+}
+
+/** `dropped`: this gets back a link that dropped, from the offline bar, rather than being one asked for anew. */
+async function reach(connector: Connector, device: FoundDevice | null, dropped: boolean): Promise<void> {
   cancelRetry();
   const gen = ++generation;
   wantedLink = { connector, device };
   // A chooser cannot be reopened without a click, and a radio that wants a PIN will not stop wanting it.
   const tries = device && connector.mode !== "picker" ? CONNECT_TRIES : 1;
   for (let attempt = 1; ; attempt++) {
-    set({ phase: "connecting", error: null, retrying: false, attempt: tries > 1 ? attempt : 0 });
+    set({ phase: "connecting", error: null, retrying: false, attempt: tries > 1 ? attempt : 0, target: { connectorId: connector.id, device }, dropped });
     try {
       const transport = await open(connector, device, gen);
       if (!transport) return;
       await session.connect(transport);
       if (gen !== generation) return;
-      rememberLink({ connectorId: connector.id, device: device ?? { id: "", name: transport.label, detail: null, rssi: null } });
-      set({ phase: "connected", error: null, retrying: false, attempt: 0 });
+      rememberLink({
+        connectorId: connector.id,
+        device: device ?? { id: "", name: transport.label, detail: null, rssi: null },
+        radioName: session.getState().self?.name,
+      });
+      set({ phase: "connected", error: null, retrying: false, attempt: 0, dropped: false });
       return;
     } catch (error) {
       // Given up for another radio or a disconnect: its failure is no news.
       if (gen !== generation) return;
       if (attempt < tries && !needsPairing(error)) continue;
       const message = errorText(error);
-      set({ phase: "failed", error: message, attempt: 0, pair: canPair(connector, device, error) });
+      set({ phase: "failed", error: message, attempt: 0, unpaired: needsPairing(error), pair: canPair(connector, device, error) });
       throw error;
     }
   }
@@ -132,15 +151,24 @@ export async function pairLink(pin: string): Promise<void> {
   const link = wantedLink;
   if (!link?.device || !link.connector.pair) throw new Error(t("connect.error.nothingToPair"));
   await link.connector.pair(link.device, pin);
-  void connectWith(link.connector, link.device).catch(() => undefined);
+  void reach(link.connector, link.device, state.dropped).catch(() => undefined);
 }
 
 export async function disconnect(): Promise<void> {
   cancelRetry();
   generation++;
   wantedLink = null;
+  // Said at once: a connect given up on answers to nothing from here, and the screen need not wait for the radio.
+  set({ phase: "idle", error: null, retrying: false, attempt: 0, target: null, dropped: false });
   await session.disconnect();
-  set({ phase: "idle", error: null, retrying: false, attempt: 0 });
+}
+
+/**
+ * Gives up the connect under way, or the failure on screen. A link that opens
+ * after this is closed as it arrives (see `open`).
+ */
+export function cancelConnect(): Promise<void> {
+  return disconnect();
 }
 
 /** Stop reconnecting during installation; restore this exact link if installation fails. */
@@ -177,7 +205,7 @@ session.subscribe(() => {
   if (status !== "closed" || !wantedLink || state.phase !== "connected") return;
   if (!wantedLink.device || wantedLink.connector.mode === "picker") {
     // A chooser cannot be reopened without a click.
-    set({ phase: "failed", error: t("connect.error.linkDropped") });
+    set({ phase: "failed", error: t("connect.error.linkDropped"), dropped: true });
     return;
   }
   scheduleRetry();
@@ -190,7 +218,7 @@ function scheduleRetry(): void {
   const attempt = state.attempt + 1;
   const delay = Math.min(RETRY_MAX_MS, 1000 * 2 ** (attempt - 1));
   const gen = generation;
-  set({ phase: "connecting", retrying: true, attempt, error: null, waiting: true });
+  set({ phase: "connecting", retrying: true, attempt, error: null, waiting: true, dropped: true });
   retryTimer = setTimeout(() => void retry(gen), delay);
 }
 
@@ -204,14 +232,14 @@ async function retry(gen: number): Promise<void> {
     if (!transport) return;
     await session.connect(transport);
     if (gen !== generation) return;
-    set({ phase: "connected", retrying: false, attempt: 0, error: null });
+    set({ phase: "connected", retrying: false, attempt: 0, error: null, dropped: false });
   } catch (error) {
     if (gen !== generation) return;
     const message = errorText(error);
     if (needsPairing(error)) {
       // A radio that wants a bond will not stop wanting it: ask for the PIN, or say why, instead of
       // trying again (on a phone, each try would put the system's PIN prompt up once more).
-      set({ phase: "failed", error: message, retrying: false, attempt: 0, pair: canPair(link.connector, link.device, error) });
+      set({ phase: "failed", error: message, retrying: false, attempt: 0, unpaired: true, pair: canPair(link.connector, link.device, error) });
       return;
     }
     set({ error: message });
@@ -228,7 +256,7 @@ export function reconnectNow(): void {
     clearTimeout(retryTimer);
     void retry(generation);
   } else if (state.phase === "failed" && wantedLink) {
-    void connectWith(wantedLink.connector, wantedLink.device).catch(() => undefined);
+    void reach(wantedLink.connector, wantedLink.device, state.dropped).catch(() => undefined);
   }
 }
 

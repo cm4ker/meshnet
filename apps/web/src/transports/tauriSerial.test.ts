@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { WatchHandlers, WatchOptions } from "tauri-plugin-serialplugin-api";
-import { TauriSerialTransport } from "./tauriSerial.js";
+import { portDevice, TauriSerialTransport } from "./tauriSerial.js";
 
 class FakePort {
   handlers: WatchHandlers | null = null;
@@ -60,4 +60,15 @@ test("USB errors release the native port and report the first failure once", asy
   assert.equal(failures.length, 1);
   assert.equal(failures[0]?.message, "read failed");
   await assert.rejects(transport.send(new Uint8Array([10])), /port closed/);
+});
+
+test("a USB port is offered as a radio by its product; the board's and Bluetooth's ports are set apart", () => {
+  const info = (type: string, product = "Unknown", manufacturer = "Unknown") => ({ path: "COM7", type, vid: "4292", pid: "60000", product, manufacturer, serial_number: "Unknown" });
+  const usb = portDevice("COM7", info("USB", "Silicon Labs CP210x USB to UART Bridge (COM7)", "Silicon Labs"));
+  assert.deepEqual([usb.role, usb.name, usb.detail], ["radio", "COM7", "Silicon Labs CP210x USB to UART Bridge"]);
+  assert.equal(portDevice("COM8", info("USB", "Unknown", "wch.cn")).detail, "wch.cn");
+  assert.equal(portDevice("COM9", info("USB")).detail, null);
+  assert.equal(portDevice("COM1", info("PCI")).role, "port");
+  assert.equal(portDevice("COM4", info("Bluetooth")).role, "port");
+  assert.equal(portDevice("/dev/ttyS0", info("Unknown")).role, "port");
 });

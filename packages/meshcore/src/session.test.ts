@@ -570,6 +570,23 @@ test("while it connects again, the radio and its history stay in the state", asy
   assert.ok(seen.every((s) => s.self && s.texts.includes("still here")));
 });
 
+test("a connect says how far it has got: the hello, then the contacts, then nothing once ready", async () => {
+  const session = new MeshSession({ now: () => 1_700_000_000_000 });
+  const steps: (string | null)[] = [];
+  session.subscribe(() => {
+    const step = session.getState().connectStep;
+    if (steps.at(-1) !== step) steps.push(step);
+  });
+  await session.connect(new ScriptedRadio());
+  assert.deepEqual(steps, ["hello", "contacts", null]);
+  assert.equal(session.getState().status, "ready");
+  // The radio known from the first time is there from the start of the next connect, and the step still begins at the hello.
+  await session.disconnect();
+  steps.length = 0;
+  await session.connect(new ScriptedRadio());
+  assert.deepEqual(steps, ["hello", "contacts", null]);
+});
+
 test("a stored history that cannot be read is not written over", async () => {
   class UnreadableStorage extends MemoryStorage {
     unreadable = false;

@@ -82,6 +82,7 @@ function state(messages: MessageRecord[]): SessionState {
     log: [],
     error: null,
     syncing: false,
+    connectStep: null,
   };
 }
 

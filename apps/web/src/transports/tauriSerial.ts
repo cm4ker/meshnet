@@ -4,10 +4,27 @@
  */
 
 import { BaseTransport, frameForStream, SERIAL_BAUD, StreamFrameDecoder } from "@meshnet/meshcore";
+import type { PortInfo } from "tauri-plugin-serialplugin-api";
 import type { Connector, FoundDevice } from "./types.js";
 import { t } from "../i18n/index.js";
 
 type SerialModule = typeof import("tauri-plugin-serialplugin-api");
+
+const known = (value: string | undefined): string | null => (value && value !== "Unknown" ? value : null);
+
+/**
+ * A port as the screen lists it. A radio's cable is a USB port; a port on the
+ * board or one Windows keeps for Bluetooth is set apart, named by its kind.
+ * The product is named without the port Windows appends to it.
+ */
+export function portDevice(path: string, info: PortInfo): FoundDevice {
+  if (info.type !== "USB") {
+    const kind = info.type === "Bluetooth" ? t("connect.port.bluetooth") : info.type === "PCI" ? t("connect.port.board") : t("connect.port.other");
+    return { id: path, name: path, detail: kind, rssi: null, role: "port" };
+  }
+  const product = known(info.product)?.replace(/\s*\((?:COM\d+|\/dev\/[^)]+)\)$/, "") ?? null;
+  return { id: path, name: path, detail: product ?? known(info.manufacturer), rssi: null, role: "radio" };
+}
 
 let plugin: Promise<SerialModule> | null = null;
 function serial(): Promise<SerialModule> {
@@ -88,12 +105,7 @@ export const tauriSerialConnector: Connector = {
     const { SerialPort } = await serial();
     const list = async () => {
       const ports = await SerialPort.available_ports();
-      const devices: FoundDevice[] = Object.entries(ports).map(([path, info]) => ({
-        id: path,
-        name: path,
-        detail: [info.manufacturer, info.product].filter((s) => s && s !== "Unknown").join(" ") || info.type || null,
-        rssi: null,
-      }));
+      const devices = Object.entries(ports).map(([path, info]) => portDevice(path, info));
       devices.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
       onFound(devices);
     };

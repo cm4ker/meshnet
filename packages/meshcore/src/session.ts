@@ -342,6 +342,12 @@ export interface SessionState {
   log: LogEntry[];
   error: string | null;
   syncing: boolean;
+  /**
+   * How far a connect has got, for a screen to show while it waits: `hello`
+   * until the radio has said who it is, `contacts` while its contacts and
+   * channels are read; null otherwise.
+   */
+  connectStep: "hello" | "contacts" | null;
 }
 
 /** What survives a disconnect, per radio. */
@@ -721,6 +727,7 @@ const EMPTY: SessionState = {
   log: [],
   error: null,
   syncing: false,
+  connectStep: null,
 };
 
 /** How long after sending a channel message its echoes are still looked for. */
@@ -1010,6 +1017,7 @@ export class MeshSession {
       ...EMPTY,
       ...staying,
       status: "connecting",
+      connectStep: "hello",
       link: { kind: transport.kind, label: transport.label },
       log: this.state.log,
     });
@@ -1029,7 +1037,7 @@ export class MeshSession {
       this.retryTimer = null;
       this.holdRetryPlans();
       this.dropRemoteJobs(reason ? `link dropped: ${reason.message}` : "disconnected");
-      this.set({ status: "closed", syncing: false, error: reason ? reason.message : this.state.error });
+      this.set({ status: "closed", syncing: false, connectStep: null, error: reason ? reason.message : this.state.error });
       this.log("link", reason ? `link dropped: ${reason.message}` : "disconnected");
     });
 
@@ -1078,6 +1086,7 @@ export class MeshSession {
         statusHistory: persisted?.statusHistory ?? {},
         batteryHistory: persisted?.batteryHistory ?? {},
         routing: persisted?.routing ?? EMPTY.routing,
+        connectStep: "contacts",
       });
       this.log("link", `connected to ${self.name} (${device.firmwareVersion})`);
 
@@ -1085,7 +1094,7 @@ export class MeshSession {
       await this.refreshContacts();
       await this.refreshChannels();
       await this.readAutoAdd(client);
-      this.set({ status: "ready" });
+      this.set({ status: "ready", connectStep: null });
       this.routeTimer = setInterval(() => void this.sweepRoutes(), ROUTE_SWEEP_MS);
       // Node keeps a process alive for an interval; a browser has no such notion.
       (this.routeTimer as { unref?: () => void }).unref?.();

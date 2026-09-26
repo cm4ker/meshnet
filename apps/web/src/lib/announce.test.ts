@@ -75,6 +75,7 @@ function initial(messages: MessageRecord[] = [], unread: Record<string, number> 
     log: [],
     error: null,
     syncing: false,
+    connectStep: null,
   };
 }
 

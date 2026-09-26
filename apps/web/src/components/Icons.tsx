@@ -33,6 +33,10 @@ export const SendIcon = icon('<path d="M4 12l16-8-6 16-2-6z"/>');
 export const BluetoothIcon = icon('<path d="M7 7l10 10-5 4V3l5 4L7 17"/>');
 export const UsbIcon = icon('<path d="M12 3v18"/><path d="M12 21l-3-3M12 21l3-3"/><path d="M12 9l4-2v4M12 13l-4-2V7"/><circle cx="12" cy="3" r="1"/>');
 export const WifiIcon = icon('<path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="0.75"/>');
+/** A phone sharing its radio, among the radios on the connect screen. */
+export const PhoneIcon = icon('<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>');
+/** A serial port that is not a radio's cable. */
+export const PortIcon = icon('<rect x="3.5" y="8" width="17" height="8" rx="1.5"/><path d="M8 12h.01M12 12h.01M16 12h.01"/>');
 
 /** The icon for how the radio is reached. */
 export function LinkIcon({ kind, size = 16 }: { kind: "ble" | "serial" | "tcp"; size?: number }) {

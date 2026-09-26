@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BaseTransport, type Transport } from "@meshnet/meshcore";
 import type { Connector, FoundDevice } from "../transports/types.js";
-import { connectWith, disconnect, getLink, reconnectNow } from "./link.js";
+import { cancelConnect, connectWith, disconnect, getLink, reconnectNow } from "./link.js";
 import { demoConnector } from "../transports/demo.js";
+import { lastLink } from "../transports/index.js";
 import { session } from "./session.js";
 
 class IdleRadio extends BaseTransport {
@@ -49,6 +50,41 @@ test("a radio given up while it was still connecting is let go when it answers, 
   assert.equal(getLink().phase, "idle");
 });
 
+test("a connect names the radio it is for, and Cancel says so at once, before the radio has answered", async () => {
+  const { connector, answer } = slowConnector();
+  const device = radio("Node-21");
+  const attempt = connectWith(connector, device);
+  assert.deepEqual(getLink().target, { connectorId: "slow", device });
+  // A radio asked for anew is connected from the connect screen, not over the last one's chats.
+  assert.equal(getLink().dropped, false);
+  const cancelling = cancelConnect();
+  assert.equal(getLink().phase, "idle");
+  assert.equal(getLink().target, null);
+  await cancelling;
+  const late = new IdleRadio("Node-21");
+  answer(late);
+  await attempt;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(late.shut, true);
+  assert.equal(getLink().phase, "idle");
+});
+
+test("the link remembered is kept with the radio's own name, which a port or an address does not give", async (t) => {
+  const kept = new Map<string, string>();
+  const storage = { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v), removeItem: (k: string) => void kept.delete(k) };
+  const before = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true, writable: true });
+  t.after(() => {
+    if (before) Object.defineProperty(globalThis, "localStorage", before);
+    else delete (globalThis as { localStorage?: unknown }).localStorage;
+  });
+  await connectWith(demoConnector, radio("MeshCore-demo"));
+  assert.equal(lastLink()?.connectorId, "demo");
+  assert.equal(lastLink()?.radioName, session.getState().self?.name);
+  assert.ok(lastLink()?.radioName);
+  await disconnect();
+});
+
 /** Turns of the event loop until `done`, for a radio that answers on timers. */
 async function until(done: () => boolean): Promise<void> {
   for (let i = 0; i < 2_000 && !done(); i++) await new Promise((resolve) => setTimeout(resolve, 5));
@@ -76,6 +112,8 @@ test("a dropped link is tried again for as long as the radio stays away, and com
   for (let i = 0; i < 10; i++) {
     await until(() => getLink().waiting);
     assert.equal(getLink().phase, "connecting");
+    // Getting a dropped link back keeps its chats on screen.
+    assert.equal(getLink().dropped, true);
     reconnectNow();
   }
   await until(() => getLink().waiting);

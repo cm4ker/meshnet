@@ -1,6 +1,6 @@
 import { Fragment, useEffect } from "react";
 import { AdvType, type ContactRecord } from "@meshnet/meshcore";
-import { ConnectView } from "./components/ConnectView.js";
+import { ConnectView } from "./components/connect/ConnectView.js";
 import { Workspace } from "./components/Workspace.js";
 import { UpdatesDialog } from "./components/Updates.js";
 import { NoticeBanner } from "./components/NoticeBanner.js";
@@ -165,9 +165,9 @@ export function App() {
   }, [ready]);
 
   // A dropped link keeps the chats on screen, the attempts to get it back included:
-  // the session keeps the radio and its history while it connects again.
-  const reconnecting = status === "closed" || (status === "connecting" && link.retrying);
-  const showWorkspace = status === "ready" || (reconnecting && known && link.phase !== "idle");
+  // the session keeps the radio and its history while it connects again. A radio
+  // asked for after a disconnect is connected from the connect screen, which shows how it goes.
+  const showWorkspace = status === "ready" || (link.dropped && known && link.phase !== "idle");
   // A new language redraws every screen: a word made before the change would stay in the old one.
   return <Fragment key={language}>{showWorkspace ? <Workspace /> : <ConnectView />}<UpdatesDialog /><NoticeBanner /></Fragment>;
 }
